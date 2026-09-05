@@ -242,7 +242,7 @@ export interface ToolContext {
    * Used by tools that need to query tables without a dedicated repository
    * (e.g., market assessment artifacts, preset transitions).
    * Provided by the worker runtime. Typed loosely because the domain package
-   * cannot depend on @herobids/db.
+   * cannot depend on @traderton/db.
    */
   db?: unknown;
   /** External skill provider for search/browse (optional — absent when external skills are disabled) */

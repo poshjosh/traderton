@@ -4,7 +4,7 @@
  * DEX assets require chain + address to avoid ambiguous-ticker repricing.
  *
  * Originally defined in apps/worker/src/runtime-composition.ts.
- * Moved to @herobids/domain so the strategy package can reference it
+ * Moved to @traderton/domain so the strategy package can reference it
  * without depending on the worker.
  */
 export interface HybridPricingIdentity {
@@ -20,7 +20,7 @@ export interface HybridPricingIdentity {
  * Orderbook targets route to Binance by provider symbol.
  * Swap targets route to GeckoTerminal by network + pool address.
  *
- * Moved from @herobids/strategy so domain consumers (worker,
+ * Moved from @traderton/strategy so domain consumers (worker,
  * market-data adapters) can reference the full union without
  * depending on the strategy package.
  */

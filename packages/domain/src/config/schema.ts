@@ -2027,7 +2027,7 @@ export const LlmParamsSchema = z.object({
 // --- Indicator sub-schemas (Phase 0 — shared by TechnicalConfig and MechanicalParams) ---
 
 /**
- * Regime filter params (mirrors RegimeParams from @herobids/market-data).
+ * Regime filter params (mirrors RegimeParams from @traderton/market-data).
  * Defined here so domain has no dependency on market-data.
  */
 export const RegimeParamsSchema = z.object({

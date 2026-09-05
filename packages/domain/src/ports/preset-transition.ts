@@ -2,7 +2,7 @@ import type { Result } from '../result.js';
 import type { TransitionMode, PreparedPresetTransition } from '../market-assessment.js';
 
 /**
- * Preset Transition Port — the public contract for @herobids/engine's PresetTransitionService.
+ * Preset Transition Port — the public contract for @traderton/engine's PresetTransitionService.
  *
  * This port defines the two public operations: recommendTransition (read-only analysis)
  * and applyTransition (durable mutation with state machine lifecycle).

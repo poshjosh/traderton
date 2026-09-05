@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ok, err } from '@herobids/domain';
+import { ok, err } from '@traderton/domain';
 
 describe('Result type', () => {
   it('ok() creates a success result', () => {

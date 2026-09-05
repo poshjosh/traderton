@@ -828,7 +828,7 @@ export function getArtifactFreshnessStatus(
 /**
  * Market regime assessment result.
  *
- * Defined here (not imported from @herobids/market-data) because the domain
+ * Defined here (not imported from @traderton/market-data) because the domain
  * package must remain dependency-free per ports-and-adapters architecture.
  * The canonical source is packages/market-data/src/types.ts; this copy must
  * stay structurally identical.
