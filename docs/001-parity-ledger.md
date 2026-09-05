@@ -24,6 +24,15 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 
 ## Ledger
 
+### Phase 1 progress (live)
+
+**Status: IN PROGRESS — blocked, build not green.** Do not mark any slice `Met` until the copied `packages/domain` build + tests are green again.
+
+- Workspace shell scaffolded (pnpm workspace, strict TS ES2022 ESM, vitest) mirroring herobids toolchain (Node ≥22, pnpm 10.33.2). `git init` done for delete-visibility.
+- `@herobids/domain` copied verbatim (97 files) and renamed to `@traderton/domain`. Trading `config/strategy-presets/*.yaml` copied. **Verbatim-copy baseline was green: 981/981 tests, build + lint clean** (the parity harness).
+- Leaf-first platform deletions completed cleanly (build green after each): removed `agent-evaluation`, `agent-goal`, `assessment-billing`, `plan-entitlements`, `platform`, `provider-catalog`, `runtime-composition`, `skills*`, `skill-resolution`, `tools`, `tool-schemas`, `llm-selection`, `external-skill-provider-http`, `text-search`, `review-pre-check`, `browser-pool-feature.test`, dirs `email/ infra/ skills/ __tests__/`, platform ports (`assessment-identity-resolver`, `assessment-request`, `preset-transition`, `blueprint-execution-capability`, `browser-pool`, `document-store`, `document-text-extractor`, `runtime-document-materializer`, `runtime`, `external-skill-provider`), `models/llm-models`. Barrels (`index.ts`, `ports/index.ts`, `models/index.ts`) trimmed accordingly.
+- **BLOCKER:** `config/schema.ts` is a fused trading+platform monolith (2598 lines, 212 exports). Cannot be reduced to trading-only by leaf deletion; doing so is authored surgery on a fused file. Logged in [003-anomalies-and-deviations.md](./003-anomalies-and-deviations.md) (2026-09-05). 3 typecheck errors remain, all rooted in this seam. Awaiting direction before proceeding.
+
 ### Cross-cutting
 
 | Capability (from source) | Area | Status | Notes |
