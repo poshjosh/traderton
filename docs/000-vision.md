@@ -120,6 +120,20 @@ we must not **degrade**. Anything we cannot preserve now is recorded in the
    platform orchestration + platform-side billing behind. Traderton-side usage
    metering remains Deferred. `documents` stays platform.
 
+### Source-fix requests
+
+When the cleanest seam requires reshaping the source, Traderton may **request** a
+behaviour-preserving change in herobids — never editing herobids directly. The
+owner makes, tests, gates, and releases the change in herobids; Traderton then
+copies from the improved source. Requests must be behaviour-preserving
+(validated by herobids' existing tests) — they may not alter trading behaviour;
+a behaviour change is a product decision, not a copy-enablement request. Log each
+request and the resulting herobids version in
+[003-anomalies-and-deviations.md](./003-anomalies-and-deviations.md). Prefer a
+clean in-Traderton deletion when one exists; reserve source requests for seams a
+deletion cannot cut without authoring non-trivial logic. Rationale is in
+[004-decision-log.md](./004-decision-log.md).
+
 ## Deviation discipline
 
 If preserving parity would require authoring **non-trivial logic** (not just a

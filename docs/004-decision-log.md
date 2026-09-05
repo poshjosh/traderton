@@ -140,3 +140,33 @@ showed the trading core tables (`decisions`, `positions`, `orders`, `fills`,
 `journal-events`, etc.) are **already soft-linked** — plain `text` columns, no
 FKs. The only trading→platform hard FKs are the identity/grant seam above. This
 is strong evidence the split follows a real seam, not an arbitrary line.
+
+## Why source-fix requests are allowed (never source edits)
+
+Copy-and-delete lets Traderton author only deletions and thin seams. When the
+source has an awkward shape — e.g. a single symbol fusing trading and platform
+fields — the choices inside Traderton are to author a workaround (forbidden) or
+stall. The better fix is usually to make the seam clean *at the source*: reshape
+herobids so trading and platform concerns are separable, then copy the
+already-clean shape.
+
+So Traderton may **request** such a reshape; it must never edit herobids itself.
+Reasons:
+
+- **Preserves 1:1 parity.** If herobids changes and Traderton copies it, the two
+  stay diffable — the whole point of keeping file-for-file correspondence with
+  the source, so we can monitor parity and port bug-fixes cleanly. An authored
+  Traderton-only fix would create exactly the drift we are avoiding.
+- **Keeps authorship where the context and tests live.** A reshape validated by
+  herobids' real suite and released is trustworthy in a way an in-Traderton
+  guess is not.
+- **Respects herobids as READ-ONLY.** Traderton asks; the owner makes, tests,
+  gates, and releases. Clean separation of authority.
+
+Guardrails: requests must be **behaviour-preserving** (validated by herobids'
+existing tests) — altering trading behaviour is a product decision, not a
+copy-enablement request. Every request and the resulting herobids version is
+logged in [003-anomalies-and-deviations.md](./003-anomalies-and-deviations.md).
+Prefer a clean in-Traderton deletion when one exists; each source request costs a
+full herobids test/gate/release cycle, so reserve it for seams a deletion cannot
+cut without authoring non-trivial logic.

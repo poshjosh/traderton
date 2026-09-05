@@ -55,6 +55,18 @@ We are extracting Traderton from the existing [herobids](../herobids/) system by
   improve; we must not degrade. Anything you can't preserve goes in the ledger
   as **Gap** or **Deferred** — never silently dropped.
 
+### Source-fix requests
+
+When the cleanest seam requires reshaping the source, you may *request* a
+behaviour-preserving change in herobids — you must never edit herobids yourself.
+The change is made, tested, gated, and released in herobids by the owner; then
+you copy from the improved source. Requests must be behaviour-preserving
+(validated by herobids' existing tests) — they may not alter trading behaviour.
+Log each request and the resulting herobids version in
+[docs/003-anomalies-and-deviations.md](./docs/003-anomalies-and-deviations.md).
+Prefer a clean in-Traderton deletion when one exists; reserve source requests
+for seams a deletion cannot cut without authoring non-trivial logic.
+
 ## Source system — READ-ONLY
 
 `../herobids` relative to this repo — the `herobids` monorepo, where
