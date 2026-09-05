@@ -110,7 +110,6 @@ export {
   SentimentConfigSchema,
   deriveStrategyPreset,
   extractStrategyFromConfig,
-  WakePreferencesSchema,
   GmailIntegrationConfigSchema,
   AllowedPresetsPolicySchema,
   PresetTransitionPolicySchema,
@@ -136,13 +135,7 @@ export {
   type SupportedDecisionMode,
 } from './strategy-parameters.js';
 
-export {
-  resolveAssessmentConfig,
-  type ResolvedAssessmentConfig,
-} from './assessment-config.js';
-
 export type {
-  WakePreferences,
   SwapVenue,
   OrderbookVenue,
   SupportedTokenSafetyNetwork,
@@ -223,5 +216,3 @@ export type {
   BrowserPoolConfig,
   HttpClientConfig,
 } from './schema.js';
-
-export type { ProvidersYaml, ProviderConfig } from '../models/llm-models.js';

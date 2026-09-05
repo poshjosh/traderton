@@ -12,7 +12,6 @@ import {
   PresetTransitionPolicySchema,
   PlatformAssessmentOptInSchema,
   AgentRuntimePolicyOverridesSchema,
-  WakePreferencesSchema,
 } from './config/schema.js';
 
 // ── Discriminators & Lifecycle ───────────────────────────────────────────────
@@ -88,7 +87,6 @@ const _AgentBlueprintRevisionPayloadRawSchema = z.object({
   presetTransition: PresetTransitionPolicySchema.optional(),
   platformAssessment: PlatformAssessmentOptInSchema.optional(),
   authorizationMode: z.enum(['direct', 'approval_required']).nullable(),
-  wakePreferences: WakePreferencesSchema.optional(),
   openPositionEscalationToJudgePolicy: z.enum([
     'never',
     'uncovered_or_triggered',

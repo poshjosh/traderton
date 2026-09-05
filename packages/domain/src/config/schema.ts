@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { AgentWakeSourceSchema } from '../agent-protocol.js';
 import { ok, err, type Result } from '../result.js';
 import {
   getStrategyParameters,
@@ -131,14 +130,6 @@ export const MarketDataRecordingConfigSchema = z.object({
 });
 
 // ── Per-agent wake preferences ──────────────────────────────────────────────
-
-export const WakePreferencesSchema = z.object({
-  /** Monitor-owned sources this agent subscribes to. If absent, agent receives all sources.
-   *  Send `null` for the whole object (PATCH) or omit the field (POST) to clear/reset. */
-  subscribedSources: z.array(AgentWakeSourceSchema).min(1).transform(arr => [...new Set(arr)]).optional(),
-});
-
-export type WakePreferences = z.infer<typeof WakePreferencesSchema>;
 
 export const TradingHoursConfigSchema = z.object({
   /** Allowed UTC hours for agent ticks. Empty or omitted means always active. */
