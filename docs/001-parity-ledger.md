@@ -28,7 +28,9 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 
 **Status: DONE.** The `@traderton/domain` trading slice compiles under strict TS, lint is clean, and all copied domain parity tests pass (230). No platform imports remain in the slice; no `@herobids` references; no LLM coupling.
 
-**Next action:** Phase 2 (`db`), per the roadmap [009-extraction-roadmap.md](./009-extraction-roadmap.md). Phases 2–10 (db, engine, market-data, venues, mechanical strategy, backtesting, worker, api, infra) are governed by 009; execute each via its per-phase pattern, honoring the stop-gates. Engine / venues / market-data / db / worker / api / infra are future phases (rows below remain `Pending` accordingly).
+**Phase 2 (`db`): DONE** — see "Trading data model" row (Met) + the Phase 2 Intentional Divergence rows. `@traderton/db` compiles strict, lint clean, copied unit tests green (11 pass; 9 integration gated on DATABASE_URL), fresh initial migration generated, no platform imports/FKs.
+
+**Next action:** Phase 3 (`engine`), per the roadmap [009-extraction-roadmap.md](./009-extraction-roadmap.md). `engine` is a clean-package phase, domain-only (137 imports all via domain ports). Phases 3–10 governed by 009; execute each via its per-phase pattern, honoring the stop-gates.
 
 **Phase 1 evidence:**
 
@@ -54,8 +56,8 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 | Tool | Status | Notes |
 |------|--------|-------|
 | `submit_decision` | Pending | Decision execution — highest-stakes parity surface. |
-| `create_bot` | Pending | |
-| `start_bot` | Pending | |
+| `create_bot` | Pending | **Deferred-REQUIRED sub-capability:** limit-enforced bot creation. herobids' per-agent maxBots (agents-row-locked) is Intentional Divergence (platform, not copied — deleted from `@traderton/db` BotRepository, Phase 2). Traderton must provide limit-enforced creation via this tool before cutover (herobids will rely on it); limit key (per-owner / per-venue-account / operator config) decided in the bot-lifecycle phase (worker/api). See [004](./004-decision-log.md) + [003](./003-anomalies-and-deviations.md). |
+| `start_bot` | Pending | **Deferred-REQUIRED sub-capability:** limit-enforced bot start (was `tryMarkBotRunningWithLimit`, agents-row-locked → Intentional Divergence, deleted Phase 2). Same obligation as `create_bot`. |
 | `stop_bot` | Pending | |
 | `list_bots` | Pending | |
 | `resolve_bot` | Pending | |
@@ -92,7 +94,7 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 | Price-watch lifecycle | Pending | |
 | Market data / discovery | Pending | Indicators and discovery inputs only, no LLM. Moves to Traderton. |
 | Backtesting / replay | Pending | |
-| Trading data model (tables listed in Phase 0) | Pending | |
+| Trading data model (tables listed in Phase 0) | Met (schema + repositories) | **Phase 2 landed** (`@traderton/db`). 23 trading tables copied (trading-core verbatim, all soft-linked); 7 identity FKs → soft `ownerId`, `bots.connectionId` dropped (decisions 10–13 + soft-reference rule, 004); 3 intra-trading FKs preserved. Trading repositories copied (journal-pg, repositories.ts Fill/Position/ExecutionPlan/Order/BalanceSnapshot/Decision/Bot, reconciliation, backtesting, instrument, token-safety-override, decision-approval, decision-failure, llm-artifact). Platform schema/repos deleted. Fresh initial migration `0000_init_trading_schema.sql` generated (herobids migration history not copied — decision 1). Build + lint + copied unit tests green (11 pass). **Note:** 9 db integration tests (`journal-pg`, `position-repository`) are gated on `DATABASE_URL` (skip without a live Postgres) — they must run against Postgres in CI to validate the `ownerId` renames end-to-end (Phase 10 / CI concern). Row is Met for schema+repository extraction; runtime DB validation pending CI. |
 | Mechanical strategies (`Dca`, `Mechanical`, `scan-engine`, `regime`) | Pending | Move to Traderton (no LLM). Domain-config foundation landed in Phase 1 (`MechanicalParamsSchema`, indicator/technical schemas, mechanical-only strategy registry); the `packages/strategy` implementation is a future phase. |
 
 ### Risk gate — exact rules (highest-stakes parity surface)
@@ -164,6 +166,8 @@ sees it explicitly; none is a silent drop.
 |------------------|-----------|-----------|
 | Trading coupled to platform `users` + platform billing tables | Not owned by Traderton | Traderton is multi-tenant but not the identity/platform-billing authority; accepts authenticated `ownerId` + `actor` at the boundary (decision 10). |
 | `connections` / `agent_connections` grant layer | Stays platform | Grant/entitlement is platform-owned; Traderton binds bots directly to `venueAccountId` (decisions 11, 13). |
+| herobids per-agent maxBots enforcement (`BotRepository.tryCreateBotWithLimit` / `tryMarkBotRunningWithLimit`, row-locking the `agents` table) | Platform implementation not copied (deleted Phase 2) | The per-agent limit keyed on `agents` + agent-row-lock is platform concurrency policy; only the platform agent-broker/worker call it. Deleted from `@traderton/db`. The *capability* (limit-enforced bot creation/start) is trading and **Deferred-REQUIRED** — Traderton must provide it via `create_bot`/`start_bot` before cutover (see those tool rows + [004](./004-decision-log.md)). This is the "capability trading, implementation platform-coupled" case from the herobids-becomes-a-consumer model. |
+| `bots.userId`/`venue_accounts.userId`/`user_credentials.userId`/`backtest_runs.userId`/`replay_corpora.userId`/`datasets.userId` hard FKs to `users`; `bots.connectionId` FK to `connections` | Converted to soft `ownerId` / dropped (Phase 2) | Soft-reference rule ([004](./004-decision-log.md)): Traderton doesn't own user identity (decision 10); every copied table's `users` FK → soft `ownerId`; `bots.connectionId` dropped, bots bind via `venueAccountId` (decision 13). Sanctioned authored seam, not a gap. |
 | Bots could run `LlmStrategy` / `HybridStrategy` | Traderton bots are **mechanical-only** (`mechanical`, `dca`) | Intelligence is the agent's job. LLM/Hybrid decision-making relocates to the agent, which submits decisions via the boundary (decisions 7–9). Config-validation form: the strategy registry that moves to Traderton registers only `mechanical`+`dca` (the `llm`/`hybrid` modes + `LlmParams`/`HybridParams` stay agent-side — herobids source-request #1 in [003](./003-anomalies-and-deviations.md)); `StrategySchema.decisionMode` narrows to the mechanical set. Same decision, seen from config. |
 | `blueprint.ts` (whole file — marketplace/authoring: agent+bot revision payloads, publish/fork/browse, revisions, popularity) | Stays platform; **`blueprint.ts` not copied into Traderton** | Confirmed 2026-09-05: blueprint.ts is the marketplace/authoring layer, not the trading path — bots are created/validated/executed via `BotConfigSchema`, and the bot execution path is blueprint-free (see [003](./003-anomalies-and-deviations.md), [004](./004-decision-log.md)). The trading config Traderton owns (`RiskPosture`, `BotRisk`, `ExecutionDefaults`, `TokenSafety`, `BotConfigSchema`) lives in `config/schema.ts`, not blueprint.ts, so decision 14's "risk/execution/token-safety schema slice" is satisfied without copying blueprint.ts. 1:1 parity preserved by deleting the platform file, not repurposing it. |
 | market-assessment platform orchestration + platform billing | Left behind (Intentional divergence + Deferred) | Only the domain/analysis is trading-owned; platform-side billing stays outside Traderton, while Traderton-owned usage metering remains Deferred (decision 15). |

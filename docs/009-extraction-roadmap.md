@@ -147,8 +147,8 @@ recommended default (foundational data model first, then the core engine).
 | # | Phase | Shape | Depends on | Status |
 |---|-------|-------|-----------|--------|
 | 1 | `@traderton/domain` slice | subtraction | — | **Done** |
-| 2 | `db` — trading cluster | subtraction | domain | Queued |
-| 3 | `engine` | clean-package (+internal seams) | domain | Queued |
+| 2 | `db` — trading cluster | subtraction | domain | **Done** |
+| 3 | `engine` | clean-package (+internal seams) | domain | Queued (next) |
 | 4 | `market-data` | clean-package | domain | Queued |
 | 5 | `venues` | clean-package (+internal seams) | domain, market-data | Queued |
 | 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | Queued |
