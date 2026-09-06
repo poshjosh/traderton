@@ -283,3 +283,63 @@ Corollary for the automation flow: a novice agent that lacks the "herobids becom
 consumer" model will mis-file such a capability as optional backlog and risk a silent
 parity regression at cutover. The model is now explicit in 000; the ledger must tag
 required-for-cutover Deferrals distinctly from optional ones.
+
+## Why there is an interim "library consumer" milestone (M1) before the API (M2)
+
+Added 2026-09-06, while resolving the Phase 8 (`apps/worker`) stop-gate.
+
+For a long time the docs described a single end state: "herobids becomes a consumer of
+Traderton **over the boundary**" — i.e. HTTP/REST (005). That framing was load-bearing in a
+way we hadn't named: it implied the *first* time herobids calls Traderton is over an HTTP
+boundary. That is precisely what produced the Phase 8 stop-gate — the mechanical decision
+intake core is copyable, but if the first driver must be the 005 HTTPS boundary, then the
+driver is **authored** boundary infrastructure (auth/idempotency/deadline), not copied
+trading logic. Under "defer all authoring to the end," authoring the boundary early is
+exactly what we want to avoid.
+
+Naming an **intermediate library state (M1)** dissolves the tension:
+
+- **M1 — Library consumer.** herobids consumes Traderton **in-process** via dependency
+  injection / hexagonal ports & adapters. The extracted `@traderton/*` packages *replace*
+  herobids' in-process trading; herobids drives Traderton's intake core in-process, exactly
+  as it drives its own trading today. herobids keeps owning what Traderton deliberately does
+  not — the `connections`/`agents` grant layer, the agent message-broker drive, the per-agent
+  `maxBots` key — and **injects those into Traderton's ports as values/callbacks at the call
+  site.** No boundary code is authored. This is where the extraction proves itself.
+- **M2 — API consumer.** The 005 REST boundary is added as a **second adapter over the same
+  ports.** Its request/deadline/idempotency semantics are the HTTP expression of the M1 ports.
+  MCP/skills wrap it later.
+
+Why this is the right shape, not a convenience:
+
+1. **It makes "defer authoring to the end" coherent.** All the authored pieces (per-owner
+   `maxBots` enforcement, the REST layer) become **M2 work**, done after M1 lands and a
+   holistic review — not sprinkled through the extraction.
+2. **It is the honest expression of the ownership seam.** Decisions 10–13 already put
+   grant/identity/billing outside Traderton. M1 says: in the interim, the owner of those
+   concerns (herobids) supplies them through ports. Nothing is dropped; nothing is authored to
+   fake ownership Traderton doesn't have.
+3. **Same ports, two adapters** keeps M1 and M2 from diverging — the API is not a different
+   core, it is a driver over the identical seams.
+
+### The ports-carry-values invariant
+
+A consumer may inject through a port only the **platform-owned values** Traderton does not own:
+a resolved `venueAccountId`, grant/connection validity, the `maxBots` limit decision, an
+authenticated `ownerId`/`actor`. A port must **never** let the consumer inject *trading
+behaviour* — the risk gate, planner, executors, reconciliation, and fill/position accounting
+are Traderton's and are not overridable through a seam. If a proposed port would carry trading
+logic, the seam is mis-drawn; that is the copy-never-author law asserting itself at the
+boundary. This invariant is what keeps the injected M1 seams (e.g. injected `venueAccountId`,
+deferred `maxBots` decision) from quietly becoming a backdoor around copy-never-author.
+
+### Worked consequences (Phase 8)
+
+- The bot-startup connection→venueAccount resolution (`resolveBotStartupContext`) is a platform
+  grant concern → deleted from Traderton (Intentional Divergence); the port takes an injected
+  `venueAccountId`. herobids (the M1 consumer) resolves it and runs the connection-grant guards;
+  Traderton runs only the venue-account guards it owns.
+- `create_bot`/`start_bot` limit enforcement is `Deferred (required for cutover)`: not copied
+  (platform-keyed), not authored at M1; herobids enforces its existing key in the interim; the
+  per-`ownerId` enforcement is authored as M2 work. Cutover is gated on it, so Traderton never
+  ships weaker than herobids-today.

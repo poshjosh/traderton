@@ -15,15 +15,51 @@ here, not in any consuming platform.
 
 **This is the most important thing to understand for *classifying* code —
 second only to the copy-never-author law (see AGENTS.md) — and it governs many
-decisions.** We are extracting trading out of herobids so that, in the end state,
-**herobids itself becomes a runtime consumer of Traderton.** The agent +
-messaging platform stays in herobids; everything trading (bots, decisions,
-execution, the 25 trading tools) moves to Traderton; and **herobids calls
-Traderton's trading tools over the consumer boundary**
-([005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md)). The
-agent reasons, supplies an authenticated `ownerId` + `actor`, and invokes
-Traderton (`submit_decision`, `create_bot`, `start_bot`, …). herobids is the
-**first consumer** — the "consuming platform" that 005 speaks of *is herobids*.
+decisions.** We are extracting trading out of herobids so that **herobids itself
+becomes a runtime consumer of Traderton.** The agent + messaging platform stays
+in herobids; everything trading (bots, decisions, execution, the 25 trading
+tools) moves to Traderton; and herobids invokes Traderton
+(`submit_decision`, `create_bot`, `start_bot`, …), supplying an authenticated
+`ownerId` + `actor`. herobids is the **first consumer**.
+
+### Two consumption milestones — same ports, two adapters
+
+herobids consumes Traderton through **the same set of ports** (the extraction
+seams — hexagonal architecture). What changes between milestones is only the
+**adapter** driving those ports:
+
+- **M1 — Library consumer (the interim state, reached FIRST).** herobids consumes
+  Traderton **in-process, as a library** via dependency injection / ports &
+  adapters. In this state trading *moves out of herobids* — the extracted
+  `@traderton/*` packages **replace herobids' in-process trading**, and herobids
+  drives Traderton's intake core in-process (as it drives its own trading today).
+  **herobids keeps supplying the things Traderton deliberately does not own** — the
+  platform `connections`/`agents` grant layer, the agent message-broker drive, the
+  per-agent `maxBots` key — by **injecting them into Traderton's ports as values /
+  callbacks at the call site.** No REST/API layer is built for M1. This is where the
+  bulk of the extraction lands (Phases 8–10 target M1).
+- **M2 — API consumer (the end state).** The REST/API boundary
+  ([005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md)) is added
+  as a **second adapter over the same ports** — its request/response, auth, deadline,
+  and idempotency semantics are the HTTP expression of the M1 ports. MCP/skills wrap
+  the same boundary later still (decision 6). The "consuming platform" that 005 speaks
+  of *is herobids*; 005 describes the M2 adapter.
+
+Load-bearing consequence: because M1 is reached first and drives the ports
+**in-process**, the interim state requires **no authored boundary/API code** — herobids
+injects what it owns and calls the core directly. Authoring (the per-owner `maxBots`
+enforcement, the REST/005 layer) is **deferred to after M1 lands and a holistic review**,
+then built as the M2 adapter. This two-milestone framing is what lets us honor "defer
+authoring to the end" without leaving any trading capability behind.
+
+> **Ports carry values, never trading behaviour (invariant).** A consumer (herobids
+> at M1, any caller at M2) may inject through a port only the platform-owned things
+> Traderton does not own — a resolved `venueAccountId`, grant/connection validity, the
+> `maxBots` limit decision, an authenticated `ownerId`/`actor`. A port must **never**
+> let the consumer inject *trading behaviour*: the risk gate, planner, executors,
+> reconciliation, fill/position accounting are Traderton's and are not overridable
+> through a seam. If a proposed port would carry trading logic, the seam is mis-drawn —
+> that is the copy-never-author law asserting itself at the boundary.
 
 The load-bearing implication for decisions:
 
@@ -116,8 +152,12 @@ we must not **degrade**. Anything we cannot preserve now is recorded in the
    Platform billing authority stays outside Traderton by design; any
    Traderton-owned usage metering, billing, or caps are cut for now and
    tracked as Deferred in the ledger.
-6. **Direct API first.** MCP and skills wrap the same boundary later; they do
-   not block the first working API.
+6. **Library (M1) first, API (M2) second, MCP/skills later.** The first working
+   consumption mode is the **in-process library / ports-and-adapters** state (M1,
+   above): herobids consumes Traderton via DI, injecting what it owns. The REST/API
+   boundary (M2) is a later adapter over the same ports; MCP and skills wrap that same
+   boundary later still. None of the outer adapters block M1, and M1 is where the
+   extraction proves itself before any API is authored.
 
 ### Toolchain & naming
 

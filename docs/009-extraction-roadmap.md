@@ -266,6 +266,17 @@ recommended default (foundational data model first, then the core engine).
   ([007](./007-operational-readiness.md)); equivalence validation against herobids is
   mandatory before removing the legacy path.
 
+## Milestone framing (M1 vs M2)
+
+Per [000-vision.md](./000-vision.md) ("Two consumption milestones — same ports, two adapters"),
+**Phases 8–10 target M1 — the in-process library / ports-and-adapters state** where herobids
+consumes Traderton by injecting the platform-owned values it still holds (grant/`connections`,
+agent message-broker drive, `maxBots` key) into Traderton's ports at the call site. **No REST/API
+boundary is authored in M1.** The M2 API adapter ([005](./005-consumer-boundary-contract.md)) over
+the same ports — and the per-`ownerId` `maxBots` enforcement — are **authored after M1 lands and a
+holistic review**, not during Phases 8–10. Each phase below still runs the per-phase pattern; the
+authored M2 work is deliberately out of the copy-and-delete scope.
+
 ## Completion of the whole extraction
 
 The extraction is complete when the [006](./006-source-capability-manifest.md)

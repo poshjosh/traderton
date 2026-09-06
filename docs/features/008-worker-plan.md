@@ -9,8 +9,9 @@ decisions are settled — see "RESOLVED DECISIONS" below (and the RESOLVED entry
 
 ## RESOLVED DECISIONS (human-approved)
 
-1. **Drive-path / boundary — NO API layer in Phase 8.** Traderton (pre-authoring) is packaged as a
-   **library**; herobids consumes its in-process intake core (`actorRegistry` + `agent-intake-resolver` +
+1. **Drive-path / boundary — NO API layer in Phase 8 (this is M1).** This is the **M1 library
+   milestone** ([000-vision.md](../000-vision.md) "Two consumption milestones"). Traderton
+   (pre-authoring) is packaged as a **library**; herobids consumes its in-process intake core (`actorRegistry` + `agent-intake-resolver` +
    `submitDecisionForExecution` + the two actors + `WorkerRuntime`) to **replace its existing in-process
    trading**. herobids stays the consumer and drives the core **in-process** (as it does today) — the
    platform message-broker/Redis-stream driver stays in herobids. The 005 REST/API layer is built **later**

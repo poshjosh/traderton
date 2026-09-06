@@ -10,6 +10,19 @@ runtime, or internal caller invokes Traderton trading tools. This contract is
 the same whether the consumer is temporarily repo-local during extraction or a
 separate service later.
 
+> **This document describes the M2 (API) adapter.** Per the two-milestone model in
+> [000-vision.md](./000-vision.md) ("Two consumption milestones — same ports, two
+> adapters"), Traderton is consumed first at **M1** as an **in-process library via
+> dependency injection / hexagonal ports** (herobids injects the platform-owned values
+> it still holds — resolved `venueAccountId`, grant validity, the `maxBots` decision,
+> `ownerId`/`actor` — at the call site). This REST/API contract is the **M2 adapter over
+> those same ports**: the request/response, auth, deadline, retry, and idempotency
+> semantics below are the HTTP expression of the M1 ports, not a different core. M1 is
+> reached first and requires no authored boundary code; the M2 adapter defined here is
+> authored after M1 lands and a holistic review. The ports-carry-values invariant
+> (000/004) applies to both adapters: a caller injects platform-owned values, never
+> trading behaviour.
+
 ## Scope
 
 This doc includes:
