@@ -24,9 +24,13 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 
 ## Ledger
 
-### Phase 1 progress (live)
+### Phase 1 (domain slice) — DONE
 
-**Status: IN PROGRESS — domain slice complete and green.** The `@traderton/domain` trading slice compiles under strict TS, lint is clean, and all copied domain parity tests pass (230). No platform imports remain in the slice; no `@herobids` references; no LLM coupling. Engine / venues / market-data / db / runtime remain future phases.
+**Status: DONE.** The `@traderton/domain` trading slice compiles under strict TS, lint is clean, and all copied domain parity tests pass (230). No platform imports remain in the slice; no `@herobids` references; no LLM coupling.
+
+**Next action:** Phase 2 (`db`), per the roadmap [009-extraction-roadmap.md](./009-extraction-roadmap.md). Phases 2–10 (db, engine, market-data, venues, mechanical strategy, backtesting, worker, api, infra) are governed by 009; execute each via its per-phase pattern, honoring the stop-gates. Engine / venues / market-data / db / worker / api / infra are future phases (rows below remain `Pending` accordingly).
+
+**Phase 1 evidence:**
 
 - Workspace shell scaffolded (pnpm workspace, strict TS ES2022 ESM, vitest) mirroring herobids toolchain (Node ≥22, pnpm 10.33.2). `git init` done for delete-visibility.
 - `@herobids/domain` copied verbatim (97 files) and renamed to `@traderton/domain`. Trading `config/strategy-presets/*.yaml` copied. **Verbatim-copy baseline was green: 981/981 tests, build + lint clean** (the parity harness).

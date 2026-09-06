@@ -1,7 +1,15 @@
 # Phase 1 — Scaffold And Domain Slice
 
-**Status:** ready after Phase 0 sign-off
+**Status:** DONE (2026-09-06) — historical record.
 **Created:** 2026-09-05
+
+> **This phase is complete.** The `@traderton/domain` slice is extracted, compiles
+> under strict TS, lint clean, 230 copied tests green. Do **not** re-execute this doc.
+> Current/remaining work is governed by
+> [009-extraction-roadmap.md](./009-extraction-roadmap.md); the live status is in
+> [001-parity-ledger.md](./001-parity-ledger.md). The "Execution Gate" and task list
+> below are the original Phase 1 instructions, kept for the historical record.
+
 **Depends on:** [000-vision.md](./000-vision.md),
 [001-parity-ledger.md](./001-parity-ledger.md),
 [002-phase-0-subtraction-plan.md](./002-phase-0-subtraction-plan.md),

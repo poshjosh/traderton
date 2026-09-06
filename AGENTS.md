@@ -40,6 +40,21 @@ reasoning that produced this plan unless it reads them. **Before doing anything
 Do not rely on prior chat context — assume you have none. If a decision isn't in
 these docs, it does not exist yet: decide it deliberately and record it here.
 
+## Where you are / where to start
+
+- **Phase 0 (planning): complete.** Phase 1 (`@traderton/domain` slice): **complete
+  and green** (see the "Phase 1 (domain slice) — DONE" block in
+  [docs/001-parity-ledger.md](./docs/001-parity-ledger.md)).
+- **The next work is Phase 2 (`db`)**, governed by
+  [docs/009-extraction-roadmap.md](./docs/009-extraction-roadmap.md). To proceed:
+  start at the first `Queued` phase in the 009 phase table and run that phase's
+  per-phase pattern (investigate → draft plan → implement → review → test → update
+  docs → mark complete → draft next), stopping only at the 009 stop-gates.
+- The single source of truth for "what is done vs. pending" is the parity ledger
+  ([001](./docs/001-parity-ledger.md)); 009 tracks per-phase status. Docs 002 and 008
+  are historical Phase 0/1 records — do not re-execute them.
+- Per-phase plans (drafted at each phase's start) live git-tracked in `docs/features/`.
+
 ## The rule you must not break
 
 We are extracting Traderton from the existing [herobids](../herobids/) system by

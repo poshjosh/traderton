@@ -161,26 +161,34 @@ Fill this record when Phase 0 is approved and authority passes to Phase 1.
 
 | Field | Value |
 |------|-------|
-| Approval authority used | chinomso ikwuagwu |
-| Approved by (phase approver) | Met |
-| Approver role | Met |
-| Date | Met |
-| Environment / branch / repo state | Met |
-| Notes / accepted Deferred items | Met |
-| Handoff target | [008-phase-1-scaffold-and-domain-slice.md](./008-phase-1-scaffold-and-domain-slice.md) |
+| Approval authority used | chinomso ikwuagwu (repo owner) |
+| Approved by (phase approver) | chinomso ikwuagwu (repo owner) |
+| Approver role | Repo owner (no delegate designated) |
+| Date | 2026-09-05 |
+| Environment / branch / repo state | `traderton` repo, branch `main`, at the pre-extraction planning baseline (docs only; before any package copy). |
+| Notes / accepted Deferred items | Accepted Deferred: platform billing/metering/caps (cross-cutting). Accepted Intentional Divergences: user identity/billing not owned by Traderton; `connections` grant layer stays platform; bots mechanical-only; blueprint marketplace stays platform. |
+| Handoff target | [008-phase-1-scaffold-and-domain-slice.md](./008-phase-1-scaffold-and-domain-slice.md) (Phase 1 — now complete; subsequent phases governed by [009-extraction-roadmap.md](./009-extraction-roadmap.md)). |
 
 Phase 1 becomes active only after every gate above is `Met` and the sign-off
 record is filled in by the named phase approver.
 
 ## Next after sign-off
 
-After Phase 0 sign-off, begin Phase 1 by executing
+> **STATUS UPDATE (2026-09-06): Phase 0 and Phase 1 are complete.** This section is a
+> historical record. Phase 0 was signed off; Phase 1 (the `@traderton/domain` slice,
+> [008](./008-phase-1-scaffold-and-domain-slice.md)) is **done and green** (see the
+> parity ledger). **The current and remaining work (Phases 2–10) is governed by
+> [009-extraction-roadmap.md](./009-extraction-roadmap.md)** — start there, not here.
+> This doc (002) remains the authority for the copy / stay / cut-seam / defer
+> classifications, which the later phases still consult.
+
+After Phase 0 sign-off, Phase 1 began by executing
 [008-phase-1-scaffold-and-domain-slice.md](./008-phase-1-scaffold-and-domain-slice.md).
-That phase owns the live updates to
-[001-parity-ledger.md](./001-parity-ledger.md) as copied slices land against the
+That phase owned the live updates to
+[001-parity-ledger.md](./001-parity-ledger.md) as copied slices landed against the
 static inventory in
 [006-source-capability-manifest.md](./006-source-capability-manifest.md).
-Companion docs for that phase are
+Companion docs are
 [005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md),
 [006-source-capability-manifest.md](./006-source-capability-manifest.md), and
 [007-operational-readiness.md](./007-operational-readiness.md).

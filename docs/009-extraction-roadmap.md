@@ -86,7 +86,7 @@ subtraction phases; lightweight for clean-package phases).
    Map cross-package and intra-package imports; identify seams and any file that is
    platform-owned. For subtraction phases, delegate a context-gatherer to produce a
    full keep/delete classification with fused-edge analysis.
-2. **Draft the phase plan** — write `.ignore/roadmap/<NN>-<phase>-plan.md` from what
+2. **Draft the phase plan** — write `docs/features/<NN>-<phase>-plan.md` from what
    was actually found (not from this roadmap's guesses). It must list: files to copy,
    internal seams to cut, files/symbols to delete, tests to bring across, expected
    Intentional Divergences, and any suspected stop-gate. **This plan is a checkpoint:**
@@ -108,7 +108,7 @@ subtraction phases; lightweight for clean-package phases).
    made; capture reusable lessons/best-practices (see "Lessons & best-practices" below).
 7. **Mark phase complete** — flip the phase's status in this doc to `Done`, note the
    commit range and the green evidence (build/lint/test counts).
-8. **Draft the next phase's plan** — seed `.ignore/roadmap/<NN+1>-...plan.md` using
+8. **Draft the next phase's plan** — seed `docs/features/<NN+1>-...plan.md` using
    what was learned, so the chain continues without needing this roadmap to have
    pre-planned the interior. Then proceed to the next phase (subject to stop-gates).
 
@@ -293,5 +293,7 @@ from Phase 1:
 
 To run this roadmap: start at the first `Queued` phase, execute the per-phase pattern,
 honor the stop-gates, and keep [001](./001-parity-ledger.md) current throughout. Each
-phase's own plan lives in `.ignore/roadmap/<NN>-<phase>-plan.md`, drafted at the start
-of that phase (step 2) — this roadmap intentionally does not pre-author them.
+phase's own plan lives in `docs/features/<NN>-<phase>-plan.md` (git-tracked, reviewable),
+drafted at the start of that phase (step 2) — this roadmap intentionally does not
+pre-author them. Precedent: [docs/features/001-strategy-registry-source-fix-plan.md](./features/001-strategy-registry-source-fix-plan.md)
+(the Phase 1 source-fix request plan).
