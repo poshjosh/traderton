@@ -5,6 +5,7 @@
     { "path": "packages/db" },
     { "path": "packages/engine" },
     { "path": "packages/market-data" },
+    { "path": "packages/strategy" },
     { "path": "packages/venues" }
   ]
 }

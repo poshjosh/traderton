@@ -73,6 +73,22 @@ importers:
         specifier: ^25.9.1
         version: 25.9.5
 
+  packages/strategy:
+    dependencies:
+      '@traderton/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@traderton/market-data':
+        specifier: workspace:*
+        version: link:../market-data
+      zod:
+        specifier: ^3.25.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.1
+        version: 25.9.5
+
   packages/venues:
     dependencies:
       '@traderton/domain':
