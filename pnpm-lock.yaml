@@ -50,6 +50,16 @@ importers:
         specifier: ^25.9.1
         version: 25.9.5
 
+  packages/engine:
+    dependencies:
+      '@traderton/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.1
+        version: 25.9.5
+
 packages:
 
   '@drizzle-team/brocli@0.10.2':
