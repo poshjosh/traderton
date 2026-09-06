@@ -12,5 +12,4 @@ export * from './trading/actor-health.js';
 export * from './cost-profile.js';
 export * from './scanner-types.js';
 export * from './market-assessment.js';
-export * from './blueprint.js';
 export * from './pagination.js';
