@@ -153,7 +153,7 @@ recommended default (foundational data model first, then the core engine).
 | 5 | `venues` | clean-package (+internal seams) | domain, market-data | **Done** |
 | 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | **Done** |
 | 7 | `backtesting` | clean-package | domain, engine | **Done** |
-| 8 | `apps/worker` — trading loop | subtraction (large) | all packages | Active (stop-gate resolved) |
+| 8 | `apps/worker` — trading loop | subtraction (large) | all packages | Blocked (source-fix #2 — trading types re-home) |
 | 9 | `apps/api` — trading control-plane + tools | subtraction (large) | db, domain, engine, venues, backtesting | Queued |
 | 10 | infra (Dockerfile, compose, CI, deploy) | clean-package (copy trading slice) | a working service | Queued |
 

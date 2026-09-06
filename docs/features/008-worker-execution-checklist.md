@@ -8,6 +8,17 @@ procedure. Milestone: **M1** (in-process library; no API). Source is READ-ONLY.
 package scaffolding, and the ONE sanctioned type-relocation seam (scan-types) below. Build + copied
 tests green after EVERY step. Small commits. Stop at the residual stop-gates.
 
+> **STATUS (2026-09-06): Phase 8 BLOCKED on herobids source-fix request #2** (relocate 5 trading
+> types out of `agent-protocol.ts`/`config/schema.ts` — see `docs/003` + `.ignore/source-fix-request/002-…`).
+> The mechanical loop is copied (uncommitted in `packages/worker/`) but cannot compile green until
+> Traderton re-syncs `@traderton/domain` with the relocated types. **Two pieces are also deferred as
+> `Deferred (required for cutover)`, authored at M1-integration/Phase 9, NOT copied:** (i) `config.ts` /
+> `AppConfig` → a Traderton-owned config shape (decision 2); (ii) the `index.ts` trading composition
+> root (no faithful subset exists — actors are constructed by deleted startup/session/intake wiring).
+> So Phase 8's deliverable is the **loop MODULES + copied parity tests (green)** as the M1 library
+> surface, once the source-fix lands. `config.ts` and the composition root are excluded from the
+> "verbatim copy" scope and tracked as deferred authoring.
+
 ## Investigation findings that shape this checklist (verified, not assumed)
 
 - **CORRECTION (2026-09-06, at implement time):** the original KEEP list included a 5-file
@@ -59,8 +70,8 @@ Actors/runtime: `trading-actor`, `agent-trading-actor`, `execution-actor`, `runt
 `validate-trade-instrument`, `swap-startup-validation`. Scan: `technical-phase`,
 `complete-technical-scan`, `scanner-candidate-discovery`, `scanner-candle-fetcher`, `scanner-pre-filter`,
 `swap-candidate-discovery`, `candle-fetch-breaker`, `candle-fetch-retry`. Risk/gating:
-`agent-risk-limits`, `live-gate`, `tick-gates`, `tick-gate-state`, `tick-thinking`, `position-coverage`,
-`watch-types`. Utils: `config`, `redis-keys`, `crypto`, `logger`, `fmt`, `prompt-timing-context`,
+`agent-risk-limits`, `live-gate`, `tick-gates`, `tick-gate-state`, `position-coverage`,
+`watch-types`. (`tick-thinking` reclassified DELETE — agent scout/judge reasoning.) Utils: `config`, `redis-keys`, `crypto`, `logger`, `fmt`, `prompt-timing-context`,
 `tool-result-metadata`. From subdirs: `shared/decision-validation` (mechanical per-trade-level validation, confirm it needs only
 domain/engine at implement time).
 
@@ -78,6 +89,8 @@ their capabilities are Deferred-required for Phase 9.
 `runtime-degradation.ts`, `runtime-resilience.ts`, `runtime-tool-visibility.ts`, `llm-selection.ts`,
 `scout-dispatch.ts`, `scout-gating.ts`, `context-diff.ts`, `cost-profile.ts`, `usage-billing-service.ts`,
 `agent-wake-scheduler.ts`, `agent-capabilities.ts`, `agent-intake-fallback.ts`,
+**`tick-thinking.ts`** (reclassified DELETE 2026-09-06 — resolves agent scout/judge `ReasoningLevel`;
+only `agent.ts` consumes it; no mechanical KEEP file imports it),
 `assessment-review-message.ts`, `manual-review-runtime.ts`, `reminder-coordinator.ts`,
 `browser-pool-health-publisher.ts`, `gmail-adapter.ts`, `gmail-credential-resolver.ts`, `tar-utils.ts`,
 `user-event-publisher.ts`, `startup-context.ts`, **`venue-intelligence.ts`**, **`intelligence-tools.ts`**,
