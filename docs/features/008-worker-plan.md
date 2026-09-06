@@ -3,8 +3,37 @@
 **Phase:** 8 of the roadmap ([009](../009-extraction-roadmap.md)).
 **Shape:** subtraction (LARGE, 326 files). Formal keep/delete classification done (step 1, read-only).
 **Depends on:** all extracted packages (domain, db, engine, market-data, venues, strategy, backtesting — all done).
-**Status:** **BLOCKED (stop-gate)** — classification complete; four coupled boundary/ownership decisions
-require human approval before any code moves (009 stop-gates 1–4). See "STOP-GATE" below.
+**Status:** **ACTIVE (stop-gate resolved 2026-09-06, human-approved).** The four boundary/ownership
+decisions are settled — see "RESOLVED DECISIONS" below (and the RESOLVED entry in
+[003](../003-anomalies-and-deviations.md)). Execution is now the mechanical loop laid out in "Method".
+
+## RESOLVED DECISIONS (human-approved)
+
+1. **Drive-path / boundary — NO API layer in Phase 8.** Traderton (pre-authoring) is packaged as a
+   **library**; herobids consumes its in-process intake core (`actorRegistry` + `agent-intake-resolver` +
+   `submitDecisionForExecution` + the two actors + `WorkerRuntime`) to **replace its existing in-process
+   trading**. herobids stays the consumer and drives the core **in-process** (as it does today) — the
+   platform message-broker/Redis-stream driver stays in herobids. The 005 REST/API layer is built **later**
+   (Phase 9 / final authoring pass), layered above the intake core. **Phase 8 authors no boundary code**;
+   it copies the intake core as a library surface and leaves the injection points open.
+2. **`resolveBotStartupContext` — delete as Intentional Divergence; inject `venueAccountId`; NO source-request.**
+   The connection→venueAccount front-end is a platform grant file and cuts cleanly by deletion (it terminates
+   in a `venueAccountId` string; the whole venue-account-onward trading path already takes `venueAccountId`).
+   Delete `startup-context.ts` (+ test). Copy the venue-account-onward path verbatim; it takes an injected
+   `venueAccountId`. **Guard split on the ownership line:** connection-grant guards (`connection_not_usable`,
+   `connection_venue_account_mismatch`, `missing_connection_id`, `connection_not_found`) stay herobids;
+   venue-account existence guards (`missing_source_venue_account`, `source_venue_account_not_found`) move to
+   Traderton (copied where they live in the kept path). Do NOT keep a hollowed `startup-context.ts`.
+3. **`create_bot`/`start_bot` limit — Deferred-required; NOT source-request; NOT authored now.** No
+   behaviour-preserving reshape exists (herobids' limit is `agents.maxBots`/`plan.entitlements`-keyed —
+   platform; the atomic `BotRepository` limit methods were deleted Phase 2). Phase 8 copies the mechanical
+   create/start path with **no native limit**. The capability stays `Deferred (required for cutover)` on the
+   `create_bot`/`start_bot` rows + the cutover gate; **per-`ownerId` enforcement is authored in the final
+   authoring pass** alongside the API/tenancy model. Cutover blocked until it lands (never ships weaker).
+4. **Trading-tool ownership — Phase 8 = loop + intake core; Phase 9 = the 25 tool modules + boundary.**
+   Confirmed per 009. Phase 8 keeps `agents/agent-decision-handler.ts` + `agents/agent-intake-resolver.ts`
+   (venue-account-direct, connection binding dropped) + `agents/actor-state-owner.ts` + `shared/decision-validation.ts`;
+   the `tools/` trading modules (`trading.ts`, `bots.ts`, `risk-limits.ts`, …) move in Phase 9.
 
 ## Classification (from the read-only context-gather, 2026-09-06)
 
@@ -55,37 +84,45 @@ reconnect, crash-loop, ephemeral-redis, capability-policy, sandbox), platform `t
   `price.ts`, `market-data.ts`, `watch.ts`, `find-instrument.ts`, `resolvers.ts`, `schema.ts`): the 25-tool
   surface — **009 assigns the 25 tool endpoints to Phase 9 (api)**. Ownership question below.
 
-## STOP-GATE — four coupled decisions needed before code moves (009 stop-gates 1–4)
+## Method (execution — now unblocked)
 
-1. **Drive-path / 005 boundary shape (stop-gate #1 + shape).** The mechanical decision core
-   (`actorRegistry` + `agent-intake-resolver` + `submitDecisionForExecution` + the two actors + `WorkerRuntime`)
-   is copyable. But it is driven **today** by the platform `AgentMessageBroker` reading a **Redis stream**
-   (`DECISION_SUBMIT`). Traderton must be driven by the **005 HTTPS boundary** (`POST /internal/v1/tools:invoke`
-   → `submit_decision`). That driver is **authored boundary infrastructure, not copied trading logic.**
-   DECISION: what does Phase 8 copy (in-process actor/intake core, driven by a test/stub harness) vs. what is
-   authored, and is the HTTP `submit_decision` handler in Phase 8 or **deferred to Phase 9**?
+`apps/worker` is an APP but Phase 8 ships it as a **library surface** (decision 1 above): a Traderton worker
+package that exposes the in-process intake core + the mechanical loop, consumable by herobids in-process. No
+REST/API. Copy-and-delete, leaf-first, build + copied tests green after each step, small commits.
 
-2. **`startup-context.ts` / `agent-intake-resolver.ts` binding (stop-gate #1 + #3).**
-   `resolveBotStartupContext` resolves `bot.connectionId` → `connections.resolvedVenueAccountId` → venue account
-   and validates `bot.connectionId`/`bot.userId` — **all dropped by decisions 11–13**; it cannot compile against
-   `@traderton/db` and cannot be cut by deletion. Traderton must bind `venueAccountId` **directly** (decision 13).
-   DECISION: **herobids source-fix request** to reshape `resolveBotStartupContext` to a venue-account-direct form,
-   **or** a Traderton-authored soft-seam resolver? AND: dropping the platform connection-status/mismatch guards
-   (`connection_venue_account_mismatch`, `connection_not_usable`, …) is a **consequential behavioural divergence**
-   — confirm it is an accepted Intentional Divergence whose safety intent is preserved venue-account-side
-   (herobids-on-Traderton not weaker than herobids-today).
+1. **Scaffold** a Traderton worker package (deps on the extracted `@traderton/*` packages + bullmq/ioredis/
+   drizzle/pino/zod/yaml — the sanctioned infra; NO `@herobids/llm`/`documents`/SES/readability/linkedom).
+   Mirror Traderton toolchain conventions (decision 16); retarget operator config (Redis/DB URLs, queue/service
+   names) to Traderton (decision 1), not copied verbatim. Wire root tsconfig ref + vitest alias.
+2. **Copy the KEEP set verbatim** (see classification) + namespace-rename `@herobids/*`→`@traderton/*`. Bring the
+   trading-loop parity tests across (`agent-risk-limits.parity.test`, `cross-venue-lifecycle`, actor-lifecycle,
+   scanner/technical-scan — confirm each trading-owned at implement time).
+3. **Cut the seams:**
+   - Delete `startup-context.ts` (+ test) — Intentional Divergence (decision 2 above); the kept path takes an
+     injected `venueAccountId`.
+   - `runtime-composition.ts`: relocate the mechanical scan value-types (`TechnicalScanState`, `ScannerHealth(Result)`,
+     `RuntimePositionSnapshot`, `HybridPricingIdentity` re-export) into a small `scan-types.ts` beside
+     `complete-technical-scan.ts`; delete the platform body (thin type-relocation seam).
+   - `index.ts`: split into a **trading composition root** (KEEP, assembled from copied parts) + drop the platform
+     composition. Leave the drive injection point open (herobids-consumer drives in-process).
+   - `AgentTradingActor`: leave the optional agent callbacks (`emitAgentWake?`/`onTechnicalScanComplete?`/…) unwired
+     (fail-open when absent, as source already does).
+   - Delete all platform files/dirs per the classification (`agent.ts`, `hybrid-*`, `agent-evaluation/`, `alerting/`,
+     `market-intelligence/`, platform `agents/*`, platform `tools/*`, llm/documents/ses coupling).
+4. **Guard split (decision 2):** connection-grant guards stay herobids; venue-account existence guards
+   (`missing_source_venue_account`, `source_venue_account_not_found`) come across where they live in the kept path.
 
-3. **`create_bot`/`start_bot` limit KEY (stop-gate #4, shape).** Enforcement today is agent-keyed +
-   `agents`-row-locked (`agent-message-broker.ts`, `index.ts` start-guard) — the Phase-2 Deferred-required item.
-   Traderton has no `agents` table. DECISION: the new limit key — **per-`ownerId` / per-`venueAccountId` /
-   operator config**. This sets Traderton's tenancy/ownership model at the boundary (touches decisions 10–13).
-   Do NOT author a speculative key.
+## Acceptance
+- Traderton worker library compiles strict against the extracted packages; lint clean.
+- Copied trading-loop tests green (note any gated/integration tests).
+- Forbidden-import sweep: no `@herobids/*`, no llm, no documents/ses, no platform agent-session imports.
+- Ledger updated: trading-loop / actor / scan rows → Met with evidence; `create_bot`/`start_bot` remain
+  `Deferred (required for cutover)` (per-`ownerId` limit authored at final pass); every deleted platform
+  subsystem recorded as Intentional Divergence; nothing silently dropped.
+- Mark Phase 8 Done in 009; seed Phase 9 (`apps/api`) plan.
 
-4. **Trading-tool ownership: Phase 8 vs Phase 9 (stop-gate #2).** 009 assigns the 25 tool endpoints to Phase 9
-   (api). Recommend Phase 8 keeps the loop + actor/intake; Phase 9 owns the tool modules + boundary handlers.
-   DECISION: confirm the split (also `user-event-publisher.ts`, `services/approval-service.ts` ownership).
-
-Autonomous ONCE decided: KEEP-core copy, `runtime-composition.ts` type-split, `index.ts` composition-root split,
-all platform deletions, the `AgentTradingActor` callback-seam, and bringing the trading-loop parity tests across
-(`agent-risk-limits.parity.test`, `cross-venue-lifecycle`, actor-lifecycle, scanner/technical-scan — confirm each
-trading-owned at implement time).
+## Stop-gates during implementation (residual guards)
+- If a KEEP file needs a domain/db/engine symbol not in the Traderton barrels → source-fix request.
+- If a KEEP file's platform coupling can't be cut by deletion without authoring non-trivial trading logic → stop.
+- If a trading-loop parity test can't pass unmodified (beyond namespace rename + removed deleted-subject blocks) → stop.
+- Any NEW consequential divergence beyond the four resolved above → stop and surface.
