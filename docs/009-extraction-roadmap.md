@@ -151,8 +151,8 @@ recommended default (foundational data model first, then the core engine).
 | 3 | `engine` | clean-package (+internal seams) | domain | **Done** |
 | 4 | `market-data` | clean-package | domain | **Done** |
 | 5 | `venues` | clean-package (+internal seams) | domain, market-data | **Done** |
-| 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | Queued (next) |
-| 7 | `backtesting` | clean-package | domain, engine | Queued |
+| 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | **Done** |
+| 7 | `backtesting` | clean-package | domain, engine | Queued (next) |
 | 8 | `apps/worker` — trading loop | subtraction (large) | all packages | Queued |
 | 9 | `apps/api` — trading control-plane + tools | subtraction (large) | db, domain, engine, venues, backtesting | Queued |
 | 10 | infra (Dockerfile, compose, CI, deploy) | clean-package (copy trading slice) | a working service | Queued |
@@ -215,6 +215,15 @@ recommended default (foundational data model first, then the core engine).
   copied mechanical tests green.
 - **Likely stop-gates:** `index.ts` re-exporting llm slices (barrel trim); confirm the
   mechanical slice needs nothing from the dropped llm files.
+- **DONE:** `@traderton/strategy` (mechanical slice) landed. Copied `mechanical-strategy`,
+  `dca-strategy`, `scan-engine` (+ tests) + `index.ts` verbatim (diff = namespace rename
+  only). Dropped `llm.ts`/`llm-provider.ts`/`hybrid-strategy.ts` (+ tests) + the `@herobids/llm`
+  dep entirely (never entered the tree). Both stop-gates cleared: mechanical slice is llm-free
+  (no `./llm`/`./hybrid` imports), and every needed domain/market-data symbol
+  (`HybridPricingIdentity` kept — it is the domain pricing-identity, not `HybridStrategy`) is
+  in the Traderton barrels. Barrel trim = exactly the 3 `./llm` + 1 `./hybrid-strategy` export
+  lines removed. Compiles strict, lint clean, forbidden-import sweep clean. **56 copied tests
+  green** (dca 14, mechanical 18, scan-engine 24).
 
 ### Phase 7 — `backtesting`
 - **Copy:** whole `packages/backtesting` (replay, historical execution, replay corpora).
