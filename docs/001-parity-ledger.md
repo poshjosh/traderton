@@ -26,17 +26,16 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 
 ### Phase 1 progress (live)
 
-**Status: IN PROGRESS — blocked, build not green.** Do not mark any slice `Met` until the copied `packages/domain` build + tests are green again.
+**Status: IN PROGRESS — domain slice complete and green.** The `@traderton/domain` trading slice compiles under strict TS, lint is clean, and all copied domain parity tests pass (230). No platform imports remain in the slice; no `@herobids` references; no LLM coupling. Engine / venues / market-data / db / runtime remain future phases.
 
 - Workspace shell scaffolded (pnpm workspace, strict TS ES2022 ESM, vitest) mirroring herobids toolchain (Node ≥22, pnpm 10.33.2). `git init` done for delete-visibility.
 - `@herobids/domain` copied verbatim (97 files) and renamed to `@traderton/domain`. Trading `config/strategy-presets/*.yaml` copied. **Verbatim-copy baseline was green: 981/981 tests, build + lint clean** (the parity harness).
 - Leaf-first platform deletions completed cleanly (build green after each): removed `agent-evaluation`, `agent-goal`, `assessment-billing`, `plan-entitlements`, `platform`, `provider-catalog`, `runtime-composition`, `skills*`, `skill-resolution`, `tools`, `tool-schemas`, `llm-selection`, `external-skill-provider-http`, `text-search`, `review-pre-check`, `browser-pool-feature.test`, dirs `email/ infra/ skills/ __tests__/`, platform ports (`assessment-identity-resolver`, `assessment-request`, `preset-transition`, `blueprint-execution-capability`, `browser-pool`, `document-store`, `document-text-extractor`, `runtime-document-materializer`, `runtime`, `external-skill-provider`), `models/llm-models`. Barrels (`index.ts`, `ports/index.ts`, `models/index.ts`) trimmed accordingly.
-- Config seam progress: resolved the `WakePreferences`/`agent-protocol` seam by clean in-place deletion (deleted platform wake schema, `agent-protocol.ts`, `config/load-providers.ts`, `config/assessment-config.ts`; trimmed barrels).
-- Deleted `blueprint.ts` + `blueprint.test.ts` (platform marketplace/authoring — Intentional Divergence, confirmed not on the trading path); removed the barrel export. The 80 blueprint tests were removed with their deleted platform subject (not counted as a parity slice). **Build + remaining copied tests green at this checkpoint (432 tests).**
-- **BLOCKED on ONE herobids source-change request** (per the source-fix rule; logged in [003-anomalies-and-deviations.md](./003-anomalies-and-deviations.md)):
-  - **#1 strategy registry** — the registry is trading-owned and moves to Traderton, but it currently also registers the agent's `llm`/`hybrid` decision modes (`LlmParams`/`HybridParams`). Need herobids to **extract the llm/hybrid registration + schemas to the agent side, leaving a mechanical-only registry** (registers `mechanical`+`dca`). Same seam as "bots are mechanical-only" (decisions 7–9); narrowing `StrategySchema.decisionMode` is a logged Intentional Divergence. Plan: `.ignore/extract-agent-concepts-from-domain/001-strategy-registry-plan.md`.
-  - **~~#2 blueprint union~~ — WITHDRAWN.** Investigation confirmed `blueprint.ts` is the platform marketplace/authoring layer, not the trading path (bots use `BotConfigSchema`; execution path is blueprint-free). No herobids change; `blueprint.ts` is deleted from Traderton as Intentional Divergence. See [003](./003-anomalies-and-deviations.md).
-  Remaining `config/schema.ts` platform-schema deletions become clean leaf deletions once `blueprint.ts` is deleted (its agent-policy schema consumers go with it) and request #1 lands (frees the LLM schemas).
+- Config seam RESOLVED: `config/schema.ts` reduced to trading-only (2568→844 lines, 77 exports) by clean leaf-first in-place deletions — no authored restructuring. Removed the `WakePreferences`/`agent-protocol` seam, then (after `blueprint.ts` deletion freed the agent-policy schemas and herobids source-request #1 freed the LLM schemas) all platform schemas: AppConfig, agent-runtime-policy island, LLM block, billing/plans, auth, alerts/telegram/gmail, nomad/sharedServices, worker/services/browser/http/sessionCircuit/agentRuntime(+Policy), marketIntelligence, platformAssessment*, evaluation, Intelligence/UnifiedAgent/preset/capability/hybrid schemas, WakeGate, validateReviewInterval, and agent `PermissionLevel`/`AgentStyle`. Details in [003](./003-anomalies-and-deviations.md).
+- Deleted `blueprint.ts` + `blueprint.test.ts` (platform marketplace/authoring — Intentional Divergence, confirmed not on the trading path).
+- Strategy-registry seam RESOLVED via herobids source-request #1 (commit `648f9110`, released). Traderton copies a mechanical-first registry and omits the `registerAgentDecisionModes({llm,hybrid})` call → mechanical-only (`mechanical`+`dca`); `momentum:llm`/`momentum:hybrid` unsupported (Intentional Divergence). See [003](./003-anomalies-and-deviations.md).
+- **No open herobids requests.** (#2 was withdrawn — `blueprint.ts` is platform marketplace, not the trading path; bots use `BotConfigSchema`, execution path is blueprint-free.)
+- **Domain slice green: build + lint clean, 230 copied tests pass.** Surviving trading files match the Phase 0 COPY list (trading/, values/, named ports, result/enums/pagination/scanner-types/cost-profile, agent-risk-contract, market-assessment, models/decision, config trading schemas + strategy-parameters + presets).
 
 ### Cross-cutting
 
@@ -81,6 +80,7 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 
 | Capability | Status | Notes |
 |------------|--------|-------|
+| Domain slice (`@traderton/domain`: trading config schemas, values, ports, models/decision, result/enums/pagination, scanner-types, cost-profile, agent-risk-contract, market-assessment, strategy-parameters, presets) | Met | Phase 1 landed. Copied from herobids + platform slices deleted; strict-TS compile + lint clean; 230 copied parity tests pass. This is the domain layer only — the engine/venues/market-data/db/runtime that *consume* these types remain future phases (rows below stay Pending). |
 | Risk gate (all rules, hard invariants, user vs operator defaults) | Pending | `packages/engine/risk-gate.ts` + parity test. |
 | Venue adapters (Hyperliquid, Bybit, Jupiter, 1inch) | Pending | order types, streams, mark sources, rate limits. |
 | Trading loop (scan→decision→plan→risk→execute→fill→reconcile) | Pending | |
@@ -89,7 +89,7 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 | Market data / discovery | Pending | Indicators and discovery inputs only, no LLM. Moves to Traderton. |
 | Backtesting / replay | Pending | |
 | Trading data model (tables listed in Phase 0) | Pending | |
-| Mechanical strategies (`Dca`, `Mechanical`, `scan-engine`, `regime`) | Pending | Move to Traderton (no LLM). |
+| Mechanical strategies (`Dca`, `Mechanical`, `scan-engine`, `regime`) | Pending | Move to Traderton (no LLM). Domain-config foundation landed in Phase 1 (`MechanicalParamsSchema`, indicator/technical schemas, mechanical-only strategy registry); the `packages/strategy` implementation is a future phase. |
 
 ### Risk gate — exact rules (highest-stakes parity surface)
 
