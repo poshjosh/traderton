@@ -139,7 +139,7 @@ Source: `packages/venues`. Each carries order ops + streams + confirmation.
 | Adapter | Kind | Status | Notes |
 |---------|------|--------|-------|
 | Hyperliquid | perp/orderbook | Met | **Phase 5.** `hyperliquid.ts` + public/private streams (`hyperliquid-public-stream.ts`, `hyperliquid-private-stream.ts`) + `hyperliquid-mark-source.ts` copied verbatim; unit tests green; `hyperliquid.integration.test.ts` credential-gated (skips). |
-| Bybit | perp/orderbook | Met | **Phase 5.** `bybit.ts` + public/private streams + `bybit-info.ts`/`bybit-tickers.ts` copied verbatim; unit tests green; `bybit.integration.test.ts` credential-gated (skips). ccxt pinned to source-resolved `4.5.54` (dependency reproduction; see [003](./003-anomalies-and-deviations.md)). |
+| Bybit | perp/orderbook | Met | **Phase 5.** `bybit.ts` + public/private streams (`bybit-public-stream.ts`, `bybit-private-stream.ts`) copied verbatim; unit tests green; `bybit.integration.test.ts` credential-gated (skips). ccxt pinned to source-resolved `4.5.54` (dependency reproduction; see [003](./003-anomalies-and-deviations.md)). (Bybit market-data helpers `bybit-info.ts`/`bybit-tickers.ts` landed in `@traderton/market-data`, Phase 4.) |
 | Jupiter | swap (Solana) | Met | **Phase 5.** `jupiter-swap.ts` + `jupiter-confirmation.ts` + `solana-signer.ts` copied verbatim; unit tests green. |
 | 1inch | swap (EVM) | Met | **Phase 5.** `oneinch-swap.ts` + `evm-confirmation.ts` + `evm-signer.ts` copied verbatim; unit tests green; `oneinch.integration.test.ts` credential-gated (skips). |
 | PublicStreamPool | shared streaming | Met | **Phase 5.** `stream-pool.ts` copied verbatim; tests green. worker-scoped shared WS connections. |
