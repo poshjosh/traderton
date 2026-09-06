@@ -152,8 +152,8 @@ recommended default (foundational data model first, then the core engine).
 | 4 | `market-data` | clean-package | domain | **Done** |
 | 5 | `venues` | clean-package (+internal seams) | domain, market-data | **Done** |
 | 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | **Done** |
-| 7 | `backtesting` | clean-package | domain, engine | Queued (next) |
-| 8 | `apps/worker` — trading loop | subtraction (large) | all packages | Queued |
+| 7 | `backtesting` | clean-package | domain, engine | **Done** |
+| 8 | `apps/worker` — trading loop | subtraction (large) | all packages | Queued (next) |
 | 9 | `apps/api` — trading control-plane + tools | subtraction (large) | db, domain, engine, venues, backtesting | Queued |
 | 10 | infra (Dockerfile, compose, CI, deploy) | clean-package (copy trading slice) | a working service | Queued |
 
@@ -395,6 +395,25 @@ From Phase 5 (`venues`):
 - **Integration tests gated on credentials skip cleanly — mark the row `Met (unit; integration
   credential-gated)`, not plain Met.** Same discipline as Phase 2 db: live-venue validation is a CI /
   Phase-10 concern; don't claim full Met on unit evidence alone.
+
+From Phase 6 (`strategy`) & Phase 7 (`backtesting`):
+
+- **A file-level split is copy-a-subset, not copy-whole-then-delete.** strategy's mechanical/llm split
+  was clean at file granularity (mechanical files don't import the llm files), so copying only the
+  mechanical files (+ barrel-trimming the llm/hybrid export lines) is the faithful move; the llm files
+  never enter the tree. Verified up front that the kept files don't import the dropped ones.
+- **The naming-trap check is now routine:** a domain type whose name contains a dropped concept's word
+  (`HybridPricingIdentity` vs the dropped `HybridStrategy`) can be trading and required. Resolve by
+  reading the type, not matching the substring. Keep it if the mechanical slice imports it.
+- **Verbatim non-import strings referencing `@herobids` stay verbatim — including test `describe()`
+  labels.** backtesting's `describe('@herobids/backtesting package.json exports ...')` is a regression
+  label; the test asserts the local (Traderton) package.json shape and passes. Only imports are renamed;
+  rewriting a parity test's descriptive string would be an authored edit. Log as LOW, don't change.
+- **Toolchain scaffolding is retargeted to Traderton's convention, not copied verbatim.** backtesting's
+  source package.json used a bare `build: tsc` + own `typescript` devDep; Traderton uses `tsc --build` +
+  project references + root toolchain (decision 16). Mirroring the Traderton package shape (as the other
+  landed packages do) is correct scaffolding, not a copy-never-author concern — same class as retargeting
+  operator config.
 
 ## Coordinator handoff
 
