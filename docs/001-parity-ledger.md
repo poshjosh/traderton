@@ -15,7 +15,8 @@ ledger carries the live status against that inventory.
 | **Pending** | In inventory, but not yet copied or verified. Transitional status before work reaches that slice. |
 | **Met** | Reproduced; verified against source behaviour (copied code + copied tests green). |
 | **Improved** | Reproduced and made better. Note what changed and why. |
-| **Deferred** | Deliberately not done yet. Note reason + what it blocks. |
+| **Deferred (optional)** | Deliberately not done yet, with **no herobids parity obligation** (genuinely new/nice-to-have, e.g. bot cloning). May remain unbuilt without harm. Note reason. |
+| **Deferred (required for cutover)** | Deliberately not done yet, but herobids will **rely on Traderton to provide it** in the end state (see "herobids becomes a consumer" in [000](./000-vision.md)). Deferred only in *when*, not *whether* — **blocks cutover until resolved.** Note reason + the tool/subsystem row it belongs to. |
 | **Gap** | Attempted; fell short. Note exactly what is missing and why. Requires sign-off. |
 | **Intentional divergence** | Source behaviour deliberately NOT copied because it was platform coupling, not trading capability. Note the seam. |
 
@@ -47,8 +48,8 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 
 | Capability (from source) | Area | Status | Notes |
 |--------------------------|------|--------|-------|
-| Traderton-native usage metering / payments / caps | cross-cutting | Deferred | Platform billing authority stays outside Traderton by design. Service-owned metering, billing, and caps are cut for initial extraction and can return later. |
-| Bot reproduction / cloning (Traderton-native) | cross-cutting | Deferred (planned feature) | **New Traderton-native capability, not a source parity item.** Reproduce/clone a bot from its stored `BotConfigSchema` recipe (strip instance-only fields `venueAccountId`/`connectionId`/`status`; create a new bot bound to a venue account). Built on `BotConfigSchema`; does NOT require the platform blueprint marketplace machinery. Intended from day one; to be designed/built in a later phase, not authored during Phase 1. See [004](./004-decision-log.md). |
+| Traderton-native usage metering / payments / caps | cross-cutting | Deferred (optional) | Platform billing authority stays outside Traderton by design. Service-owned metering, billing, and caps are cut for initial extraction and can return later. No herobids parity obligation (platform keeps its own billing). |
+| Bot reproduction / cloning (Traderton-native) | cross-cutting | Deferred (optional) | **New Traderton-native capability, not a source parity item.** Reproduce/clone a bot from its stored `BotConfigSchema` recipe (strip instance-only fields `venueAccountId`/`connectionId`/`status`; create a new bot bound to a venue account). Built on `BotConfigSchema`; does NOT require the platform blueprint marketplace machinery. Intended from day one; to be designed/built in a later phase, not authored during Phase 1. See [004](./004-decision-log.md). |
 
 ### Trading tools (25 — authority:
 [006-source-capability-manifest.md](./006-source-capability-manifest.md))
@@ -56,8 +57,8 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 | Tool | Status | Notes |
 |------|--------|-------|
 | `submit_decision` | Pending | Decision execution — highest-stakes parity surface. |
-| `create_bot` | Pending | **Deferred-REQUIRED sub-capability:** limit-enforced bot creation. herobids' per-agent maxBots (agents-row-locked) is Intentional Divergence (platform, not copied — deleted from `@traderton/db` BotRepository, Phase 2). Traderton must provide limit-enforced creation via this tool before cutover (herobids will rely on it); limit key (per-owner / per-venue-account / operator config) decided in the bot-lifecycle phase (worker/api). See [004](./004-decision-log.md) + [003](./003-anomalies-and-deviations.md). |
-| `start_bot` | Pending | **Deferred-REQUIRED sub-capability:** limit-enforced bot start (was `tryMarkBotRunningWithLimit`, agents-row-locked → Intentional Divergence, deleted Phase 2). Same obligation as `create_bot`. |
+| `create_bot` | Pending | **`Deferred (required for cutover)` sub-capability:** limit-enforced bot creation. herobids' per-agent maxBots (agents-row-locked) is Intentional Divergence (platform, not copied — deleted from `@traderton/db` BotRepository, Phase 2). Traderton must provide limit-enforced creation via this tool before cutover (herobids will rely on it); limit key (per-owner / per-venue-account / operator config) decided in the bot-lifecycle phase (worker/api). See [004](./004-decision-log.md) + [003](./003-anomalies-and-deviations.md). |
+| `start_bot` | Pending | **`Deferred (required for cutover)` sub-capability:** limit-enforced bot start (was `tryMarkBotRunningWithLimit`, agents-row-locked → Intentional Divergence, deleted Phase 2). Same obligation as `create_bot`. |
 | `stop_bot` | Pending | |
 | `list_bots` | Pending | |
 | `resolve_bot` | Pending | |
@@ -166,7 +167,7 @@ sees it explicitly; none is a silent drop.
 |------------------|-----------|-----------|
 | Trading coupled to platform `users` + platform billing tables | Not owned by Traderton | Traderton is multi-tenant but not the identity/platform-billing authority; accepts authenticated `ownerId` + `actor` at the boundary (decision 10). |
 | `connections` / `agent_connections` grant layer | Stays platform | Grant/entitlement is platform-owned; Traderton binds bots directly to `venueAccountId` (decisions 11, 13). |
-| herobids per-agent maxBots enforcement (`BotRepository.tryCreateBotWithLimit` / `tryMarkBotRunningWithLimit`, row-locking the `agents` table) | Platform implementation not copied (deleted Phase 2) | The per-agent limit keyed on `agents` + agent-row-lock is platform concurrency policy; only the platform agent-broker/worker call it. Deleted from `@traderton/db`. The *capability* (limit-enforced bot creation/start) is trading and **Deferred-REQUIRED** — Traderton must provide it via `create_bot`/`start_bot` before cutover (see those tool rows + [004](./004-decision-log.md)). This is the "capability trading, implementation platform-coupled" case from the herobids-becomes-a-consumer model. |
+| herobids per-agent maxBots enforcement (`BotRepository.tryCreateBotWithLimit` / `tryMarkBotRunningWithLimit`, row-locking the `agents` table) | Platform implementation not copied (deleted Phase 2) | The per-agent limit keyed on `agents` + agent-row-lock is platform concurrency policy; only the platform agent-broker/worker call it. Deleted from `@traderton/db`. The *capability* (limit-enforced bot creation/start) is trading and tagged **`Deferred (required for cutover)`** on the `create_bot`/`start_bot` rows — Traderton must provide it before cutover (see those tool rows + [004](./004-decision-log.md)). This is the "capability trading, implementation platform-coupled" case from the herobids-becomes-a-consumer model. |
 | `bots.userId`/`venue_accounts.userId`/`user_credentials.userId`/`backtest_runs.userId`/`replay_corpora.userId`/`datasets.userId` hard FKs to `users`; `bots.connectionId` FK to `connections` | Converted to soft `ownerId` / dropped (Phase 2) | Soft-reference rule ([004](./004-decision-log.md)): Traderton doesn't own user identity (decision 10); every copied table's `users` FK → soft `ownerId`; `bots.connectionId` dropped, bots bind via `venueAccountId` (decision 13). Sanctioned authored seam, not a gap. |
 | Bots could run `LlmStrategy` / `HybridStrategy` | Traderton bots are **mechanical-only** (`mechanical`, `dca`) | Intelligence is the agent's job. LLM/Hybrid decision-making relocates to the agent, which submits decisions via the boundary (decisions 7–9). Config-validation form: the strategy registry that moves to Traderton registers only `mechanical`+`dca` (the `llm`/`hybrid` modes + `LlmParams`/`HybridParams` stay agent-side — herobids source-request #1 in [003](./003-anomalies-and-deviations.md)); `StrategySchema.decisionMode` narrows to the mechanical set. Same decision, seen from config. |
 | `blueprint.ts` (whole file — marketplace/authoring: agent+bot revision payloads, publish/fork/browse, revisions, popularity) | Stays platform; **`blueprint.ts` not copied into Traderton** | Confirmed 2026-09-05: blueprint.ts is the marketplace/authoring layer, not the trading path — bots are created/validated/executed via `BotConfigSchema`, and the bot execution path is blueprint-free (see [003](./003-anomalies-and-deviations.md), [004](./004-decision-log.md)). The trading config Traderton owns (`RiskPosture`, `BotRisk`, `ExecutionDefaults`, `TokenSafety`, `BotConfigSchema`) lives in `config/schema.ts`, not blueprint.ts, so decision 14's "risk/execution/token-safety schema slice" is satisfied without copying blueprint.ts. 1:1 parity preserved by deleting the platform file, not repurposing it. |
@@ -183,6 +184,7 @@ proof comes from [007-operational-readiness.md](./007-operational-readiness.md).
 | Gate | Status | Evidence / notes |
 |------|--------|------------------|
 | Inventory fully accounted for | Pending | Every inventory row from 006 has a ledger disposition appropriate for the target cutover. |
+| All `Deferred (required for cutover)` entries resolved | Pending | Every ledger entry tagged `Deferred (required for cutover)` is now `Met`/`Improved` (or explicitly re-accepted as `Gap` with sign-off). herobids-on-Traderton must not be weaker than herobids-today for any capability herobids relies on Traderton to provide. Enumerate the resolved entries here. |
 | Side-effecting parity validated | Pending | `submit_decision`, bot lifecycle, risk gate, and watch lifecycle have copied-test and cutover-evidence coverage. |
 | Consumer boundary contract validated | Pending | [005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md) is implemented and integration-tested end to end. |
 | Operational readiness passed | Pending | Latency, equivalence, restart-resilience, and rollback checks from 007 passed in the target environment. |
@@ -190,8 +192,11 @@ proof comes from [007-operational-readiness.md](./007-operational-readiness.md).
 | Final cutover approval | Pending | Record approver, environment, date, and release note or change ticket here. |
 
 Only mark `Final cutover approval` as `Met` when `Inventory fully accounted
-for` is `Met`, and `Side-effecting parity validated`, `Consumer boundary
+for` is `Met`, `All Deferred (required for cutover) entries resolved` is `Met`,
+and `Side-effecting parity validated`, `Consumer boundary
 contract validated`, `Operational readiness passed`, and `Rollback path
-rehearsed` are each `Met`. Accepted `Gap` or `Deferred` entries may explain the
-inventory state; they do not waive the mandatory contract, readiness, or
-rollback gates.
+rehearsed` are each `Met`. Accepted `Gap` or `Deferred (optional)` entries may
+explain the inventory state; they do not waive the mandatory contract, readiness,
+or rollback gates. A `Deferred (required for cutover)` entry does **not** get to
+explain-and-pass — it must be resolved (or re-accepted as a signed-off `Gap`)
+before cutover.

@@ -13,7 +13,8 @@ here, not in any consuming platform.
 
 ## The end state — herobids becomes a consumer of Traderton
 
-**This is the single most important thing to understand, and it governs many
+**This is the most important thing to understand for *classifying* code —
+second only to the copy-never-author law (see AGENTS.md) — and it governs many
 decisions.** We are extracting trading out of herobids so that, in the end state,
 **herobids itself becomes a runtime consumer of Traderton.** The agent +
 messaging platform stays in herobids; everything trading (bots, decisions,
