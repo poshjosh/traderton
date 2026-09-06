@@ -35,7 +35,9 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 
 **Phase 4 (`market-data`): DONE** — `@traderton/market-data` extracted by copy-and-delete. Domain-only (+`node-html-parser`). Clean-package, **zero seams**: 44 files copied, the only diff across all files is the `@herobids/domain`→`@traderton/domain` rename (3 files; other 41 byte-identical — verified by diff in review). Compiles strict, lint clean, forbidden-import sweep clean (no LLM-package/platform/db/venues/engine imports). **market-data slice: 354 copied tests green.** "Market data / discovery" row → Met; `regime`+indicators (mechanical analysis inputs) landed.
 
-**Next action:** Phase 5 (`venues`), per the roadmap [009-extraction-roadmap.md](./009-extraction-roadmap.md). Clean-package phase (+ internal seams — browser-pool/browserless classification), depends on domain + market-data. Seed plan at [docs/features/005-venues-plan.md](./features/005-venues-plan.md). Phases 5–10 governed by 009; execute each via its per-phase pattern, honoring the stop-gates.
+**Phase 5 (`venues`): DONE** — `@traderton/venues` extracted by copy-and-delete. Depends on domain + market-data (+`ccxt`/`viem`/`ws`). 40 files copied verbatim (diff = namespace rename only; verified in review). One seam cut: the platform browser-pool `browserless-adapter.ts` (+ test + 2 barrel exports) deleted as Intentional Divergence (needs Phase-1-dropped `BrowserPoolPort`; only consumer was the platform agent worker). Compiles strict, lint clean, forbidden-import sweep clean. **venues slice: 177 unit tests green; 6 integration tests credential-gated (skip).** ccxt pinned to source-resolved `4.5.54` ([003](./003-anomalies-and-deviations.md)). Venue-adapter rows → Met; browser-pool → Intentional divergence.
+
+**Next action:** Phase 6 (`strategy` mechanical slice), per the roadmap [009-extraction-roadmap.md](./009-extraction-roadmap.md). Clean-package (split): copy `mechanical-strategy`/`dca-strategy`/`scan-engine`, drop the llm/hybrid slice. Depends on domain + market-data. Seed plan at [docs/features/006-strategy-plan.md](./features/006-strategy-plan.md). Phases 6–10 governed by 009; execute each via its per-phase pattern, honoring the stop-gates.
 
 **Phase 1 evidence:**
 
@@ -93,7 +95,7 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 |------------|--------|-------|
 | Domain slice (`@traderton/domain`: trading config schemas, values, ports, models/decision, result/enums/pagination, scanner-types, cost-profile, agent-risk-contract, market-assessment, strategy-parameters, presets) | Met | Phase 1 landed. Copied from herobids + platform slices deleted; strict-TS compile + lint clean; 230 copied parity tests pass. This is the domain layer only — the engine/venues/market-data/db/runtime that *consume* these types remain future phases (rows below stay Pending). |
 | Risk gate (all rules, hard invariants, user vs operator defaults) | Met | **Phase 3 landed.** `packages/engine/src/risk-gate.ts` copied byte-identical; 83 parity tests pass unmodified (see the risk-gate exact-rules table below). |
-| Venue adapters (Hyperliquid, Bybit, Jupiter, 1inch) | Pending | order types, streams, mark sources, rate limits. |
+| Venue adapters (Hyperliquid, Bybit, Jupiter, 1inch) | Met (unit; integration credential-gated) | **Phase 5 landed** (`@traderton/venues`). 40 files copied verbatim (diff = namespace rename only; verified in review), then the browser-pool seam (`browserless-adapter.ts` + test + 2 barrel exports) cut as Intentional Divergence. Compiles strict against domain + market-data; **177 unit tests green; 6 integration tests credential-gated (skip without venue creds)** — like Phase 2 db, live venue validation is a CI/Phase-10 concern. See per-adapter table below + [Phase 5 plan](./features/005-venues-plan.md). |
 | Trading loop (scan→decision→plan→risk→execute→fill→reconcile) | Met (engine orchestration) | **Phase 3 landed the engine's `runTradingCycle` orchestration** (`packages/engine/src/trading-cycle.ts`) + decision intake, planner, executors, reconcile — copied verbatim, tests green. The *scan* front-end (market-data/strategy scan-engine) and the worker-level loop wiring remain later phases (4, 6, 8). |
 | Position / equity trackers | Met | **Phase 3 landed** (`position-tracker.ts`, `swap-position-tracker.ts`, `equity-tracker.ts`, `daily-loss-tracker.ts`, `rehydrate-daily-loss.ts`) — copied verbatim, tests green. |
 | Price-watch lifecycle | Pending | |
@@ -136,15 +138,15 @@ Source: `packages/venues`. Each carries order ops + streams + confirmation.
 
 | Adapter | Kind | Status | Notes |
 |---------|------|--------|-------|
-| Hyperliquid | perp/orderbook | Pending | adapter + public/private streams + mark source. |
-| Bybit | perp/orderbook | Pending | adapter + public/private streams. |
-| Jupiter | swap (Solana) | Pending | swap adapter + confirmation poller + Solana signer. |
-| 1inch | swap (EVM) | Pending | swap adapter + EVM confirmation + EVM signer. |
-| PublicStreamPool | shared streaming | Pending | worker-scoped shared WS connections. |
-| Mark sources | Oracle, Hyperliquid | Pending | |
-| Rate limiter | token bucket | Pending | per-venue. |
-| Wallet generation | EVM/Solana | Pending | |
-| Candle fetcher | Gecko | Pending | |
+| Hyperliquid | perp/orderbook | Met | **Phase 5.** `hyperliquid.ts` + public/private streams (`hyperliquid-public-stream.ts`, `hyperliquid-private-stream.ts`) + `hyperliquid-mark-source.ts` copied verbatim; unit tests green; `hyperliquid.integration.test.ts` credential-gated (skips). |
+| Bybit | perp/orderbook | Met | **Phase 5.** `bybit.ts` + public/private streams + `bybit-info.ts`/`bybit-tickers.ts` copied verbatim; unit tests green; `bybit.integration.test.ts` credential-gated (skips). ccxt pinned to source-resolved `4.5.54` (dependency reproduction; see [003](./003-anomalies-and-deviations.md)). |
+| Jupiter | swap (Solana) | Met | **Phase 5.** `jupiter-swap.ts` + `jupiter-confirmation.ts` + `solana-signer.ts` copied verbatim; unit tests green. |
+| 1inch | swap (EVM) | Met | **Phase 5.** `oneinch-swap.ts` + `evm-confirmation.ts` + `evm-signer.ts` copied verbatim; unit tests green; `oneinch.integration.test.ts` credential-gated (skips). |
+| PublicStreamPool | shared streaming | Met | **Phase 5.** `stream-pool.ts` copied verbatim; tests green. worker-scoped shared WS connections. |
+| Mark sources | Oracle, Hyperliquid | Met | **Phase 5.** `oracle-mark-source.ts`, `hyperliquid-mark-source.ts` copied verbatim; tests green. |
+| Rate limiter | token bucket | Met | **Phase 5.** `rate-limiter.ts` copied verbatim; tests green. per-venue. |
+| Wallet generation | EVM/Solana | Met | **Phase 5.** `wallet-generation.ts` copied verbatim; tests green. |
+| Candle fetcher | Gecko | Met | **Phase 5.** `candle-fetcher.ts` copied verbatim. |
 
 ### Engine subsystems (packages/engine)
 
@@ -183,6 +185,7 @@ sees it explicitly; none is a silent drop.
 | `blueprint.ts` (whole file — marketplace/authoring: agent+bot revision payloads, publish/fork/browse, revisions, popularity) | Stays platform; **`blueprint.ts` not copied into Traderton** | Confirmed 2026-09-05: blueprint.ts is the marketplace/authoring layer, not the trading path — bots are created/validated/executed via `BotConfigSchema`, and the bot execution path is blueprint-free (see [003](./003-anomalies-and-deviations.md), [004](./004-decision-log.md)). The trading config Traderton owns (`RiskPosture`, `BotRisk`, `ExecutionDefaults`, `TokenSafety`, `BotConfigSchema`) lives in `config/schema.ts`, not blueprint.ts, so decision 14's "risk/execution/token-safety schema slice" is satisfied without copying blueprint.ts. 1:1 parity preserved by deleting the platform file, not repurposing it. |
 | market-assessment platform orchestration + platform billing | Left behind (Intentional divergence + Deferred) | Only the domain/analysis is trading-owned; platform-side billing stays outside Traderton, while Traderton-owned usage metering remains Deferred (decision 15). |
 | Traderton-native usage metering / payments / caps | Deferred (see Cross-cutting) | Cut for initial extraction. |
+| Venues `browserless-adapter.ts` / `BrowserlessAdapter` (platform browser-pool client) | `browserless-adapter.ts` not copied into Traderton (deleted Phase 5) | A headless-browser session-pool client (acquires CDP browser sessions from a Browserless service via `fetch /json/new`) — a platform web-scraping/browser-automation concern, **not** a trading venue adapter. It implements `BrowserPoolPort` (with `BrowserSession`/`BrowserPoolError`), types Phase 1 classified platform and dropped from the domain slice. Consumer check across all of herobids (read-only): imported only by `apps/worker/src/agent.ts` (platform agent runtime) + re-exported by the venues barrel — no trading consumer. Same pattern as the engine wake gate: platform coupling needing a Phase-1-dropped domain port, orphaned of trading consumers → cut by deletion (+ 2 barrel exports). Not a herobids-on-Traderton dependency, so not Deferred-required. |
 | Engine `wake-gate.ts` / `evaluateWakeGate` (platform agent preset-review wake) | `wake-gate.ts` not copied into Traderton (deleted Phase 3) | The engine's wake gate decides **agent preset-review wakes** — it is keyed entirely on agent-reasoning concerns (`agentId`, `agentStyleTier`, `agentCurrentPreset`, preset rankings, per-agent daily wake limits) and imports `WakeGateConfig`, a type Phase 1 already classified platform and dropped from the domain slice. Consumer check across all of herobids (read-only): `evaluateWakeGate`/`WakeGateInput`/`WakeGateResult` are referenced only as re-exports in `packages/engine/src/index.ts` — no trading (or any) consumer imports them. This is the agent preset-review reasoning relocated agent-side by decisions 7–9, not a trading capability. Cut by deletion (+ its 2 barrel exports); the **trading** fill-first mark source (`mark-source.ts`) is separate and IS copied (Met). Not a herobids-on-Traderton dependency, so not Deferred-required. |
 
 ## Cutover Sign-Off

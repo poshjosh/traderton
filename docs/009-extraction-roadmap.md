@@ -150,8 +150,8 @@ recommended default (foundational data model first, then the core engine).
 | 2 | `db` — trading cluster | subtraction | domain | **Done** |
 | 3 | `engine` | clean-package (+internal seams) | domain | **Done** |
 | 4 | `market-data` | clean-package | domain | **Done** |
-| 5 | `venues` | clean-package (+internal seams) | domain, market-data | Queued (next) |
-| 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | Queued |
+| 5 | `venues` | clean-package (+internal seams) | domain, market-data | **Done** |
+| 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | Queued (next) |
 | 7 | `backtesting` | clean-package | domain, engine | Queued |
 | 8 | `apps/worker` — trading loop | subtraction (large) | all packages | Queued |
 | 9 | `apps/api` — trading control-plane + tools | subtraction (large) | db, domain, engine, venues, backtesting | Queued |
@@ -367,6 +367,25 @@ From Phase 4 (`market-data`):
   cost center (satisfies decision 9). It is copied verbatim and Met. Grep hits for `llm`/`ioredis`
   need reading in context: local definitions and comments are not couplings. Record the
   classification in the ledger so the "no LLM" invariant stays auditable.
+
+From Phase 5 (`venues`):
+
+- **The seam pattern repeats: a platform file needing a Phase-1-dropped domain PORT, orphaned of
+  trading consumers, is cut by deletion.** venues' `browserless-adapter.ts` (browser-pool) was the
+  exact analogue of engine's `wake-gate.ts` — imports a dropped domain type, only platform consumers,
+  clean deletion + barrel-trim. When the per-symbol domain diff flags a missing type, trace which
+  file(s) use it and check consumers; if it's platform-orphaned, it's an Intentional Divergence delete.
+- **A verbatim dependency SPEC can still break the copy — pin to the source's RESOLVED version, not
+  its declared range.** herobids declared `ccxt: ^4.4.0` but green-builds at the lockfile-resolved
+  `4.5.54`; a fresh Traderton install of `^4.4.0` pulled `4.5.77`, which broke a byte-identical
+  trading file (`bybit.ts` cast, TS2352). Fix = pin to the source's resolved version (reproduce the
+  tested build), not edit the copied code. This is dependency-reproduction scaffolding (same class as
+  retargeting operator config), not a copy-never-author breach — but log it in 003 because it's a
+  forced deviation from a verbatim spec. Lesson for later phases: when a copied file fails to compile,
+  check whether a transitive dependency drifted before suspecting the copy.
+- **Integration tests gated on credentials skip cleanly — mark the row `Met (unit; integration
+  credential-gated)`, not plain Met.** Same discipline as Phase 2 db: live-venue validation is a CI /
+  Phase-10 concern; don't claim full Met on unit evidence alone.
 
 ## Coordinator handoff
 

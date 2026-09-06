@@ -1,11 +1,19 @@
-# Phase 5 Plan (SEED) — `@traderton/venues`
+# Phase 5 Plan (FINAL) — `@traderton/venues`
 
 **Phase:** 5 of the roadmap ([009](../009-extraction-roadmap.md)).
 **Shape:** clean-package (+ one internal seam — browser-pool).
 **Depends on:** `@traderton/domain` + `@traderton/market-data` (both done). NOT engine/db.
-**Status:** SEED — drafted at end of Phase 4 from a light investigation of herobids
-`packages/venues`. The executing agent MUST run step 1 (investigate) and finalize this plan
-(step 2) against the real herobids code before implementing. Do not treat this seed as final.
+**Status:** FINAL — investigated (step 1) against real herobids `packages/venues` on 2026-09-06.
+Supersedes the seed.
+
+## Step-1 confirmation (per-symbol domain-import diff)
+venues imports 16 domain symbols: `BrowserPoolError`, `BrowserPoolPort`, `BrowserSession`,
+`CandleFetcher`, `Decimal`, `Mark`, `MarkError`, `MarkSource`, `OrderId`, `PriceCandle`,
+`PublicStreamHandlers`, `Quantity`, `Result`, `StreamOrderbook`, `StreamTicker`, `StreamTrade`.
+**All present in the Traderton domain barrel EXCEPT the three browser-pool types**
+(`BrowserPoolError`/`BrowserPoolPort`/`BrowserSession`) — dropped in Phase 1. Confirmed those
+three are imported by **only** `browserless-adapter.ts`; the barrel has exactly 2 browserless
+export lines (37–38). So the single seam is real and isolated — exactly as the seed predicted.
 
 ## Dependency graph (light investigation, 2026-09-06)
 `packages/venues/package.json` prod deps: `@herobids/domain`, `@herobids/market-data`, `ccxt`,
