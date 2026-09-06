@@ -11,6 +11,49 @@ equities, and others. Access is exposed over multiple mechanisms: HTTP API
 now; MCP and skills later. The domain business meaning of "trading" lives
 here, not in any consuming platform.
 
+## The end state — herobids becomes a consumer of Traderton
+
+**This is the single most important thing to understand, and it governs many
+decisions.** We are extracting trading out of herobids so that, in the end state,
+**herobids itself becomes a runtime consumer of Traderton.** The agent +
+messaging platform stays in herobids; everything trading (bots, decisions,
+execution, the 25 trading tools) moves to Traderton; and **herobids calls
+Traderton's trading tools over the consumer boundary**
+([005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md)). The
+agent reasons, supplies an authenticated `ownerId` + `actor`, and invokes
+Traderton (`submit_decision`, `create_bot`, `start_bot`, …). herobids is the
+**first consumer** — the "consuming platform" that 005 speaks of *is herobids*.
+
+The load-bearing implication for decisions:
+
+> When a trading capability is currently implemented in herobids in a
+> platform-coupled way, "it stays platform" is only half the story. Ask the
+> second question: **in the end state, will herobids rely on Traderton to
+> provide this capability?** If yes, then the *herobids implementation* may be
+> Intentional Divergence (a relocated concern, not copied), but the *Traderton
+> counterpart is a REQUIRED parity obligation* — herobids-on-Traderton must not
+> be weaker than herobids-today. Such a capability is **Deferred-but-required**
+> (see the Deferred distinction below and in
+> [004-decision-log.md](./004-decision-log.md)), not optional backlog.
+
+Concretely: a relocated concern (e.g. per-agent bot-limit enforcement, keyed on
+the platform `agents` table) is not copied — that specific implementation is
+platform. But the *capability* (limit-enforced bot creation via `create_bot` /
+`start_bot`) is trading, is owned by Traderton, and herobids will depend on it.
+So it is a required Traderton capability, deferred to the phase that builds
+Traderton's bot lifecycle (where the limit *key* — per-owner, per-venue-account,
+operator config — is decided), and it must land before cutover.
+
+### Two kinds of Deferred
+
+- **Deferred (optional):** a genuinely new/nice-to-have Traderton capability with
+  no herobids parity obligation (e.g. bot cloning). May never be built without
+  harm.
+- **Deferred (required for cutover):** a trading capability herobids relies on
+  Traderton to provide in the end state. Deferred only in *when* it is built, not
+  *whether*. Blocks cutover until met (cross-reference the affected tool/subsystem
+  in the ledger so the cutover gate cannot pass without it).
+
 ## How we are building it
 
 Traderton is extracted from an existing, working system

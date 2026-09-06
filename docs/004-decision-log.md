@@ -244,3 +244,42 @@ a method as a fused edge needing a source-fix request, **check its consumers acr
 of herobids (read-only, any phase)**: if only platform code calls it, delete the method
 in place (a deletion, not authoring). Escalate to a source-fix only when a trading
 consumer needs the reshaped behaviour.
+
+## Why "herobids becomes a consumer of Traderton" changes how we classify
+
+Discovered while extracting `packages/db` (Phase 2), on the BotRepository seam. The
+end-state (stated in [000-vision.md](./000-vision.md): herobids becomes a runtime
+consumer of Traderton) means the question "is this capability trading or platform?"
+is too coarse. The precise questions are:
+
+1. **Is the CAPABILITY trading?** (bots, decisions, execution, limits → yes.)
+2. **Is the current IMPLEMENTATION platform-coupled?** (e.g. per-agent limit locked on
+   the `agents` table → yes.)
+3. **In the end state, will herobids RELY on Traderton to provide this capability?**
+
+A capability can be "trading capability, platform-coupled implementation, and herobids
+will depend on Traderton for it." In that case:
+
+- The platform-coupled implementation → **Intentional Divergence** (relocated, not
+  copied). It is deleted from Traderton; it stays in herobids' agent layer for now and
+  is retired when herobids cuts over to calling Traderton.
+- The capability itself → **Deferred but REQUIRED for cutover** — Traderton must
+  provide it (via the relevant tool, e.g. `create_bot`/`start_bot`), because
+  herobids-on-Traderton must not be weaker than herobids-today. Record it against the
+  affected tool/subsystem in the ledger so the cutover gate cannot pass without it.
+
+Worked example (BotRepository, Phase 2): `tryCreateBotWithLimit` /
+`tryMarkBotRunningWithLimit` enforce a per-agent maxBots limit by row-locking `agents`.
+- Implementation (agent-keyed, agents-locked) → Intentional Divergence (platform); the
+  methods are DELETED from `@traderton/db` (their only callers are the platform
+  agent-broker + worker runtime, which stay in herobids).
+- Capability (limit-enforced bot creation/start) → Deferred-REQUIRED; owned by
+  Traderton's bot-lifecycle phase (worker/api), where the limit key (per-owner /
+  per-venue-account / operator config) is decided. herobids will call Traderton's
+  `create_bot`/`start_bot`, so this MUST land before cutover; herobids' per-agent
+  enforcement is the parity reference for "not weaker than."
+
+Corollary for the automation flow: a novice agent that lacks the "herobids becomes a
+consumer" model will mis-file such a capability as optional backlog and risk a silent
+parity regression at cutover. The model is now explicit in 000; the ledger must tag
+required-for-cutover Deferrals distinctly from optional ones.

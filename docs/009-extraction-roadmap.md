@@ -289,6 +289,46 @@ from Phase 1:
   is which *entries* it registers, resolved by not calling the agent-mode hook
   (mechanical-only), not by rewriting the registry.
 
+From Phase 2 (`db`):
+
+- **The plan doc is a guide, not ground truth — the code is.** 002 named "four identity
+  FKs"; the real FK graph had seven `users` FKs among copied tables + a platform-coupled
+  `market-assessment-requests` mislabelled by the "market-assessment-*" glob. Always
+  verify the plan's named seams against the actual dependency/FK graph.
+- **Soft-reference rule** (now in [004](./004-decision-log.md)): no Traderton-copied table
+  hard-FKs a platform table; every `users` FK → soft `ownerId`; platform FKs dropped or
+  softened per decisions 10–13; intra-trading FKs preserved. This is a sanctioned authored
+  seam, not a stop-gate — apply uniformly without re-litigating per table.
+- **Before escalating a fused-METHOD edge to a source-fix, check consumers across ALL of
+  herobids (read-only, any phase).** A kept class may carry platform-coupled methods; if
+  only platform code calls them, delete the methods in place (a deletion). Escalate only
+  when a trading consumer needs the reshaped behaviour.
+- **"Is it trading or platform?" is too coarse for a capability.** Ask (1) is the
+  capability trading, (2) is the implementation platform-coupled, (3) will herobids rely
+  on Traderton for it in the end state. See the "herobids becomes a consumer" section in
+  [000](./000-vision.md). The implementation may be Intentional Divergence while the
+  capability is a **required** Traderton obligation.
+- **Two kinds of Deferred (tag them distinctly in the ledger):** *Deferred-optional* (no
+  parity obligation, e.g. bot cloning) vs *Deferred-required-for-cutover* (herobids will
+  rely on Traderton for it; blocks cutover until met). Cross-reference required deferrals
+  to their tool/subsystem row so the cutover gate cannot pass without them.
+- **Cross-phase information dependency (structural).** A phase's seam decision can depend
+  on an unextracted later phase's design (Phase 2's BotRepository limit methods depend on
+  how Traderton's worker/api create bots, Phases 8–9). When a kept class has a
+  method whose fate depends on an unextracted consumer: keep it if it compiles
+  owner/venue-clean; delete it if its only callers are platform (staying in herobids);
+  and record any capability herobids will still need as a Deferred-required ledger entry
+  for the owning phase. Do not author speculative trading logic to resolve it early.
+- **Plans must state the guard, not an optimistic "expected clean."** Phase 2's plan said
+  a seam was "expected clean"; it wasn't. Editorializing an expectation primes an agent to
+  under-escalate. State the stop condition; let the code decide.
+- **Review step must sweep ROOT config** (vitest aliases, tsconfig refs, package.json) for
+  references to files/exports deleted in the phase. Phase 1 left a stale vitest alias to a
+  deleted file; Phase 2's review caught it.
+- **Operator config (DB names, connection strings, service names) is retargeted to
+  Traderton, not copied verbatim** (decision 1, own database). Not trading logic; not a
+  copy-never-author concern.
+
 ## Coordinator handoff
 
 To run this roadmap: start at the first `Queued` phase, execute the per-phase pattern,
