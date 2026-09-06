@@ -210,3 +210,37 @@ This is a deliberate future feature, not a parity gap and not an anomaly. It is
 recorded here + in the ledger as a planned Traderton-native capability built on
 `BotConfigSchema`, to be designed and built in a later phase — not authored during
 the Phase 1 domain-slice extraction.
+
+## The soft-reference rule (generalizing decisions 10–13)
+
+Decisions 10–13 name specific identity FKs to convert (`bots.userId`,
+`bots.connectionId`, `venue_accounts.userId`, `backtest-runs.userId`). Phase 2 (db)
+investigation found the actual FK graph has more copied trading tables that hard-FK a
+platform table than decisions 10–13 enumerated: `user_credentials.userId`,
+`replay_corpora.userId`, and `datasets.userId` also reference `users`. The named list
+was illustrative, not exhaustive.
+
+The governing principle behind those decisions (decision 10: Traderton does not own
+user identity — it accepts an authenticated `ownerId` + `actor` at the boundary) implies
+a general rule, adopted 2026-09-06:
+
+> **Soft-reference rule.** No Traderton-copied table hard-FKs a platform table. Every
+> `users` FK in a copied trading table is converted to a soft `ownerId` (plain text
+> column, no `.references()`, validated at the boundary). Every other platform FK
+> (`connections`, `agents`, `billing*`) is dropped or softened per decisions 11–13
+> (e.g. `bots.connectionId` → `venueAccountId`). Intra-trading FKs (a copied table
+> referencing another copied table — e.g. `bots.venueAccountId` → `venue_accounts`,
+> `venue_accounts.credentialId` → `user_credentials`, `market_assessment_artifacts` →
+> `market_assessment_runs`) are preserved.
+
+This is a sanctioned **authored seam**, not an anomaly and not a stop-gate: it is the
+schema-level expression of the ownerId boundary model. Apply it uniformly to every
+copied table without re-litigating per table.
+
+Corollary (from the same investigation): a KEPT repository/class may carry individual
+platform-coupled *methods* (e.g. `BotRepository.getResolvedVenueAccount` reads
+`connections`; `listRunningBotsForInactiveAgents` joins `agents`). Before treating such
+a method as a fused edge needing a source-fix request, **check its consumers across all
+of herobids (read-only, any phase)**: if only platform code calls it, delete the method
+in place (a deletion, not authoring). Escalate to a source-fix only when a trading
+consumer needs the reshaped behaviour.
