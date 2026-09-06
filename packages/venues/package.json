@@ -1,0 +1,27 @@
+{
+  "name": "@traderton/venues",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@traderton/domain": "workspace:*",
+    "@traderton/market-data": "workspace:*",
+    "ccxt": "4.5.54",
+    "viem": "^2.51.3",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "@types/node": "^25.9.1"
+  }
+}
