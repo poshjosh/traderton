@@ -31,7 +31,9 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 
 **Phase 2 (`db`): DONE** — see "Trading data model" row (Met) + the Phase 2 Intentional Divergence rows. `@traderton/db` compiles strict, lint clean, copied unit tests green (11 pass; 9 integration gated on DATABASE_URL), fresh initial migration generated, no platform imports/FKs.
 
-**Next action:** Phase 3 (`engine`), per the roadmap [009-extraction-roadmap.md](./009-extraction-roadmap.md). `engine` is a clean-package phase, domain-only (137 imports all via domain ports). Phases 3–10 governed by 009; execute each via its per-phase pattern, honoring the stop-gates.
+**Phase 3 (`engine`): DONE** — `@traderton/engine` extracted by copy-and-delete. Domain-only (sole prod dep `@traderton/domain`). 58 src files copied byte-identical (modulo `@herobids/*`→`@traderton/*` rename; verified by diff in review), incl. the **risk gate byte-identical**. One seam cut: the platform preset-review `wake-gate.ts` (+ test + 2 barrel exports) deleted as Intentional Divergence. Compiles strict, lint clean, forbidden-import sweep clean. **Engine slice: 437 copied tests green** (incl. risk-gate parity 83 unmodified). Risk-gate exact-rules table + engine-subsystems rows → Met; wake gate → Intentional divergence.
+
+**Next action:** Phase 4 (`market-data`), per the roadmap [009-extraction-roadmap.md](./009-extraction-roadmap.md). Clean-package phase, domain-only. Seed plan at [docs/features/004-market-data-plan.md](./features/004-market-data-plan.md). Phases 4–10 governed by 009; execute each via its per-phase pattern, honoring the stop-gates.
 
 **Phase 1 evidence:**
 
@@ -88,10 +90,10 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 | Capability | Status | Notes |
 |------------|--------|-------|
 | Domain slice (`@traderton/domain`: trading config schemas, values, ports, models/decision, result/enums/pagination, scanner-types, cost-profile, agent-risk-contract, market-assessment, strategy-parameters, presets) | Met | Phase 1 landed. Copied from herobids + platform slices deleted; strict-TS compile + lint clean; 230 copied parity tests pass. This is the domain layer only — the engine/venues/market-data/db/runtime that *consume* these types remain future phases (rows below stay Pending). |
-| Risk gate (all rules, hard invariants, user vs operator defaults) | Pending | `packages/engine/risk-gate.ts` + parity test. |
+| Risk gate (all rules, hard invariants, user vs operator defaults) | Met | **Phase 3 landed.** `packages/engine/src/risk-gate.ts` copied byte-identical; 83 parity tests pass unmodified (see the risk-gate exact-rules table below). |
 | Venue adapters (Hyperliquid, Bybit, Jupiter, 1inch) | Pending | order types, streams, mark sources, rate limits. |
-| Trading loop (scan→decision→plan→risk→execute→fill→reconcile) | Pending | |
-| Position / equity trackers | Pending | |
+| Trading loop (scan→decision→plan→risk→execute→fill→reconcile) | Met (engine orchestration) | **Phase 3 landed the engine's `runTradingCycle` orchestration** (`packages/engine/src/trading-cycle.ts`) + decision intake, planner, executors, reconcile — copied verbatim, tests green. The *scan* front-end (market-data/strategy scan-engine) and the worker-level loop wiring remain later phases (4, 6, 8). |
+| Position / equity trackers | Met | **Phase 3 landed** (`position-tracker.ts`, `swap-position-tracker.ts`, `equity-tracker.ts`, `daily-loss-tracker.ts`, `rehydrate-daily-loss.ts`) — copied verbatim, tests green. |
 | Price-watch lifecycle | Pending | |
 | Market data / discovery | Pending | Indicators and discovery inputs only, no LLM. Moves to Traderton. |
 | Backtesting / replay | Pending | |
@@ -106,15 +108,21 @@ reproduce its exact error code.
 
 | # | Rule | Error code | Status |
 |---|------|-----------|--------|
-| 1 | Max drawdown (absolute USD) | `risk.max_drawdown_exceeded` | Pending |
-| 1a | Max drawdown % (peak→current equity) | `risk.max_drawdown_pct_exceeded` | Pending |
-| 1b | Daily max loss % (rolling 24h) | `risk.daily_max_loss_exceeded` | Pending |
-| 1c | Stop-loss cooldown | `risk.stop_loss_cooldown` | Pending |
-| 2 | Max open positions (on open) | `risk.max_open_positions_exceeded` | Pending |
-| 3 | Max position size (resulting) | `risk.max_position_size_exceeded` | Pending |
-| 3b | Max position size % of equity | `risk.max_position_size_pct_exceeded` | Pending |
-| 4 | Max order notional | `risk.max_order_notional_exceeded` | Pending |
-| — | Missing mark for notional | `risk.no_mark_for_notional` | Pending |
+| 1 | Max drawdown (absolute USD) | `risk.max_drawdown_exceeded` | Met |
+| 1a | Max drawdown % (peak→current equity) | `risk.max_drawdown_pct_exceeded` | Met |
+| 1b | Daily max loss % (rolling 24h) | `risk.daily_max_loss_exceeded` | Met |
+| 1c | Stop-loss cooldown | `risk.stop_loss_cooldown` | Met |
+| 2 | Max open positions (on open) | `risk.max_open_positions_exceeded` | Met |
+| 3 | Max position size (resulting) | `risk.max_position_size_exceeded` | Met |
+| 3b | Max position size % of equity | `risk.max_position_size_pct_exceeded` | Met |
+| 4 | Max order notional | `risk.max_order_notional_exceeded` | Met |
+| — | Missing mark for notional | `risk.no_mark_for_notional` | Met |
+
+**Phase 3 evidence (risk gate):** `packages/engine/src/risk-gate.ts` `checkRisk()` copied
+byte-identical from herobids (modulo the `@herobids/*`→`@traderton/*` namespace rename; verified
+by diff in review). The copied parity tests pass **unmodified**: `risk-gate.test.ts` (29) +
+`risk-gate.parity.test.ts` (54) = 83 tests green. Risk-reducing (`close`/`reduce`) bypass of
+entry-side checks and every exact error code preserved verbatim.
 
 Note: `dailyMaxLossPct`/`maxDrawdownPct` are the agent-facing %-based controls;
 `maxDrawdown` (absolute USD) is preserved for non-agent flows. Notional checks
@@ -140,22 +148,22 @@ Source: `packages/venues`. Each carries order ops + streams + confirmation.
 
 | Subsystem | Status | Notes |
 |-----------|--------|-------|
-| Order manager + order-state machine | Pending | transitions, fills. |
-| Planner (`planDecision`) | Pending | decision → execution plan. |
-| Executors: Paper / Shadow / Live / SwapLive | Pending | incl. live timeout mgr + recovery. |
-| Position tracker + swap position tracker | Pending | |
-| Fill accounting | Pending | |
-| Equity tracker + daily-loss tracker + rehydrate | Pending | feeds risk gate. |
-| Stop-loss monitor + per-trade-level validator | Pending | |
-| Circuit breaker (per venue) | Pending | |
-| Fee simulator + paper slippage | Pending | |
-| Journal (event types) | Pending | decision/plan/order/fill/risk/live/credential events. |
-| Trading cycle (`runTradingCycle`) | Pending | the orchestration loop. |
-| Decision intake (`submitDecisionForExecution`) | Pending | + context-hash guard. |
-| Instrument executor (`executeDecision`) | Pending | |
-| Reconciliation (orderbook + swap loaders) | Pending | drift detection + thresholds. |
-| Wake gate | Pending | |
-| Mark source / mark selector | Pending | fill-first mark source. |
+| Order manager + order-state machine | Met | transitions, fills. Copied verbatim (`order-manager.ts`, `order-state.ts`, `order-lifecycle-manager.ts`, `order-update-decision.ts`); copied tests green. |
+| Planner (`planDecision`) | Met | decision → execution plan. `planner.ts` copied verbatim; tests green. |
+| Executors: Paper / Shadow / Live / SwapLive | Met | incl. live timeout mgr + recovery. `paper/shadow/live/swap-live-executor.ts`, `live-timeout-manager.ts`, `live-recovery.ts` copied verbatim; tests green. |
+| Position tracker + swap position tracker | Met | `position-tracker.ts`, `swap-position-tracker.ts` copied verbatim; tests green. |
+| Fill accounting | Met | `fill-accounting.ts` copied verbatim; test green. |
+| Equity tracker + daily-loss tracker + rehydrate | Met | feeds risk gate. `equity-tracker.ts`, `daily-loss-tracker.ts`, `rehydrate-daily-loss.ts` copied verbatim; tests green. |
+| Stop-loss monitor + per-trade-level validator | Met | `stop-loss-monitor.ts`, `per-trade-level-validator.ts` copied verbatim; tests green. |
+| Circuit breaker (per venue) | Met | `circuit-breaker.ts` copied verbatim; tests green. |
+| Fee simulator + paper slippage | Met | `fee-simulator.ts` copied verbatim; test green. |
+| Journal (event types) | Met | decision/plan/order/fill/risk/live/credential events. `journal.ts`, `journal-memory.ts` copied verbatim; `journal-live.test.ts` green. |
+| Trading cycle (`runTradingCycle`) | Met | the orchestration loop. `trading-cycle.ts` copied verbatim; tests green. |
+| Decision intake (`submitDecisionForExecution`) | Met | + context-hash guard. `decision-intake.ts`, `decision-context-hash.ts` copied verbatim; tests green. |
+| Instrument executor (`executeDecision`) | Met | `instrument-executor.ts` copied verbatim; test green. |
+| Reconciliation (orderbook + swap loaders) | Met | drift detection + thresholds. `reconciliation/` (reconcile, reconciler, venue-state-loaders, drift-category) copied verbatim; tests green. |
+| Wake gate | Intentional divergence | The engine's `wake-gate.ts` (`evaluateWakeGate`) is the **platform agent preset-review wake**, not the trading fill/mark-driven wake — needs the dropped `WakeGateConfig` (Phase 1 platform), operates on agent preset/style-tier concerns, and was orphaned at the herobids barrel (no consumer). Cut by deletion. See Intentional divergence table + [Phase 3 plan](./features/003-engine-plan.md). |
+| Mark source / mark selector | Met | fill-first mark source. `mark-source.ts` (`LastFillMarkSource`, `MarkSelector`, `createFillFirstMarkSource`), `market-data-feed.ts`, `stream-market-data-feed.ts` copied verbatim; tests green. This is the **trading** mark source, distinct from the platform wake gate above. |
 
 ### Intentional divergence
 
@@ -173,6 +181,7 @@ sees it explicitly; none is a silent drop.
 | `blueprint.ts` (whole file — marketplace/authoring: agent+bot revision payloads, publish/fork/browse, revisions, popularity) | Stays platform; **`blueprint.ts` not copied into Traderton** | Confirmed 2026-09-05: blueprint.ts is the marketplace/authoring layer, not the trading path — bots are created/validated/executed via `BotConfigSchema`, and the bot execution path is blueprint-free (see [003](./003-anomalies-and-deviations.md), [004](./004-decision-log.md)). The trading config Traderton owns (`RiskPosture`, `BotRisk`, `ExecutionDefaults`, `TokenSafety`, `BotConfigSchema`) lives in `config/schema.ts`, not blueprint.ts, so decision 14's "risk/execution/token-safety schema slice" is satisfied without copying blueprint.ts. 1:1 parity preserved by deleting the platform file, not repurposing it. |
 | market-assessment platform orchestration + platform billing | Left behind (Intentional divergence + Deferred) | Only the domain/analysis is trading-owned; platform-side billing stays outside Traderton, while Traderton-owned usage metering remains Deferred (decision 15). |
 | Traderton-native usage metering / payments / caps | Deferred (see Cross-cutting) | Cut for initial extraction. |
+| Engine `wake-gate.ts` / `evaluateWakeGate` (platform agent preset-review wake) | `wake-gate.ts` not copied into Traderton (deleted Phase 3) | The engine's wake gate decides **agent preset-review wakes** — it is keyed entirely on agent-reasoning concerns (`agentId`, `agentStyleTier`, `agentCurrentPreset`, preset rankings, per-agent daily wake limits) and imports `WakeGateConfig`, a type Phase 1 already classified platform and dropped from the domain slice. Consumer check across all of herobids (read-only): `evaluateWakeGate`/`WakeGateInput`/`WakeGateResult` are referenced only as re-exports in `packages/engine/src/index.ts` — no trading (or any) consumer imports them. This is the agent preset-review reasoning relocated agent-side by decisions 7–9, not a trading capability. Cut by deletion (+ its 2 barrel exports); the **trading** fill-first mark source (`mark-source.ts`) is separate and IS copied (Met). Not a herobids-on-Traderton dependency, so not Deferred-required. |
 
 ## Cutover Sign-Off
 

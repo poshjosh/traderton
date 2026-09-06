@@ -148,8 +148,8 @@ recommended default (foundational data model first, then the core engine).
 |---|-------|-------|-----------|--------|
 | 1 | `@traderton/domain` slice | subtraction | — | **Done** |
 | 2 | `db` — trading cluster | subtraction | domain | **Done** |
-| 3 | `engine` | clean-package (+internal seams) | domain | Queued (next) |
-| 4 | `market-data` | clean-package | domain | Queued |
+| 3 | `engine` | clean-package (+internal seams) | domain | **Done** |
+| 4 | `market-data` | clean-package | domain | Queued (next) |
 | 5 | `venues` | clean-package (+internal seams) | domain, market-data | Queued |
 | 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | Queued |
 | 7 | `backtesting` | clean-package | domain, engine | Queued |
@@ -328,6 +328,31 @@ From Phase 2 (`db`):
 - **Operator config (DB names, connection strings, service names) is retargeted to
   Traderton, not copied verbatim** (decision 1, own database). Not trading logic; not a
   copy-never-author concern.
+
+From Phase 3 (`engine`):
+
+- **A clean-package phase can still have exactly one seam — find it before copying.** Engine
+  was "domain-only" but one file (`wake-gate.ts`) imported a domain type Phase 1 had already
+  dropped (`WakeGateConfig`). The import sweep + a per-symbol check of every domain symbol the
+  package imports against the Traderton domain barrel found the single missing symbol up front,
+  so the seam was known before a line moved. Do this symbol-diff at investigate time.
+- **"Compiles as a verbatim copy" can be impossible when the seam file needs a Phase-1-dropped
+  type — and that's fine.** The verbatim copy's `tsc` fails only on the seam file; the full
+  vitest suite still runs green (type-only imports are stripped at runtime), which demonstrates
+  copy fidelity before the deletion. Don't force the pre-deletion build green by touching the
+  seam — delete the seam, then the build is clean. State this in the plan so the executor
+  doesn't mistake the expected seam-file type error for a stop-gate.
+- **Same name, different subsystem — don't conflate.** The engine has a platform "wake gate"
+  (agent preset-review) AND a trading "mark source". The ledger's "Wake gate" row is the
+  platform one (Intentional Divergence); the trading mark source is Met. A row label is not a
+  classification — read the code.
+- **A test-harness alias is a seam too.** Engine tests imported `@herobids/tests` (a root vitest
+  alias to `./tests`, not a package). Mirror the structure in Traderton (copy the fixture to the
+  root `tests/` dir + add a `@traderton/tests` alias) so copied tests run unmodified except the
+  namespace rename. The fixture is copied verbatim; the alias is scaffolding, not authoring.
+- **Verbatim comments stay verbatim.** Copied files may carry source-referencing comments (e.g.
+  `@herobids/db` in a JSDoc). Under copy-never-author these are left as-is (non-executable, no
+  coupling); "fixing" them would be an authored edit. Log as a LOW optional-cleanup, don't change.
 
 ## Coordinator handoff
 
