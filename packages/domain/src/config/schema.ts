@@ -2004,17 +2004,6 @@ export const RiskPlaybookSchema = z.object({
 
 export type RiskPlaybook = z.infer<typeof RiskPlaybookSchema>;
 
-export const LlmParamsSchema = z.object({
-  provider: z.string(),
-  model: z.string(),
-  promptVersion: z.string().optional(),
-  maxTokens: z.number().int().min(1).default(1024),
-  timeoutMs: z.number().min(1000).default(30_000),
-  instrumentId: z.string().optional(),
-  positionSize: z.string().default('1'),
-  baseUrl: z.string().url().optional(),
-});
-
 // --- Indicator sub-schemas (Phase 0 — shared by TechnicalConfig and MechanicalParams) ---
 
 /**
@@ -2141,25 +2130,17 @@ export const MechanicalParamsSchema = z.object({
   positionSizeMode: z.enum(['fixed', 'percent_equity']).default('fixed'),
 });
 
-export const HybridParamsSchema = z.object({
-  mechanical: MechanicalParamsSchema,
-  // Minimal LLM config — provider + dual-model selection (lightModel for signal, heavyModel for conviction)
-  provider: z.string().optional(),
-  lightModel: z.string().optional(),
-  heavyModel: z.string().optional(),
-  maxTokens: z.number().int().min(1).default(1024),
-  timeoutMs: z.number().min(1000).default(30_000),
-  baseUrl: z.string().url().optional(),
-}).refine(
-  (d) => (d.lightModel == null && d.heavyModel == null) || d.provider != null,
-  { message: 'provider is required when lightModel or heavyModel is set', path: ['provider'] },
-);
-
 // Ensure strategy param validation is active in production imports.
+// The domain registry is mechanical-first: it only needs the mechanical + empty
+// schemas to initialize.
+//
+// Traderton divergence (decisions 7–9, bots are mechanical-only): unlike herobids,
+// Traderton does NOT call registerAgentDecisionModes({ llm, hybrid }). The llm/hybrid
+// decision modes are the agent's reasoning modes and stay agent-side. As a result
+// this registry is mechanical-only: momentum:llm / momentum:hybrid resolve as
+// unsupported here (dca remains registered for all modes with empty params).
 initStrategyRegistry({
   mechanical: MechanicalParamsSchema,
-  hybrid: HybridParamsSchema,
-  llm: LlmParamsSchema,
   empty: z.object({}).strict(),
 });
 
@@ -2359,9 +2340,7 @@ export type BotConfig = z.infer<typeof BotConfigSchema>;
  */
 export type RiskConfig = z.infer<typeof RiskConfigSchema>;
 export type StrategyConfig = z.infer<typeof StrategySchema>;
-export type LlmParams = z.infer<typeof LlmParamsSchema>;
 export type MechanicalParams = z.infer<typeof MechanicalParamsSchema>;
-export type HybridParams = z.infer<typeof HybridParamsSchema>;
 
 // --- Agent Technical Config (automation-agents Phase 3) ---
 

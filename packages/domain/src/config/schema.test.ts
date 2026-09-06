@@ -6,7 +6,6 @@ import {
   MarkingConfigSchema,
   AgentRuntimePolicySchema,
   StrategySchema,
-  LlmParamsSchema,
   TechnicalConfigSchema,
   StrictTechnicalConfigSchema,
   AgentRuntimePolicyOverridesSchema,
@@ -601,27 +600,9 @@ describe('StrategySchema', () => {
   });
 });
 
-describe('LlmParamsSchema', () => {
-  it('rejects empty object (requires provider and model)', () => {
-    const result = LlmParamsSchema.safeParse({});
-    expect(result.success).toBe(false);
-  });
-
-  it('accepts minimal valid config', () => {
-    const result = LlmParamsSchema.safeParse({ provider: 'openai', model: 'gpt-4' });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.maxTokens).toBe(1024);
-      expect(result.data.timeoutMs).toBe(30_000);
-      expect(result.data.positionSize).toBe('1');
-    }
-  });
-
-  it('rejects non-integer maxTokens', () => {
-    const result = LlmParamsSchema.safeParse({ provider: 'openai', model: 'gpt-4', maxTokens: 1.5 });
-    expect(result.success).toBe(false);
-  });
-});
+// NOTE: `LlmParamsSchema` describe blocks were removed here — LlmParamsSchema is
+// agent-side and deleted from Traderton (mechanical-only, decisions 7–9). Removing
+// tests for a deliberately-deleted platform schema, not a parity regression.
 
 describe('StrategySchema (BotConfigSchema.strategy)', () => {
   it('accepts momentum with mechanical decisionMode and accepts type-specific params in params', () => {
@@ -685,28 +666,6 @@ describe('StrategySchema (BotConfigSchema.strategy)', () => {
         extraField: true,
       });
     }
-  });
-});
-
-describe('LlmParamsSchema', () => {
-  it('requires provider and model', () => {
-    const result = LlmParamsSchema.safeParse({});
-    expect(result.success).toBe(false);
-  });
-
-  it('applies defaults for optional numeric fields', () => {
-    const result = LlmParamsSchema.safeParse({ provider: 'openai', model: 'gpt-4' });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.maxTokens).toBe(1024);
-      expect(result.data.timeoutMs).toBe(30_000);
-      expect(result.data.positionSize).toBe('1');
-    }
-  });
-
-  it('rejects maxTokens as float', () => {
-    const result = LlmParamsSchema.safeParse({ provider: 'x', model: 'y', maxTokens: 10.5 });
-    expect(result.success).toBe(false);
   });
 });
 

@@ -8,6 +8,13 @@ import {
   listStrategyCombinations,
 } from './strategy-parameters.js';
 
+// Traderton divergence (decisions 7–9, bots are mechanical-only): Traderton does NOT
+// call registerAgentDecisionModes({ llm, hybrid }) — the llm/hybrid decision modes are
+// the agent's reasoning modes and stay agent-side. This test therefore covers only the
+// mechanical + dca registry, and asserts that llm/hybrid modes resolve as unsupported.
+// The source test's `momentum:hybrid uses HybridParamsSchema` assertion is intentionally
+// dropped (Intentional Divergence, see docs/001 + docs/004); the `unsupported here`
+// assertion below is its Traderton-side counterpart.
 describe('StrategyParameterRegistry', () => {
   // Initialize the registry with test schemas before tests
   const testMechanicalSchema = z.object({
@@ -15,16 +22,9 @@ describe('StrategyParameterRegistry', () => {
     takeProfitPct: z.number().min(0),
   });
 
-  const testHybridSchema = z.object({
-    mechanical: testMechanicalSchema,
-    provider: z.string().optional(),
-  });
-
   beforeAll(() => {
     initStrategyRegistry({
       mechanical: testMechanicalSchema,
-      hybrid: testHybridSchema,
-      llm: z.object({ provider: z.string() }),
       empty: z.object({}).strict(),
     });
   });
@@ -45,14 +45,12 @@ describe('StrategyParameterRegistry', () => {
     expect(result.stopLossPct).toBe(5);
   });
 
-  it('momentum:hybrid uses HybridParamsSchema', () => {
-    const entry = getStrategyParameters('momentum', 'hybrid');
-    expect(entry).toBeDefined();
-    const result = entry!.schema.parse({
-      mechanical: { stopLossPct: 5, takeProfitPct: 10 },
-      provider: 'openrouter',
-    });
-    expect(result.mechanical.stopLossPct).toBe(5);
+  it('momentum:hybrid and momentum:llm are unsupported (mechanical-only — Intentional Divergence)', () => {
+    // Traderton bots are mechanical-only; the agent decision modes are not registered.
+    expect(getStrategyParameters('momentum', 'hybrid')).toBeUndefined();
+    expect(getStrategyParameters('momentum', 'llm')).toBeUndefined();
+    expect(isStrategySupported('momentum', 'hybrid')).toBe(false);
+    expect(isStrategySupported('momentum', 'llm')).toBe(false);
   });
 
   it('isStrategySupported returns false for unknown types', () => {
