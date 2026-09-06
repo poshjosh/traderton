@@ -10,8 +10,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@traderton/domain/config/presets-loader': new URL('./packages/domain/src/config/presets-loader.ts', import.meta.url).pathname,
-      '@traderton/domain/config/load-providers': new URL('./packages/domain/src/config/load-providers.ts', import.meta.url).pathname,
       '@traderton/domain': new URL('./packages/domain/src/index.ts', import.meta.url).pathname,
+      '@traderton/db/schema': new URL('./packages/db/src/schema/index.ts', import.meta.url).pathname,
+      '@traderton/db': new URL('./packages/db/src/index.ts', import.meta.url).pathname,
     },
   },
 });

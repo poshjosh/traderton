@@ -1,0 +1,37 @@
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import * as schema from './schema/index.js';
+
+export type Database = ReturnType<typeof createDatabase>;
+
+interface ClosableDatabaseClient {
+  end(options?: { timeout?: number }): Promise<void>;
+}
+
+export function createDatabase(connectionString: string) {
+  const client = postgres(connectionString);
+  return drizzle(client, { schema });
+}
+
+export async function closeDatabase(db: Database): Promise<void> {
+  await (db as Database & { $client: ClosableDatabaseClient }).$client.end();
+}
+
+export * from './schema/index.js';
+export { PgJournal } from './journal-pg.js';
+export { FillRepository, PositionRepository, ExecutionPlanRepository, OrderRepository, BalanceSnapshotRepository, DecisionRepository, BotRepository } from './repositories.js';
+export type { InsertFill, UpsertPosition, InsertExecutionPlan, UpsertOrder, InsertBalanceSnapshot, InsertDecision } from './repositories.js';
+export { ReconciliationEventRepository } from './reconciliation-repository.js';
+export type { InsertReconciliationEvent, ReconciliationEventQuery } from './reconciliation-repository.js';
+export { BacktestingRepository } from './backtesting-repository.js';
+export type { InsertDecisionContext, InsertCorpus, InsertMarketEvent } from './backtesting-repository.js';
+export { LlmArtifactRepository } from './llm-artifact-repository.js';
+export type { InsertLlmArtifact, LlmArtifactSource } from './llm-artifact-repository.js';
+export { InstrumentRepository } from './instrument-repository.js';
+export type { InstrumentSearchParams, InstrumentRow, UpsertInstrumentRow } from './instrument-repository.js';
+export { TokenSafetyOverrideRepository } from './token-safety-override-repository.js';
+export type { IssueOverrideParams, TokenSafetyOverrideRow } from './token-safety-override-repository.js';
+export { DecisionFailureRepository } from './decision-failure-repository.js';
+export type { InsertDecisionFailure, DecisionFailureQuery } from './decision-failure-repository.js';
+export { DecisionApprovalRepository } from './decision-approval-repository.js';
+export type { InsertDecisionApproval, ResolutionInfo, DecisionApprovalRow } from './decision-approval-repository.js';
