@@ -149,8 +149,8 @@ recommended default (foundational data model first, then the core engine).
 | 1 | `@traderton/domain` slice | subtraction | — | **Done** |
 | 2 | `db` — trading cluster | subtraction | domain | **Done** |
 | 3 | `engine` | clean-package (+internal seams) | domain | **Done** |
-| 4 | `market-data` | clean-package | domain | Queued (next) |
-| 5 | `venues` | clean-package (+internal seams) | domain, market-data | Queued |
+| 4 | `market-data` | clean-package | domain | **Done** |
+| 5 | `venues` | clean-package (+internal seams) | domain, market-data | Queued (next) |
 | 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | Queued |
 | 7 | `backtesting` | clean-package | domain, engine | Queued |
 | 8 | `apps/worker` — trading loop | subtraction (large) | all packages | Queued |
@@ -353,6 +353,20 @@ From Phase 3 (`engine`):
 - **Verbatim comments stay verbatim.** Copied files may carry source-referencing comments (e.g.
   `@herobids/db` in a JSDoc). Under copy-never-author these are left as-is (non-executable, no
   coupling); "fixing" them would be an authored edit. Log as a LOW optional-cleanup, don't change.
+
+From Phase 4 (`market-data`):
+
+- **A genuinely zero-seam phase exists — don't manufacture one.** The full up-front per-symbol
+  domain-import diff (all 8 imported domain symbols present in the Traderton barrel) proved there
+  was nothing to cut; the verbatim copy WAS the deliverable. Doing the diff at investigate time let
+  the plan state "no seam" with evidence, so the implementer didn't go hunting for a deletion that
+  wasn't there. Fastest, safest phase so far (diff = namespace rename only, 41/44 files byte-identical).
+- **"No LLM" means no LLM-PACKAGE dependency, not "no string containing LLM".** market-data's
+  `economic-calendar.ts` ships a `createLlmCalendarParser` — but it's a self-contained
+  OpenAI-compatible `fetch` client taking injected config, with no `@herobids/llm` import and no
+  cost center (satisfies decision 9). It is copied verbatim and Met. Grep hits for `llm`/`ioredis`
+  need reading in context: local definitions and comments are not couplings. Record the
+  classification in the ledger so the "no LLM" invariant stays auditable.
 
 ## Coordinator handoff
 
