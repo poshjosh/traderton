@@ -6,6 +6,7 @@
     { "path": "packages/engine" },
     { "path": "packages/market-data" },
     { "path": "packages/strategy" },
-    { "path": "packages/venues" }
+    { "path": "packages/venues" },
+    { "path": "packages/backtesting" }
   ]
 }
