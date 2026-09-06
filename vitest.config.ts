@@ -14,6 +14,7 @@ export default defineConfig({
       '@traderton/db/schema': new URL('./packages/db/src/schema/index.ts', import.meta.url).pathname,
       '@traderton/db': new URL('./packages/db/src/index.ts', import.meta.url).pathname,
       '@traderton/engine': new URL('./packages/engine/src/index.ts', import.meta.url).pathname,
+      '@traderton/market-data': new URL('./packages/market-data/src/index.ts', import.meta.url).pathname,
       '@traderton/tests': new URL('./tests', import.meta.url).pathname,
     },
   },
