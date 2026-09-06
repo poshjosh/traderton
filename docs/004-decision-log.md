@@ -170,3 +170,43 @@ logged in [003-anomalies-and-deviations.md](./003-anomalies-and-deviations.md).
 Prefer a clean in-Traderton deletion when one exists; each source request costs a
 full herobids test/gate/release cycle, so reserve it for seams a deletion cannot
 cut without authoring non-trivial logic.
+
+## Why blueprint.ts stays platform, and bot cloning is a planned Traderton feature
+
+`blueprint.ts` in herobids is the **marketplace/authoring** layer — reusable
+agent/bot templates with revisions, publication status, fork lineage, likes,
+popularity/trending scores, and browse cursors. Investigation of its consumers
+(2026-09-05) confirmed it is not part of the trading path:
+
+- Bot creation, validation, and startup all validate against **`BotConfigSchema`**
+  (defined in `config/schema.ts`, trading-owned), not the blueprint payload —
+  `apps/api/routes/bots.ts`, `apps/worker/agents/agent-message-broker.ts`,
+  `apps/worker/index.ts`.
+- The bot **execution** path (`agent-trading-actor.ts`, `packages/engine`) has no
+  blueprint references at all.
+- `BotBlueprintRevisionPayload` is used only by the marketplace API. Critically,
+  `apps/api/services/blueprint-projection.ts` builds the bot blueprint payload
+  *from* a bot row (`projectBotToBlueprintPayload`) — the blueprint is a
+  marketplace **view over** the bot's `config`, and `BotConfigSchema` is the
+  source of truth.
+
+So blueprint.ts is platform and is **not copied** into Traderton (Intentional
+Divergence). We deliberately do **not** keep a hollowed `blueprint.ts` containing
+only `BotConfigSchema`: `BotConfigSchema` is defined in `config/schema.ts`, so a
+blueprint.ts holding only it would match no source file and break the
+file-for-file 1:1 diff discipline. 1:1 parity is preserved by deleting the
+platform file (the diff is simply "file removed"), not by repurposing it.
+
+**Planned Traderton-native capability — bot reproduction / cloning.** We want
+Traderton to let users reproduce/clone a bot from day one. This does not need the
+marketplace machinery. From the herobids clone/projection behaviour, reproducing
+a bot is: take the bot's stored `config` (the authored recipe validated by
+`BotConfigSchema`), strip instance-only fields (`venueAccountId`, `connectionId`,
+`status`), and create a new bot from that recipe bound to a (possibly different)
+venue account / owner. The config is the reproducible essence; the marketplace
+publish/fork/browse flow is separate and stays platform.
+
+This is a deliberate future feature, not a parity gap and not an anomaly. It is
+recorded here + in the ledger as a planned Traderton-native capability built on
+`BotConfigSchema`, to be designed and built in a later phase — not authored during
+the Phase 1 domain-slice extraction.
