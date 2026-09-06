@@ -8,7 +8,7 @@ exposed over API now and MCP/skills later.
 
 These files ARE the project's memory. A fresh session knows nothing of the
 reasoning that produced this plan unless it reads them. **Before doing anything
-— any investigation, any edit, any command — read all nine, in order:**
+— any investigation, any edit, any command — read all ten, in order:**
 
 1. **[docs/000-vision.md](./docs/000-vision.md)** — goal, method, and the
    settled decisions. Source of truth.
@@ -31,8 +31,11 @@ reasoning that produced this plan unless it reads them. **Before doing anything
    — the cutover proof: latency, equivalence, restart resilience, and rollback
    discipline.
 9. **[docs/008-phase-1-scaffold-and-domain-slice.md](./docs/008-phase-1-scaffold-and-domain-slice.md)**
-   — the queued Phase 1 task doc. It becomes executable only after Phase 0
-   sign-off.
+   — the Phase 1 task doc (domain slice). **Done** — see the parity ledger.
+10. **[docs/009-extraction-roadmap.md](./docs/009-extraction-roadmap.md)** — the outer
+    roadmap for the remaining phases (2–10): the fixed sequence, scope boundaries,
+    stop-gates, and the per-phase pattern for autonomous coordinated execution. Each
+    phase drafts its own detailed plan at its start; this roadmap governs the chain.
 
 Do not rely on prior chat context — assume you have none. If a decision isn't in
 these docs, it does not exist yet: decide it deliberately and record it here.

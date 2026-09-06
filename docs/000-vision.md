@@ -167,5 +167,8 @@ belong in this doc + the ledger, not the anomalies log.
    equivalence, restart-resilience, and cutover proof for moving traffic to
    Traderton.
 - [008-phase-1-scaffold-and-domain-slice.md](./008-phase-1-scaffold-and-domain-slice.md)
-   — the queued Phase 1 implementation slice; execute it only after Phase 0
-   sign-off.
+   — the Phase 1 implementation slice (domain). **Done.**
+- [009-extraction-roadmap.md](./009-extraction-roadmap.md) — the outer roadmap for
+   Phases 2–10 (db, engine, market-data, venues, mechanical strategy, backtesting,
+   worker, api, infra): sequence, scope, stop-gates, and the per-phase pattern for
+   autonomous coordinated execution.
