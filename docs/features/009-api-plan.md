@@ -137,3 +137,75 @@ is the phase where "defer authoring to the end" is cashed in, AFTER a holistic r
 Phase 9 CANNOT start its trading-loop wiring until **Phase 8 is green** (blocked on source-fix #2). The
 classification (step 1) and the 25-tool inventory mapping CAN be done in parallel while the source-fix is
 in flight (read-only). The authoring sub-steps wait for Phase 8's loop modules to land.
+
+
+---
+
+## 9a FINALIZED classification (investigated 2026-09-07, read-only)
+
+### Tool modules (`apps/worker/src/tools/`) — verified dependency map
+
+**Clean copies (import only `@herobids/domain` + `./registry` + `../logger`):**
+`account.ts`, `analytics.ts`, `bots.ts`, `find-instrument.ts`, `price.ts`, `risk-limits.ts`, `trading.ts`,
+`resolvers.ts`, `schema.ts`, `registry.ts`. → copy verbatim + rename.
+
+**Trading, but reclassified from the Phase-8 DELETE set (copy into the 9a tool surface):**
+- `intelligence-tools.ts` — imports ONLY `@herobids/market-data`; a clean copy. It implements
+  `executeDiscoverTokensTool` / `executeFundingRatesTool` / `executeMarketOverviewTool` (the tools
+  `discover_tokens` / `get_funding_rates` / `get_market_overview`). It was DELETE'd in Phase 8 because its
+  only *worker-loop* consumers were agent files — but it IS trading in the *tool* context. **Copy it in 9a.**
+  (Ledger note: this is a context-dependent classification, like the "herobids becomes a consumer" cases —
+  platform in one context, trading in another; here it's trading and copied.)
+
+**Trading, need a small verbatim seam-relocation (NOT authoring — the scan-types pattern):**
+- `market-data.ts` (tool) — imports the 3 functions above from `intelligence-tools` → resolves once
+  `intelligence-tools.ts` is copied. Otherwise clean (`@herobids/market-data` + `./registry` + `../logger`).
+- `watch.ts` (tool) — imports `summarizeActiveWatches` from the DELETE'd `runtime-composition.ts`. That
+  function + its helper closure (`MAX_ACTIVE_WATCHES_IN_CONTEXT`, `compareWatchEntries`, `watchSummaryKey`,
+  `mergeWatchEntry`, `formatWatchNote`, `formatWatchStatus`) operate only on `RuntimeActiveWatch` /
+  `RuntimeActiveWatchSummary` (both already in Traderton `scan-types.ts`). **Relocate this self-contained
+  watch-summary block verbatim** into a trading module the watch tool imports (e.g. extend `scan-types.ts`
+  or a `watch-summary.ts`) — a scan-types-style seam, not authoring. `watch.ts` also imports
+  `../position-coverage.js` + `../watch-types.js` (both landed in the worker loop) + `./price`.
+
+**DELETE (platform — Intentional Divergence):**
+- `tool-errors.ts` — imports `CapabilityDenial` from platform `agents/capability-policy.js`; its ONLY
+  consumers are platform tools (`browser`, `code`, `shell`, `skills`, `http-client`, `web-access`,
+  `assess-strategy-preset`, `change-strategy-preset`). No trading tool imports it. → DELETE.
+- All platform tools: `browser`, `code`, `email`, `filesystem`, `http-client`, `memory`, `messaging`,
+  `shell`, `skills`, `ssrf-guard`, `sandbox-utils`, `tasks`, `web-access`, `workspace`, `platform-docs`,
+  `platform-docs-data`, `assess-strategy-preset`, `change-strategy-preset`.
+- `index.ts` (tool barrel) — trim to trading exports only (drop the platform-tool export lines).
+
+### Package layout decision (9a)
+The trading tool modules import `../logger.js`, `../position-coverage.js`, `../watch-types.js`,
+`../intelligence-tools.js` — i.e. they live NEXT TO the worker loop. Simplest copyable layout: **place the
+trading tools under `@traderton/worker` (e.g. `packages/worker/src/tools/`)**, reusing the loop's `logger`,
+`position-coverage`, `watch-types` already landed there. (A dedicated `@traderton/tools` package would force
+re-homing those shared deps — more churn, no benefit for 9a.) Confirm at implement time; the guard is
+"whichever layout copies green without authoring."
+
+### API trading routes (`apps/api/src/routes/`) — 9a copy candidates
+`bots.ts` (db+domain), `accounts.ts` (db+domain+venues), `analytics.ts` (db), `backtests.ts`
+(backtesting+db+domain), `credentials.ts` (db+domain+engine), `reconciliation.ts` (db), `actor-health.ts`
+(db+domain), `exports.ts` (db), `datasets.ts` (db), `capabilities/trading.ts` (db+domain). Verified at
+seed time to import only extracted packages. **9a step-1 must read each in full** (the Phase-8 lesson:
+top-level scans lie) + check every symbol against the barrels + check for Fastify/auth-plugin/middleware
+coupling. Any route needing an authored dependency (config shape, auth middleware, the composition root) →
+**quarantine**, defer to 9b. The API app shell itself (Fastify server bootstrap, `index.ts`, auth/error
+middleware) is largely 9b/authoring — 9a copies the route HANDLERS that are clean, not the server wiring.
+
+### QUARANTINE rule (Phase-8 pattern, applies throughout 9a)
+Any module that cannot compile + go green WITHOUT an authored dependency → move verbatim into
+`_deferred-authoring/` (excluded from build + vitest) with a README; hand to 9b. Do NOT author in 9a.
+
+### 9a stop-gates (state the guard)
+- A tool/route needs a domain/db/engine/venues symbol not in the Traderton barrels → source-fix request.
+- A "clean" route turns out to need auth/session/config middleware not cuttable by deletion → quarantine (9b).
+- The 25-tool inventory: any tool with no clean copy path → record Deferred/Gap (never silent).
+- Any authoring temptation → STOP; quarantine instead (9a is copy-only).
+
+### 9a deliverable
+Every trading tool + clean API route handler that copies GREEN without authoring, landed + reviewed +
+committed; the full 25-tool inventory reconciled against 006 (each tool → module, Met/Deferred); the
+authoring residue cleanly quarantined for 9b. Then: pause for the holistic review before 9b.
