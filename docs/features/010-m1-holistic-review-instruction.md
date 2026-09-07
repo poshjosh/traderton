@@ -1,14 +1,22 @@
-# Instruction — M1 Pre-Authoring Holistic Review
+# Holistic Review of Extracted Trading Aspects of Herobids
 
-**Audience:** a future coordinator session (you), with NO memory of how the extraction was done.
-**When to run:** now — the trigger has fired. Every copyable surface has been extracted (Phases 1–8 +
-Phase 9a). The next roadmap work (Phase 9b) is the first **authoring**, which the human deliberately gated
-behind this review. **Do not start 9b until this review is done and the human has acted on it.**
-**Nature:** this is a READ-ONLY audit + a written report. You author no product code during the review.
+## Background
+
+Traderton is being extracted from **herobids**, an existing, working system where trading lives fused with an AI-agent + messaging platform. The goal is a standalone trading library that herobids itself will consume — trading (bots, decisions, execution, the 25 trading tools) moves out to Traderton, while the agent/messaging platform stays behind in herobids.
+
+The extraction follows one governing law: **copy, never author.** Every line of trading behaviour must arrive by being copied verbatim from herobids, never rewritten from a model of how it "should" work; the only things authored are deletions of platform code and the thin seams where platform couplings are cut. The reasoning is that rewriting-from-scratch silently loses hard-won detail and then writes tests that assert the loss, whereas copy-and-delete starts from real behaviour and makes any omission visible as a broken build or test. The bar is **feature parity with herobids**, tracked capability-by-capability in the parity ledger — nothing is silently dropped.
+
+The work has run as a sequence of phases, each extracting one slice by copy-and-delete: the domain model, the database layer, the engine (risk gate, planner, executors), market-data, venue adapters, the mechanical strategies, backtesting, and the worker's mechanical trading loop. Where a platform coupling could not be cut by a clean deletion without authoring non-trivial logic, we did not improvise — we requested a behaviour-preserving change in herobids (the owner made, tested, and released it), then copied the improved source. Three such source-fixes have been made and verified. Everything extracted so far compiles under strict TypeScript, passes its copied tests, and is free of platform/LLM imports.
+
+How the end state is sequenced then shaped what gets built when. herobids will consume Traderton in **two milestones over the same ports**: first **M1**, as an in-process library via dependency injection — herobids replaces its own trading by calling Traderton directly, still supplying the things Traderton deliberately doesn't own (the platform grant layer, the message-broker drive, the per-agent bot limit) by injecting them at the call site; then **M2**, where a REST/API boundary is added as a second adapter over those same ports. Because reaching M1 requires no authored boundary code, everything that must be *authored* rather than copied — a Traderton-owned config shape, the trading composition root that wires the loop together, the decision-intake/approval surface, the per-owner bot limit, and eventually the REST layer — was deliberately deferred into a single authoring pass (**Phase 9b**, referred to as "9b" throughout the rest of this document).
+
+We have now extracted everything copy-and-delete can reach: every package plus 18 of the 25 trading tools, all green. That leaves us standing precisely at the boundary between the copied foundation and the deferred authoring pass — and authoring is the one place the copy-never-author safety net is off, where a mistake is invisible in exactly the way this project exists to avoid. Crossing that boundary blind is the risk, and it is that risk that has **necessitated a review** before any authoring begins.
+
+**This review** is that gate. Its job is to confirm the pre-authoring library is a sound, faithful, and complete-as-possible foundation: that everything copied is a faithful copy, that everything copyable has been copied, that every source capability is honestly accounted for, that the pieces cohere as a usable in-process library at the M1 boundary, and that the remaining authoring work is precisely bounded and understood — so that when authoring does begin, its scope is known and the base beneath it is trustworthy.
 
 ---
 
-## 0. Orient yourself first (mandatory — you have no prior context)
+## 0. Orient yourself first (mandatory — read before auditing)
 
 Read, in order, the project memory (they explain the law, the model, and the state):
 1. `AGENTS.md` — the copy-never-author law; source-fix rule; where-to-start.
@@ -24,12 +32,11 @@ Read, in order, the project memory (they explain the law, the model, and the sta
 8. `docs/005-consumer-boundary-contract.md` — the M2 adapter contract (context for the deferred boundary).
 9. The per-phase plans in `docs/features/` (esp. `008-worker-*`, `009-api-plan.md`) for the deferral rationale.
 
-**What M1 is** (so you know what you are reviewing): the extracted `@traderton/*` packages that herobids will
-consume **in-process as a library** to replace its own trading — BEFORE any REST/API layer. The extraction
-proves itself here. What is deliberately NOT in M1 (all `Deferred (required for cutover)`, authored in 9b
-after this review): the Traderton-owned config shape, the trading composition root, the decision-intake/
-approval surface, per-`ownerId` maxBots, the 7 drive-path tools (`submit_decision`/`create_bot`/`start_bot`/
-`stop_bot`/`list_bots`/`get_bot_status`/`adjust_bot_config`), the API routes, and the M2 REST boundary.
+**What is deliberately NOT in M1** (the Background defines M1; this is the concrete deferred list you must
+hold in mind while auditing — all `Deferred (required for cutover)`, authored in 9b after this review): the
+Traderton-owned config shape, the trading composition root, the decision-intake/approval surface,
+per-`ownerId` maxBots, the 7 drive-path tools (`submit_decision`/`create_bot`/`start_bot`/`stop_bot`/
+`list_bots`/`get_bot_status`/`adjust_bot_config`), the API routes, and the M2 REST boundary.
 
 ## 1. Purpose of this review
 
