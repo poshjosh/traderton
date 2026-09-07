@@ -153,7 +153,7 @@ recommended default (foundational data model first, then the core engine).
 | 5 | `venues` | clean-package (+internal seams) | domain, market-data | **Done** |
 | 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | **Done** |
 | 7 | `backtesting` | clean-package | domain, engine | **Done** |
-| 8 | `apps/worker` — trading loop | subtraction (large) | all packages | Blocked (source-fix #2 — trading types re-home) |
+| 8 | `apps/worker` — trading loop | subtraction (large) | all packages | **Done (mechanical loop; config/composition/limit → Phase 9)** |
 | 9 | `apps/api` — trading control-plane + tools | subtraction (large) | db, domain, engine, venues, backtesting | Queued |
 | 10 | infra (Dockerfile, compose, CI, deploy) | clean-package (copy trading slice) | a working service | Queued |
 
@@ -435,6 +435,37 @@ From Phase 6 (`strategy`) & Phase 7 (`backtesting`):
   project references + root toolchain (decision 16). Mirroring the Traderton package shape (as the other
   landed packages do) is correct scaffolding, not a copy-never-author concern — same class as retargeting
   operator config.
+
+From Phase 8 (`apps/worker` — large subtraction; the hardest phase, hit 3 stop-gates):
+
+- **Top-level import scans LIE for subtraction phases — read files in FULL + validate every imported
+  symbol against the actual barrels.** The coordinator's edge-analysis script checked only top-level
+  relative imports and mis-classified a 5-file agent intake/approval cluster as KEEP; reading them in full
+  (and checking `agentConnections`/`AgentRepository`/… against the barrels) showed they were platform,
+  needing symbols that don't exist in Traderton. THEN a second, deeper miss: the "39-file mechanical set"
+  premise was verified only at the worker-relative-edge level, not against the DOMAIN barrel — 8 domain
+  symbols the loop imports had been dropped in Phase 1. **Lesson: for a subtraction phase, the KEEP set is
+  not proven until every KEEP file's every imported symbol is confirmed exported by the Traderton barrels.**
+- **Extraction can reveal an EARLIER phase under-delivered.** Phase 1 deleted `agent-protocol.ts` wholesale
+  as platform, but it held trading-owned types (`WatchPurpose`, `TradingSessionName`) + trading-adjacent
+  payloads the loop needs. Correcting it needed a herobids source-fix (#2) to relocate them into a
+  trading-owned domain module, then a Traderton domain re-sync. A "Done" phase is not immune to a later
+  phase exposing a gap in it.
+- **A large fused app may have NO faithful composition-root subset.** `apps/worker/index.ts` constructs the
+  trading actors *inside* the deleted startup/session/intake wiring — there is no trading-only subset to
+  carve out without authoring. Resolution: deliver the loop MODULES + copied parity tests green as the M1
+  library surface; the composition root is authored later (M1-integration/Phase 9). Don't force a subset
+  that doesn't exist.
+- **The `_deferred-config/` quarantine pattern:** when copied files (and their tests) can't compile because
+  they need a deferred/authored surface (here: the Traderton-owned config shape) or a deleted/deferred
+  subject (a test-only cross-reference), MOVE them verbatim into a quarantine dir excluded from tsconfig +
+  vitest, with a README explaining why + when they return. This keeps the copy on disk (not lost, not
+  edited), keeps the built package green, and keeps copy-never-author intact (no in-file pruning). Prefer
+  quarantining a whole test file over editing it to drop a deleted-subject block.
+- **Distinguish the THREE deferral fates cleanly:** (a) DELETE = platform, gone (Intentional Divergence);
+  (b) `Deferred (required for cutover)` = authored later, blocks cutover (config shape, composition root,
+  per-owner maxBots, intake/approval surface); (c) quarantined verbatim copy = waiting on (a-relocation) or
+  (b-authoring). Tag each in the ledger; never let a deferral read as a silent drop.
 
 ## Coordinator handoff
 
