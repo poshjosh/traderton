@@ -10,6 +10,8 @@ export * from './trading/execution-capability.js';
 export * from './trading/venue-capability.js';
 export * from './trading/actor-health.js';
 export * from './trading/trading-protocol.js';
+export * from './trading/tool-contract.js';
+export * from './tool-schemas.js';
 export * from './cost-profile.js';
 export * from './scanner-types.js';
 export * from './market-assessment.js';
