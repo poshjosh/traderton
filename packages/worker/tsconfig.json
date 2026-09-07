@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/_deferred-config/**"],
+  "references": [
+    { "path": "../domain" },
+    { "path": "../db" },
+    { "path": "../engine" },
+    { "path": "../market-data" },
+    { "path": "../strategy" },
+    { "path": "../venues" }
+  ]
+}

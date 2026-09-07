@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'node',
-    exclude: ['**/node_modules/**', '**/dist/**', '.ignore/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', '.ignore/**', '**/_deferred-config/**'],
     testTimeout: 15000,
   },
   resolve: {
@@ -18,6 +18,7 @@ export default defineConfig({
       '@traderton/strategy': new URL('./packages/strategy/src/index.ts', import.meta.url).pathname,
       '@traderton/venues': new URL('./packages/venues/src/index.ts', import.meta.url).pathname,
       '@traderton/backtesting': new URL('./packages/backtesting/src/index.ts', import.meta.url).pathname,
+      '@traderton/worker': new URL('./packages/worker/src/index.ts', import.meta.url).pathname,
       '@traderton/tests': new URL('./tests', import.meta.url).pathname,
     },
   },
