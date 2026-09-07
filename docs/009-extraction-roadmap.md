@@ -254,6 +254,16 @@ recommended default (foundational data model first, then the core engine).
   is partly authored infrastructure, not copied trading logic — clarify what is copied
   vs. what the boundary contract legitimately requires as new seam code; ownership of
   shared route middleware.
+- **SEEDED + SCOPE GREW (2026-09-06):** seed plan at [docs/features/009-api-plan.md](./features/009-api-plan.md).
+  Phase 9's scope now spans THREE surfaces: (1) `apps/api` trading routes; (2) **the 25 trading TOOL
+  modules — which live in `apps/worker/src/tools/`, deferred here from Phase 8** (decision 4); (3) the
+  **Phase-8 deferred authoring**, all `Deferred (required for cutover)`: the decision-intake/approval/session
+  surface (venue-account-direct resolver + `submit_decision` intake + human approvals), the Traderton-owned
+  **config shape** (replacing `config.ts`/`AppConfig`, decision 2), the **trading composition root**
+  (replacing the un-subsettable `index.ts`), and the per-`ownerId` **maxBots** enforcement. This is the
+  sanctioned **authoring** phase (M1 in-process composition first; the 005 REST boundary is the M2 adapter,
+  sequenced explicitly) — done AFTER a holistic review. **Blocked until Phase 8 is green** (source-fix #2);
+  the read-only classification + 25-tool inventory mapping can proceed in parallel.
 
 ### Phase 10 — infra
 - **Copy:** the trading-relevant slice of herobids' proven infra (Dockerfile, compose,
