@@ -9,6 +9,7 @@ export * from './trading/mode-rank.js';
 export * from './trading/execution-capability.js';
 export * from './trading/venue-capability.js';
 export * from './trading/actor-health.js';
+export * from './trading/trading-protocol.js';
 export * from './cost-profile.js';
 export * from './scanner-types.js';
 export * from './market-assessment.js';
