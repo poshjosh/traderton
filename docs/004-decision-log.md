@@ -343,3 +343,42 @@ deferred `maxBots` decision) from quietly becoming a backdoor around copy-never-
   (platform-keyed), not authored at M1; herobids enforces its existing key in the interim; the
   per-`ownerId` enforcement is authored as M2 work. Cutover is gated on it, so Traderton never
   ships weaker than herobids-today.
+
+## Why Phase 10 (infra) is a shared versioned module, not copy-and-delete
+
+Settled 2026-09-07. Full decision + verified source facts: [docs/features/012-shared-infra-module-decision.md](./features/012-shared-infra-module-decision.md).
+
+Every other phase moves trading code by copy-and-delete because herobids *stops* owning that code — trading
+relocates to Traderton and herobids becomes a consumer. **Infra is the exception: herobids does not stop
+owning infra.** Both herobids and Traderton must keep running on Hetzner/Nomad/cloud-init/deploy-scripts. A
+naive "copy the trading slice of the infra and delete the rest" (what the original Phase 10 said) would create
+**two divergent copies of the same infrastructure to maintain forever** — the opposite of the maintenance win
+the extraction exists to produce.
+
+So Phase 10 changes shape: herobids' proven infra is extracted into a **standalone, versioned Terraform
+module library** — two composable modules, `app-host/hcloud` (control-plane substrate: VM, firewall, network,
+TLS, cloud-init, deploy scripts) and `nomad-autoscaler/hcloud` (the agent-node pool + autoscaler) — consumed
+via pinned git-ref `source`. Traderton consumes `app-host/hcloud` with `enable_nomad = false` (host only,
+autoscaling-ready but not enabled, since Traderton is mechanical and runs no per-agent containers); herobids
+consumes both. Each pins its own immutable version tag.
+
+Load-bearing consequences for how agents work this phase:
+
+- **The module-library extraction is authoring/refactoring, not copy-and-delete, and it is herobids-owned.**
+  Parameterizing `app_name` (the ~232 `HEROBIDS_ENV` refs funnel through one `_ssh_opts.sh` seam), splitting
+  the two modules, adding the `enable_nomad` flag and the single `user_data_override` seam — all of that is
+  done *in herobids* by its owner (build/test/release), the same authority model as source-fixes. **A
+  Traderton agent does not refactor herobids infra**; it consumes the released module and authors only
+  Traderton's own operator config (tfvars/compose/env — always exempt from copy-never-author per decision 1).
+- **It is timed to the M1 testing window, deliberately.** herobids is the only system with real agent load to
+  exercise module B's autoscaler under production traffic, so it is module B's live test harness; Traderton
+  validates module A (host boots, clones, composes-up, serves TLS). Building the reusable module properly in
+  this window beats throwing away a temporary Traderton-only infra.
+- **The same "is it generic or does it encode the first consumer's semantics?" boundary test we use for
+  trading-vs-platform applies here** (doc 012 decision 9): the Nomad node-health publisher ships herobids'
+  `ServerHealthSnapshot` schema, so it stays herobids-side (re-attached via the `user_data_override` seam),
+  exactly as the browser-pool job and market-intelligence loops were ruled platform. And doc 012 decision 5's
+  "a parameter with exactly one real value is a constant with extra steps" is the same anti-speculative-
+  generality restraint used throughout — do not abstract beyond a memory-driven single-pool autoscaler.
+
+This does not affect the M1 holistic review or Phase 9b; it is Phase 10 shape, recorded now so it is not lost.

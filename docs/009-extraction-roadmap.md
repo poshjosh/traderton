@@ -281,15 +281,26 @@ recommended default (foundational data model first, then the core engine).
   (domain → worker loop → tool/route surface), which is the boundary to inspect before authoring begins.
 
 ### Phase 10 — infra
-- **Copy:** the trading-relevant slice of herobids' proven infra (Dockerfile, compose,
-  CI) and delete the rest; Traderton gets its own Postgres, Redis, host, pipeline
-  (own-database / own-TLD decisions). Comes last — it wraps a working service ([004](./004-decision-log.md)).
+- **⚠ SHAPE CHANGE (2026-09-07): Phase 10 is NOT copy-and-delete.** Infra is the one layer where
+  copy-and-delete does not apply — herobids does not *stop* owning infra (both systems keep running), so a
+  naive copy would fork two divergent infra copies to maintain forever. Per the settled decision
+  ([docs/features/012-shared-infra-module-decision.md](./features/012-shared-infra-module-decision.md) +
+  [004](./004-decision-log.md) "Why Phase 10 (infra) is a shared versioned module, not copy-and-delete"),
+  herobids infra is extracted into a **standalone, versioned Terraform module library** (two composable
+  modules — `app-host/hcloud` + `nomad-autoscaler/hcloud`) that both platforms consume via pinned git-ref
+  `source`. **That module extraction is herobids-owned, authored/refactoring cross-repo work** (parameterize
+  `app_name`, split modules, `enable_nomad` flag, `user_data_override` seam) — the owner builds/tests/releases
+  it, the same authority model as source-fixes; Traderton does not refactor herobids infra. It is scheduled in
+  the **M1 testing window** (herobids is module B's live test harness; Traderton validates module A). This is
+  a shape-level change the roadmap predates.
+- **Traderton's Phase 10 becomes a thin CONSUMER:** `module "host" { source = "…//modules/app-host/hcloud?ref=vX.Y.Z"; app_name = "traderton"; enable_nomad = false; … }` — autoscaling-ready but not enabled. Traderton authors only its own operator config (tfvars / compose / env — always exempt from copy-never-author, decision 1), plus its own Postgres/Redis/host/pipeline (own-database / own-TLD). It wraps a working service ([004](./004-decision-log.md)).
 - **Deliver:** the service builds, boots, and passes the operational-readiness checks
   ([007-operational-readiness.md](./007-operational-readiness.md)): health, latency,
   equivalence/shadow validation, restart resilience, rollback.
 - **Likely stop-gates:** production cutover is an explicit operator decision
   ([007](./007-operational-readiness.md)); equivalence validation against herobids is
-  mandatory before removing the legacy path.
+  mandatory before removing the legacy path. The module-library extraction ownership (herobids-side) and any
+  parameterization scope question are decided per doc 012 (not re-litigated here).
 
 ## Milestone framing (M1 vs M2)
 
@@ -301,6 +312,11 @@ boundary is authored in M1.** The M2 API adapter ([005](./005-consumer-boundary-
 the same ports — and the per-`ownerId` `maxBots` enforcement — are **authored after M1 lands and a
 holistic review**, not during Phases 8–10. Each phase below still runs the per-phase pattern; the
 authored M2 work is deliberately out of the copy-and-delete scope.
+
+**Phase 10 (infra) exception:** infra does not follow copy-and-delete at all (herobids keeps its infra;
+nothing is deleted). It is a shared versioned Terraform module library, extracted herobids-side and consumed
+by Traderton at a pinned version — see the Phase 10 entry + [doc 012](./features/012-shared-infra-module-decision.md).
+Do not audit Phase 10 as if trading infra "should have been copied."
 
 ## Completion of the whole extraction
 
