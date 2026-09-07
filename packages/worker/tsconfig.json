@@ -5,7 +5,7 @@
     "rootDir": "src"
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/_deferred-config/**"],
+  "exclude": ["src/**/*.test.ts", "src/_deferred-config/**", "src/_deferred-authoring/**"],
   "references": [
     { "path": "../domain" },
     { "path": "../db" },

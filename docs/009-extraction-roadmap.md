@@ -154,7 +154,7 @@ recommended default (foundational data model first, then the core engine).
 | 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | **Done** |
 | 7 | `backtesting` | clean-package | domain, engine | **Done** |
 | 8 | `apps/worker` — trading loop | subtraction (large) | all packages | **Done (mechanical loop; config/composition/limit → Phase 9)** |
-| 9a | `apps/api`/tools — COPY surface (tools + clean trading routes + 25-tool inventory) | subtraction | db, domain, engine, venues, backtesting, worker | Blocked (stop-gate: tool contract `ToolContext` platform-fused/absent — see 003) |
+| 9a | `apps/api`/tools — COPY surface (tools + clean trading routes + 25-tool inventory) | subtraction | db, domain, engine, venues, backtesting, worker | **Done** (18/25 tools copied; 7 tools + all API routes → 9b; via source-fix #3/#3b) |
 | 9b | `apps/api` — AUTHORING (config shape, composition root, intake/approval, per-owner maxBots, M2 REST boundary) | authoring | 9a + holistic review | Queued (gated on holistic review) |
 | 10 | infra (Dockerfile, compose, CI, deploy) | clean-package (copy trading slice) | a working service | Queued |
 

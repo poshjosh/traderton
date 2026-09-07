@@ -43,6 +43,8 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 
 **Phase 6 (`strategy` mechanical slice): DONE** — `@traderton/strategy` extracted by copy-and-delete (clean-package *split*). Depends on domain + market-data (+`zod`); **NO `@herobids/llm`/`@traderton/llm` dep** (decision 9 — no LLM cost center). 7 files copied verbatim (`mechanical-strategy`, `dca-strategy`, `scan-engine` + their tests, and `index.ts`; diff = `@herobids/*`→`@traderton/*` rename only, verified in review). The llm/hybrid slice (`llm.ts`, `llm-provider.ts`, `hybrid-strategy.ts` + tests) was **never copied** — Intentional Divergence (decisions 7–9; extends the `LlmStrategy`/`HybridStrategy` divergence row). `index.ts` barrel-trimmed by exactly the 3 `./llm` + 1 `./hybrid-strategy` export lines. Both stop-gates cleared: mechanical slice is llm-free (no `./llm`/`./hybrid` imports) and every needed domain/market-data symbol is in the Traderton barrels — `HybridPricingIdentity` kept (it is the domain pricing-identity used by `scan-engine`, **not** `HybridStrategy`). Compiles strict, lint clean, forbidden-import sweep clean (no `@herobids/*`, no `@traderton/llm`/`@herobids/llm`, no platform/db/engine/venues). **strategy slice: 56 copied tests green** (dca 14, mechanical 18, scan-engine 24). "Mechanical strategies" row → Met. See [Phase 6 plan](./features/006-strategy-plan.md).
 
+**Phase 9a (`apps/api`/tools — COPY surface): DONE.** After herobids source-fixes #2 (trading-protocol types) + #3 (tool contract split) + #3b (`executionConfig` port), `@traderton/domain` re-synced (verbatim `trading/tool-contract.ts` + `tool-schemas.ts`, barrel-wired; 3 platform schema-registry entries trimmed as Intentional Divergence). **18 of the 25 trading tools copied verbatim** into `packages/worker/src/tools/` (`account`, `analytics`, `find-instrument`, `market-data`, `price`, `risk-limits`, `watch`, `resolvers`, `schema` — byte-identical modulo namespace; narrowed to `TradingToolContext`) + `intelligence-tools.ts` + a `watch-summary.ts` seam (verbatim relocation of `summarizeActiveWatches` closure from the DELETE'd `runtime-composition.ts`). **7 tools deferred to 9b** (`submit_decision`, `create_bot`, `start_bot`, `stop_bot`, `list_bots`, `get_bot_status`, `adjust_bot_config` — `tools/{trading,bots}.ts`, drive-path `AGENT_MESSAGE_TYPES`). The 10 clean-looking API routes were all **quarantined** (`_deferred-authoring/`) — each needs authored deps (auth `request.userId`, `userId`→`ownerId` schema, config shape, platform tables), so they are 9b. Build + lint clean; **whole repo 2131 tests pass / 15 skipped / 0 failures.** Reviewed (copy-not-authored verified; forbidden-import sweep clean). See tool inventory table + [009-api-plan](./features/009-api-plan.md).
+
 **Next action:** Phase 9 (`apps/api` — trading control-plane + 25 tools + the Phase-8 deferred authoring), per the roadmap [009-extraction-roadmap.md](./009-extraction-roadmap.md). LARGE subtraction + the sanctioned **authoring** pass (M1 composition first, M2 REST adapter sequenced) — done after a holistic review. Its scope spans three surfaces (api trading routes; the 25 tool modules that live in `apps/worker/src/tools/`; the Phase-8 `Deferred (required for cutover)` items: config shape, composition root, intake/approval surface, per-`ownerId` maxBots). Seed plan at [docs/features/009-api-plan.md](./features/009-api-plan.md). Phases 9–10 governed by 009; honor the stop-gates.
 
 **Phase 1 evidence:**
@@ -68,31 +70,31 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `submit_decision` | Pending (engine core Met; intake surface Phase 9) | Decision execution — highest-stakes parity surface. The engine execution core (`submitDecisionForExecution`, planner, risk gate, executors) landed Phase 3 (Met). The **intake/resolution surface** (actor registry, venue-account-direct binding resolver, human approvals) is **`Deferred (required for cutover)`** — the reclassified worker cluster (Phase 8), authored at Phase 9. The tool endpoint itself is Phase 9. |
-| `create_bot` | Pending | **`Deferred (required for cutover)` sub-capability:** limit-enforced bot creation. herobids' per-agent maxBots (agents-row-locked) is Intentional Divergence (platform, not copied — deleted from `@traderton/db` BotRepository, Phase 2). Traderton must provide limit-enforced creation via this tool before cutover (herobids will rely on it). **Limit key DECIDED (2026-09-06): per-`ownerId`**, authored at Phase 9 (Phase 8 confirmed the herobids limit is `agents.maxBots`/`plan.entitlements`-keyed — platform — and copied the mechanical create path with no native limit). See [004](./004-decision-log.md) + [003](./003-anomalies-and-deviations.md) Phase-8 rows. |
+| `submit_decision` | Pending (engine core Met; tool + intake surface 9b) | Decision execution — highest-stakes parity surface. Engine execution core (`submitDecisionForExecution`, planner, risk gate, executors) landed Phase 3 (Met). The tool module `tools/trading.ts` is **deferred to 9b** (uses `AGENT_MESSAGE_TYPES` drive path). The **intake/resolution surface** (actor registry, venue-account-direct binding resolver, human approvals) is **`Deferred (required for cutover)`** — reclassified worker cluster (Phase 8), authored at 9b. |
+| `create_bot` | Pending (9b — drive path + limit) | In `tools/bots.ts` — **deferred to 9b** (uses `AGENT_MESSAGE_TYPES` drive path). **`Deferred (required for cutover)` sub-capability:** limit-enforced bot creation. herobids' per-agent maxBots (agents-row-locked) is Intentional Divergence (platform, not copied — deleted from `@traderton/db` BotRepository, Phase 2). Traderton must provide limit-enforced creation via this tool before cutover (herobids will rely on it). **Limit key DECIDED (2026-09-06): per-`ownerId`**, authored at Phase 9 (Phase 8 confirmed the herobids limit is `agents.maxBots`/`plan.entitlements`-keyed — platform — and copied the mechanical create path with no native limit). See [004](./004-decision-log.md) + [003](./003-anomalies-and-deviations.md) Phase-8 rows. |
 | `start_bot` | Pending | **`Deferred (required for cutover)` sub-capability:** limit-enforced bot start (was `tryMarkBotRunningWithLimit`, agents-row-locked → Intentional Divergence, deleted Phase 2). Same obligation as `create_bot`. |
-| `stop_bot` | Pending | |
-| `list_bots` | Pending | |
-| `resolve_bot` | Pending | |
-| `get_bot_status` | Pending | |
-| `adjust_bot_config` | Pending | |
-| `adjust_risk_limits` | Pending | Risk policy — parity must be exact. |
-| `get_risk_limits` | Pending | |
-| `get_account_summary` | Pending | |
-| `list_positions` | Pending | |
-| `get_price` | Pending | |
-| `get_funding_rates` | Pending | |
-| `get_market_overview` | Pending | |
-| `get_analytics` | Pending | |
-| `check_regime` | Pending | |
-| `discover_tokens` | Pending | |
-| `search_tokens` | Pending | |
-| `find_instrument` | Pending | |
-| `watch_token` | Pending | |
-| `check_watches` | Pending | |
-| `list_watches` | Pending | |
-| `remove_watch` | Pending | |
-| `resolve_watch` | Pending | |
+| `stop_bot` | Pending (9b — drive path) | In `tools/bots.ts` — **deferred to 9b** (uses `AGENT_MESSAGE_TYPES`, the message-broker drive path; `AGENT_MESSAGE_TYPES` is a mixed agent-messaging enum not brought into Traderton). Module quarantine-deferred with `bots.ts`. |
+| `list_bots` | Pending (9b — drive path) | In `tools/bots.ts` — deferred to 9b (see `stop_bot`). |
+| `resolve_bot` | Met (module copied, 9a) | **9a: `tools/resolvers.ts` copied verbatim** (byte-identical modulo namespace), narrowed to `TradingToolContext`; tests green. Boundary/composition wiring is 9b. (Lives in `resolvers.ts`, not `bots.ts`.) |
+| `get_bot_status` | Pending (9b — drive path) | In `tools/bots.ts` — deferred to 9b (see `stop_bot`). |
+| `adjust_bot_config` | Pending (9b — drive path) | In `tools/bots.ts` — deferred to 9b (see `stop_bot`). |
+| `adjust_risk_limits` | Met (module copied, 9a) | **9a: `tools/risk-limits.ts` copied verbatim**, narrowed to `TradingToolContext`; tests green. Risk policy parity preserved by the verbatim copy. Wiring 9b. |
+| `get_risk_limits` | Met (module copied, 9a) | **9a: `tools/risk-limits.ts`** copied verbatim; tests green. Wiring 9b. |
+| `get_account_summary` | Met (module copied, 9a) | **9a: `tools/account.ts` copied verbatim** (narrowed to `TradingToolContext` via source-fix #3b's `executionConfig` port); tests green. Wiring 9b. |
+| `list_positions` | Met (module copied, 9a) | **9a: `tools/analytics.ts`** copied verbatim; tests green. Wiring 9b. |
+| `get_price` | Met (module copied, 9a) | **9a: `tools/price.ts`** copied verbatim; tests green. Wiring 9b. |
+| `get_funding_rates` | Met (module copied, 9a) | **9a: `tools/market-data.ts` + `intelligence-tools.ts`** copied verbatim; tests green. Wiring 9b. |
+| `get_market_overview` | Met (module copied, 9a) | **9a: `tools/market-data.ts` + `intelligence-tools.ts`** copied verbatim; tests green. Wiring 9b. |
+| `get_analytics` | Met (module copied, 9a) | **9a: `tools/analytics.ts`** copied verbatim; tests green. Wiring 9b. |
+| `check_regime` | Met (module copied, 9a) | **9a: `tools/market-data.ts`** copied verbatim; tests green. Wiring 9b. |
+| `discover_tokens` | Met (module copied, 9a) | **9a: `tools/market-data.ts` + `intelligence-tools.ts`** copied verbatim; tests green. Wiring 9b. |
+| `search_tokens` | Met (module copied, 9a) | **9a: `tools/market-data.ts`** copied verbatim; tests green. Wiring 9b. |
+| `find_instrument` | Met (module copied, 9a) | **9a: `tools/find-instrument.ts`** copied verbatim; tests green. Wiring 9b. |
+| `watch_token` | Met (module copied, 9a) | **9a: `tools/watch.ts`** copied verbatim (+ `watch-summary.ts` seam relocation); tests green. Wiring 9b. |
+| `check_watches` | Met (module copied, 9a) | **9a: `tools/watch.ts`** copied verbatim; tests green. Wiring 9b. |
+| `list_watches` | Met (module copied, 9a) | **9a: `tools/watch.ts`** copied verbatim; tests green. Wiring 9b. |
+| `remove_watch` | Met (module copied, 9a) | **9a: `tools/watch.ts`** copied verbatim; tests green. Wiring 9b. |
+| `resolve_watch` | Met (module copied, 9a) | **9a: `tools/resolvers.ts`** copied verbatim; tests green. Wiring 9b. |
 
 ### Subsystems (authority:
 [006-source-capability-manifest.md](./006-source-capability-manifest.md))
