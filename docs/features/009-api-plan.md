@@ -6,7 +6,41 @@ classification REQUIRED before code moves (a full context-gatherer pass, like Ph
 **Depends on:** all extracted packages + Phase 8's `@traderton/worker` mechanical loop (which must be
 green first — Phase 8 is currently blocked on source-fix #2).
 **Status:** SEED — drafted from a light read of herobids `apps/api` + the Phase 8 deferrals
-(2026-09-06). The interior is NOT knowable from this seed; a full read-and-classify is step 1.
+(2026-09-06). SPLIT into 9a/9b (2026-09-07). The interior is NOT knowable from this seed; a full
+read-and-classify is 9a step 1.
+
+## Phase 9 is SPLIT: 9a (copy, now) / 9b (authoring, post-holistic-review)
+
+Per human decision (2026-09-07), Phase 9 separates the **copy** work from the **authoring** work so the
+copyable value lands before the holistic review and only deliberate authoring waits behind the gate.
+
+### 9a — COPY surface (execute NOW, before the holistic review)
+Pure copy-and-delete, same bar as Phases 3–8 (verbatim copy + `@herobids/*`→`@traderton/*` rename + seam
+deletion; build + copied tests green; reviewed; committed). Scope:
+- **The 25 trading tool modules** (in `apps/worker/src/tools/`): trading = `account`, `analytics`, `bots`,
+  `find-instrument`, `market-data`, `price`, `risk-limits`, `trading`, `watch` + support (`resolvers`,
+  `schema`, `tool-errors`?). Platform tools (browser/code/email/shell/skills/…) = DELETE.
+- **The clean API trading routes** (import only extracted packages): `bots`, `accounts`, `analytics`,
+  `backtests`, `credentials`, `reconciliation`, `actor-health`, `exports`, `datasets`,
+  `capabilities/trading`.
+- **Full 25-tool inventory reconciliation** against [006](../006-source-capability-manifest.md): map each
+  tool → module, mark Met vs Deferred, ensure every one of the 25 has a ledger disposition.
+- **QUARANTINE rule (the Phase-8 pattern):** any tool/route that cannot compile + go green WITHOUT an
+  authored dependency (the config shape, the intake/approval resolver, the composition root) is **quarantined
+  verbatim** into `_deferred-config/` (worker) or a sibling `_deferred-authoring/` — NOT authored in 9a. 9a's
+  deliverable is precisely "every tool/route that copies green without authoring"; the residue is cleanly
+  handed to 9b.
+- Where a tool package needs a home: decide at 9a step 1 whether the tools live in `@traderton/worker`
+  (alongside the loop) or a dedicated package — pick the layout that keeps them copyable without authoring.
+
+### 9b — AUTHORING (execute AFTER the holistic review)
+The sanctioned authoring pass (M1 composition first; M2 REST boundary sequenced): the Traderton-owned
+**config shape**, the **trading composition root**, the **decision-intake/approval** surface
+(venue-account-direct resolver + `submit_decision` intake + human approvals), per-`ownerId` **maxBots**, and
+the **M2 REST/005 boundary**. Un-quarantines the `_deferred-config/` files as their authored dependencies land.
+
+The rest of this plan (below) is the combined Phase-9 detail; 9a executes its copy/inventory portions and
+defers every authoring portion to 9b.
 
 ## Why Phase 9's scope is bigger than "copy the API routes"
 

@@ -154,7 +154,8 @@ recommended default (foundational data model first, then the core engine).
 | 6 | `strategy` — mechanical slice | clean-package (split) | domain, market-data | **Done** |
 | 7 | `backtesting` | clean-package | domain, engine | **Done** |
 | 8 | `apps/worker` — trading loop | subtraction (large) | all packages | **Done (mechanical loop; config/composition/limit → Phase 9)** |
-| 9 | `apps/api` — trading control-plane + tools | subtraction (large) | db, domain, engine, venues, backtesting | Queued |
+| 9a | `apps/api`/tools — COPY surface (tools + clean trading routes + 25-tool inventory) | subtraction | db, domain, engine, venues, backtesting, worker | Active (next) |
+| 9b | `apps/api` — AUTHORING (config shape, composition root, intake/approval, per-owner maxBots, M2 REST boundary) | authoring | 9a + holistic review | Queued (gated on holistic review) |
 | 10 | infra (Dockerfile, compose, CI, deploy) | clean-package (copy trading slice) | a working service | Queued |
 
 ### Phase 2 — `db` (trading cluster)
@@ -255,15 +256,28 @@ recommended default (foundational data model first, then the core engine).
   vs. what the boundary contract legitimately requires as new seam code; ownership of
   shared route middleware.
 - **SEEDED + SCOPE GREW (2026-09-06):** seed plan at [docs/features/009-api-plan.md](./features/009-api-plan.md).
-  Phase 9's scope now spans THREE surfaces: (1) `apps/api` trading routes; (2) **the 25 trading TOOL
+  Phase 9's scope spans THREE surfaces: (1) `apps/api` trading routes; (2) **the 25 trading TOOL
   modules — which live in `apps/worker/src/tools/`, deferred here from Phase 8** (decision 4); (3) the
   **Phase-8 deferred authoring**, all `Deferred (required for cutover)`: the decision-intake/approval/session
   surface (venue-account-direct resolver + `submit_decision` intake + human approvals), the Traderton-owned
   **config shape** (replacing `config.ts`/`AppConfig`, decision 2), the **trading composition root**
-  (replacing the un-subsettable `index.ts`), and the per-`ownerId` **maxBots** enforcement. This is the
-  sanctioned **authoring** phase (M1 in-process composition first; the 005 REST boundary is the M2 adapter,
-  sequenced explicitly) — done AFTER a holistic review. **Blocked until Phase 8 is green** (source-fix #2);
-  the read-only classification + 25-tool inventory mapping can proceed in parallel.
+  (replacing the un-subsettable `index.ts`), and the per-`ownerId` **maxBots** enforcement.
+- **SPLIT 9a / 9b (2026-09-07, human-approved):** Phase 9 is split so all copy work lands before the
+  holistic review, and only deliberate authoring waits behind the gate.
+  - **9a — COPY surface (do now):** copy the 25 trading tool modules (`apps/worker/src/tools/` — `account`,
+    `analytics`, `bots`, `find-instrument`, `market-data`, `price`, `risk-limits`, `trading`, `watch` +
+    support) and the clean API trading routes (`bots`, `accounts`, `analytics`, `backtests`, `credentials`,
+    `reconciliation`, `actor-health`, `exports`, `datasets`, `capabilities/trading`) — verbatim
+    copy-and-delete, same bar as Phases 3–8; plus the full **25-tool inventory reconciliation** against
+    [006](./006-source-capability-manifest.md). **Rule:** any module that cannot go green WITHOUT an
+    authored dependency (config shape, intake resolver, composition root) is **quarantined verbatim**
+    (`_deferred-config/` or a sibling `_deferred-authoring/`), NOT authored early — exactly the Phase-8
+    quarantine pattern. 9a's deliverable = every tool/route that copies green without authoring.
+  - **9b — AUTHORING (gated on the holistic review):** the config shape, composition root, intake/approval
+    surface, per-`ownerId` maxBots, and the M2 REST boundary. This is the sanctioned authoring pass
+    (M1 in-process composition first; 005 REST is the M2 adapter, sequenced explicitly).
+  This split also improves the review: the holistic review then covers the fuller M1 pre-authoring library
+  (domain → worker loop → tool/route surface), which is the boundary to inspect before authoring begins.
 
 ### Phase 10 — infra
 - **Copy:** the trading-relevant slice of herobids' proven infra (Dockerfile, compose,
