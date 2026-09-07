@@ -155,7 +155,8 @@ recommended default (foundational data model first, then the core engine).
 | 7 | `backtesting` | clean-package | domain, engine | **Done** |
 | 8 | `apps/worker` — trading loop | subtraction (large) | all packages | **Done (mechanical loop; config/composition/limit → Phase 9)** |
 | 9a | `apps/api`/tools — COPY surface (tools + clean trading routes + 25-tool inventory) | subtraction | db, domain, engine, venues, backtesting, worker | **Done** (18/25 tools copied; 7 tools + all API routes → 9b; via source-fix #3/#3b) |
-| 9b | `apps/api` — AUTHORING (config shape, composition root, intake/approval, per-owner maxBots, M2 REST boundary) | authoring | 9a + holistic review | Queued (gated on holistic review) |
+| — | **M1 pre-authoring holistic review** (gate before any 9b authoring) | review (read-only) | 9a | **Active (next)** — run per [docs/features/010-m1-holistic-review-instruction.md](./features/010-m1-holistic-review-instruction.md); deliverable `011-m1-holistic-review-report.md` |
+| 9b | `apps/api` — AUTHORING (config shape, composition root, intake/approval, per-owner maxBots, M2 REST boundary) | authoring | 9a + M1 holistic review | Queued (gated on the holistic review above) |
 | 10 | infra (Dockerfile, compose, CI, deploy) | clean-package (copy trading slice) | a working service | Queued |
 
 ### Phase 2 — `db` (trading cluster)
