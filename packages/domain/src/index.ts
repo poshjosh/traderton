@@ -11,6 +11,7 @@ export * from './trading/venue-capability.js';
 export * from './trading/actor-health.js';
 export * from './trading/trading-protocol.js';
 export * from './trading/tool-contract.js';
+export * from './trading/agent-message-types.js';
 export * from './tool-schemas.js';
 export * from './cost-profile.js';
 export * from './scanner-types.js';

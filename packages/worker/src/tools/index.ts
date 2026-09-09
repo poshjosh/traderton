@@ -13,12 +13,14 @@
 
 export { accountTools } from './account.js';
 export { analyticsTools } from './analytics.js';
+export { botManagementTools } from './bots.js';
 export { instrumentTools } from './find-instrument.js';
 export { marketDataTools } from './market-data.js';
 export { priceTools } from './price.js';
 export { resolverTools } from './resolvers.js';
 export { riskLimitsTools } from './risk-limits.js';
 export { schemaTools } from './schema.js';
+export { tradingTools } from './trading.js';
 export { watchTools } from './watch.js';
 
 export { ToolRegistry, convertZodToJsonSchema } from './registry.js';

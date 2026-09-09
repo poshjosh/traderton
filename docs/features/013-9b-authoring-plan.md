@@ -101,8 +101,8 @@ Every 9b item re-tested (2026-09-07, verified against herobids source) against f
 | **A″. `config.ts` loader** | **COPY (fused-file trim)** | Copy the loader; delete the platform `ENV_OVERRIDES` entries + the `billing.primaryProvider` prod guard (line deletions, diff-visible). |
 | **B. Composition root** (`createTradingRuntime` factory, **bot-lifecycle only**) | **AUTHORED** (decisions LOCKED — §4.1) | herobids `index.ts` (~3050 lines) constructs the trading actors *inside* deleted startup/session/intake wiring — no faithful trading subset (confirmed Phase 8). Wired modules all copied; wiring factory authored. **The largest genuinely-authored piece.** Scope = bot `TradingActor` only; agent-direct/registry/intake → item C; drive/tool-registry → item D; event producer → C2 (M1 no-op stubs); maxBots → E. Full brief + herobids trace: [015](./015-composition-root-proposal.md) + §4. Oracle: actor test files build the dep objects (template); herobids-clone A/B. |
 | **C. Intake router + registry + AgentTradingActor wiring** ✅ **DONE 2026-09-07** (decisions LOCKED — §5) | **COPY (already, Phase 8) + AUTHORED wiring/seam + DROP** | Re-verified 2026-09-07 (post-investigation): the actor-owned intake (`AgentTradingActor.getIntakeDeps`/`getDecisionContext`/`getPosition`), `ExecutionActor`, `TradingActor`, `validate-trade-instrument`, `venue-instrument-cache` were **already COPIED in Phase 8** — C reuses them. C **authors** only wiring: a slim decision router (`submitDecision`), a plain `Map<string, ExecutionActor>` registry (owned by B's factory), the venue-account-direct resolver seam (injected `venueAccountId` + the venue-account guards), and `AgentTradingActor` construct+register. It **DROPS** (Intentional Divergence) the `AgentIntakeResolver` grant-fallback + `ActorStateOwner` — the `agentConnections ⋈ connections` grant front-end / agent-session wrapper, both platform (crux resolved = option (a); require a running actor else `instance_not_running`). Handler drops the platform paused/session/telegram/approval branches. |
-| **D. Drive-path tools** (`bots.ts`, `trading.ts`) (decisions LOCKED — §6) | **COPY** (verbatim) | Re-verified 2026-09-07: both files copy verbatim once `AGENT_MESSAGE_TYPES` (3 consts) + the drive target exist — deps present (`convertZodToJsonSchema`, `checkModeEscalation`, `deriveStrategyPreset`, `extractStrategyFromConfig`, `TradingToolContext`). Copy `ctx.agentId`/`creatorType='agent'` verbatim (decision (a); bind injected `ownerId` at the persistence seam). Do NOT copy the platform broker. The tools use only `DECISION_SUBMIT`+`MANAGE_BOT`. |
-| **D-target. In-process drive target + bot-lifecycle handler + enqueue seam** | **AUTHORED (seam/wiring) + DROP** | Author the 3-const `AGENT_MESSAGE_TYPES` (values verbatim); the in-process `publishToInbound` target (`DECISION_SUBMIT`→item C `submitDecision` + reply-write; `MANAGE_BOT`→bot-lifecycle handler); the bot-lifecycle handler **tracing `handleManageBot`'s trading core over the copied `WorkerRuntime`**; `WorkerRuntime.enqueueLifecycle`. **DROPS** the `handleManageBot` agent-session + connection-grant + LLM-model-policy shell (platform, decisions 7–13). maxBots limit = seam → item E. `BOT_QUERY` routing omitted. |
+| **D. Drive-path tools** (`bots.ts`, `trading.ts`) ✅ **DONE 2026-09-07** (decisions LOCKED — §6) | **COPY** (verbatim) | **LANDED:** both files copied verbatim (diff = `@herobids`→`@traderton` + the sanctioned `TradingToolContext`/`AgentTool<TradingToolContext>` convention only) + their herobids parity tests (9 + 25). `ctx.agentId`/`creatorType='agent'` scope untouched (decision (a); injected `ownerId` binds at the persistence seam). Platform broker NOT copied. Tools use only `DECISION_SUBMIT`+`MANAGE_BOT`. See §6.5. |
+| **D-target. In-process drive target + bot-lifecycle handler + enqueue seam** ✅ **DONE 2026-09-07** | **AUTHORED (seam/wiring) + DROP** | **LANDED:** authored the 3-const `AGENT_MESSAGE_TYPES` (values verbatim); `createDriveTarget` `publishToInbound` (`DECISION_SUBMIT`→item C `submitDecision` + reply-write; `MANAGE_BOT`→handler; no `BOT_QUERY` route); `handleManageBot` **tracing `handleManageBot`'s trading core over the copied `WorkerRuntime`**; `WorkerRuntime.enqueueLifecycle`. **DROPPED** the agent-session + connection-grant + LLM-model-policy shell (platform, decisions 7–13). maxBots limit + create/start persist = one injected `BotLimitSeam` → item E (pre-E → `bot_limit_unavailable`). Build+lint green; 2303 tests. See §6.5. |
 | **E. maxBots atomic** | **AUTHORED (thin primitive)** | herobids' atomic method row-locked the `agents` table; Traderton has none → re-key the lock to `ownerId` via a Postgres advisory lock inside the count+write txn. Small, isolated, testable authored primitive. Human-confirmed atomic. |
 | **C2/G. Event producer — vocabulary + emitter** | **COPY** | The event envelope + per-event emitter methods (the trading subset, §ledger table) are clean and copyable (trading types). |
 | **C2/G. Event producer — durable persistence + Redis relay (outbox)** | **IMPROVEMENT (deferred)** | herobids is Redis-Streams-window-only for outbound events (verified: `xadd MAXLEN ~`, no Postgres). Postgres+Redis durable outbox is an improvement BEYOND parity → tracked in [014](./014-decision-response-and-event-model.md), decided separately, NOT built inside 9b. At 9b-parity: reproduce the Redis-window emitter (copy-shaped). |
@@ -552,6 +552,56 @@ rejection on a foreign `creatorId`. Trace the handler to herobids `handleManageB
 `_deferred-config/validate-trade-instrument.test.ts` (needs `tools/trading.ts`) and, after S-2/S-3
 reconciliation, `_deferred-authoring/schema.test.ts`. The per-`ownerId` maxBots enforcement behind the
 seam is **item E**.
+
+### 6.5 LANDED — item D DONE (2026-09-07)
+**Files.** AUTHORED: `packages/domain/src/trading/agent-message-types.ts` (3-const `AGENT_MESSAGE_TYPES`,
+string values verbatim from herobids `agent-protocol.ts` — `agent.decision.submit`/`agent.manage_bot`/
+`agent.bot.query`) + domain barrel; `packages/worker/src/composition/drive-target.ts` (`createDriveTarget`
+`publishToInbound` + `handleManageBot` tracing the trading core); `packages/worker/src/runtime.ts` thin
+`enqueueLifecycle(command, botId, config?)`; `create-trading-runtime.ts` exposes `enqueueLifecycle` +
+`createDriveTarget(injection)` + a `BotRepository` singleton on `TradingRuntime`; `worker/src/index.ts`
+barrel; `composition/drive-target.test.ts` (16 authored cases). COPIED verbatim (modulo `@herobids`→
+`@traderton` + the sanctioned `TradingToolContext`/`AgentTool<TradingToolContext>` convention):
+`tools/trading.ts`, `tools/bots.ts` + their herobids parity tests (`bots.test.ts` 9, `trading.test.ts` 25).
+Build+lint green; **2303 tests / 15 skipped / 0 failed** (+50; no copied test altered).
+
+**Authored-vs-copied-vs-dropped manifest.**
+- **COPY (verbatim):** `tools/trading.ts`, `tools/bots.ts` + both parity tests. `ctx.agentId`/
+  `creatorType='agent'` scope untouched (decision (a)); the unreachable `pending_approval` branch kept
+  byte-faithful.
+- **AUTHORED (seam/wiring):** the 3-const `AGENT_MESSAGE_TYPES` (values verbatim); the `publishToInbound`
+  drive target (`DECISION_SUBMIT`→item C `submitDecision` + `lpush`/`expire` reply write matching
+  `trading.ts`'s `blpop`; `MANAGE_BOT`→handler; no `BOT_QUERY` route); `handleManageBot` tracing the
+  herobids trading core over the copied `WorkerRuntime`; `WorkerRuntime.enqueueLifecycle`.
+- **DROPPED (Intentional Divergence — platform/consumer-owned, decisions 7–13):** the `handleManageBot`
+  agent-session shell (`agentRepo.getAgent`/`getActiveSession`), connection-grant resolution
+  (`getRuntimeCapabilityDescriptor`/`getResolvedVenueAccount`/`isConnectionOwnedBy`), LLM-model policy
+  (`resolveEffectiveLlmSelection`/`getUserAiModelConfig`), `applyAgentCapitalLimit`, `emitInstanceStatus`
+  (→ item C2, M1 no-op). venue/venueType/venueAccountId/ownerId injected; ownership by injected `ownerId`.
+
+**Surfaced seams (refine 021, carried to item E — nothing silently dropped).**
+- **create/start persist+limit is ONE item-E seam.** `@traderton/db` `BotRepository` has no bot-insert
+  (deleted Phase 2 — it was the agents-row-lock limit primitive = item E). herobids' create/start did an
+  atomic count+insert (`tryCreateBotWithLimit`) / count+mark (`tryMarkBotRunningWithLimit`). So D exposes
+  an injected optional `BotLimitSeam` (those two method shapes) and authors only its SHAPE + wiring — never
+  the limit or the insert. Pre-E (seam absent) → `create_and_start` + non-reclaim `start` return
+  `bot_limit_unavailable`; reclaim-start/stop/adjust_config are fully live. Not a degradation (herobids
+  always ran with the limit wired). **Item E acceptance line:** E must also claim the DB running-slot on
+  `create_and_start` (mirror herobids broker :738) so the persisted bot reads `running` (CodeReviewer
+  MEDIUM-2).
+- **`_deferred-config/validate-trade-instrument.test.ts` NOT un-quarantined.** Its `tools/trading.ts` dep
+  is now satisfied, but it also imports the dropped platform `DecisionSubmitPayloadSchema` (agent-protocol,
+  Phase 1). Left quarantined + surfaced (do not author the dropped schema or edit the copy).
+
+**Outstanding Issues (CodeReviewer, 2026-09-07 — no CRITICAL/HIGH; verdict PASS):**
+- **[item D] MEDIUM-1 — done-criteria doc updates.** Applied by the coordinator (this §6.5 + the 001
+  ledger rows). Resolved.
+- **[item D] MEDIUM-2 — `create_and_start` running-slot claim deferred to E.** Carried as the item-E
+  acceptance line above (E's create path must mark the DB row running). No item-D code change.
+- **[item D] LOW-3 — `handleDecisionSubmit` reads an untyped `DECISION_SUBMIT` payload** (per-field casts).
+  Producer is the copied tool (schema-guaranteed); revisit if item F introduces external producers. No action.
+- **[item D] LOW-4 — `DriveReplyRedis` interface exported but deps use `Pick<Redis,'lpush'|'expire'>`.**
+  Documentation-only type; trivial. No action.
 
 ---
 

@@ -20,6 +20,7 @@ import {
   ReconciliationEventRepository,
   DecisionRepository,
   BacktestingRepository,
+  BotRepository,
 } from '@traderton/db';
 import { MarkSelector, createFillFirstMarkSource } from '@traderton/engine';
 import {
@@ -68,6 +69,12 @@ import {
   type AgentActorRuntimeDeps,
 } from './decision-intake.js';
 import type { AgentTradingActor } from '../agent-trading-actor.js';
+import {
+  createDriveTarget,
+  type PublishToInbound,
+  type BotLimitSeam,
+} from './drive-target.js';
+import type { LifecycleCommand } from '../runtime.js';
 
 const logger = createLogger('create-trading-runtime');
 
@@ -134,6 +141,47 @@ export interface TradingRuntime {
   constructAndRegisterAgentActor(spec: AgentActorSpec): AgentTradingActor;
   /** Stop + deregister an agent actor (paired teardown hook — item C). */
   stopAndDeregisterAgentActor(actor: AgentTradingActor): Promise<void>;
+  /**
+   * Enqueue a bot lifecycle command (start/stop/restart) onto the runtime's
+   * copied queue (item D). Thin passthrough over `runtime.enqueueLifecycle` — no
+   * new lifecycle behaviour.
+   */
+  enqueueLifecycle(command: LifecycleCommand, botId: string, config?: Record<string, unknown>): Promise<void>;
+  /**
+   * Build the in-process `publishToInbound` drive target (Phase 9b item D) bound
+   * to one owned actor. The consumer sets the returned port on the copied tools'
+   * `TradingToolContext.publishToInbound`. It routes `DECISION_SUBMIT` → item C's
+   * `submitDecision` (+ reply write) and `MANAGE_BOT` → the bot-lifecycle handler
+   * over the copied `WorkerRuntime`; there is no `BOT_QUERY` route.
+   *
+   * `injection` carries the platform-owned VALUES the consumer injects per owned
+   * actor (ports-carry-values): the soft `ownerId`, the registry/creator
+   * `actorId`, the owner execution `ownerMode`, the resolved
+   * `venue`/`venueType`/`venueAccountId`, and — when item E is wired — the atomic
+   * per-`ownerId` `botLimit` seam (absent → create/non-reclaim-start refuse).
+   */
+  createDriveTarget(injection: DriveTargetInjection): PublishToInbound;
+}
+
+/**
+ * The per-owned-actor VALUES the M1 consumer injects when building a drive
+ * target (ports-carry-values, 000/004). Every field is platform-owned data, not
+ * trading behaviour. See `DriveTargetDeps` in ./drive-target.ts for the full
+ * trace to the dropped herobids agent/grant/LLM shell.
+ */
+export interface DriveTargetInjection {
+  /** Authenticated soft owner (decision 10; NOT the `agents` table). */
+  ownerId: string;
+  /** Registry routing key + `creatorId` for created bots (decision (a): `ctx.agentId`). */
+  actorId: string;
+  /** Owner/agent execution mode for the mode-escalation guard. */
+  ownerMode: 'paper' | 'shadow' | 'live';
+  /** INJECTED resolved venue coordinates (decisions 11–13). */
+  venue: string;
+  venueType: 'orderbook' | 'swap';
+  venueAccountId: string;
+  /** Per-`ownerId` maxBots limit + create/start persistence seam (item E). */
+  botLimit?: BotLimitSeam;
 }
 
 /**
@@ -223,6 +271,10 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
   const reconciliationRepo = new ReconciliationEventRepository(db);
   const decisionRepo = new DecisionRepository(db);
   const backtestingRepo = new BacktestingRepository(db);
+  // Bot repository — the item-D drive target's bot-lifecycle handler reads/updates
+  // bot rows through it (getBotById/updateBotConfig/markBotRunning/… — the
+  // persist/limit primitives were deleted Phase 2 and are item E's seam).
+  const botRepo = new BotRepository(db);
 
   const idGen = createIdGen();
 
@@ -728,5 +780,20 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
       ),
     stopAndDeregisterAgentActor: (actor) =>
       stopAndDeregisterAgentActor({ register: registerActor, deregister: deregisterActor }, actor),
+    enqueueLifecycle: (command, botId, config) => runtime.enqueueLifecycle(command, botId, config),
+    createDriveTarget: (injection) =>
+      createDriveTarget({
+        runtime,
+        submitDecision: (input) => submitDecision(actorRegistry, input),
+        botRepo,
+        redis,
+        ...(injection.botLimit !== undefined ? { botLimit: injection.botLimit } : {}),
+        ownerId: injection.ownerId,
+        actorId: injection.actorId,
+        ownerMode: injection.ownerMode,
+        venue: injection.venue,
+        venueType: injection.venueType,
+        venueAccountId: injection.venueAccountId,
+      }),
   };
 }

@@ -141,6 +141,21 @@ export class WorkerRuntime {
   }
 
   /**
+   * Enqueue a lifecycle command (start/stop/restart) onto the BullMQ queue this
+   * runtime already owns and consumes. This is the single public entry the
+   * in-process drive path (Phase 9b item D) uses to drive bot lifecycle — the
+   * in-process expression of the herobids `botStart`/`botStop`/`botRestart`
+   * queue-add closures (apps/worker/src/index.ts:1523–1542). It adds no new
+   * lifecycle behaviour: the job it enqueues is processed by `processJob` exactly
+   * as an internally-enqueued job would be. The job name mirrors herobids
+   * (`${command}-instance`); only `job.data` is load-bearing.
+   */
+  async enqueueLifecycle(command: LifecycleCommand, botId: string, config?: Record<string, unknown>): Promise<void> {
+    const data: LifecycleJob = config !== undefined ? { command, botId, config } : { command, botId };
+    await this.queue.add(`${command}-instance`, data);
+  }
+
+  /**
    * Remove a crashed actor from the runtime's internal state and release its lease.
    * Called by the actor's onCrashed callback after persisting crashed status to DB.
    * Does NOT call actor.stop() (the actor already stopped itself).
