@@ -52,63 +52,15 @@ const ENV_OVERRIDES: Record<string, EnvOverride> = {
   // Live rollout
   LIVE_ROLLOUT_ENABLED: { path: 'liveRollout.enabled', type: 'boolean' },
   LIVE_ROLLOUT_MAX_ORDER_NOTIONAL_USD: { path: 'liveRollout.maxInitialOrderNotionalUsd', type: 'string' },
-  // Alerts
-  ALERTS_ENABLED: { path: 'alerts.enabled', type: 'boolean' },
-  TELEGRAM_BOT_TOKEN: { path: 'alerts.telegram.botToken', type: 'string' },
-  TELEGRAM_WEBHOOK_SECRET: { path: 'alerts.telegram.webhookSecret', type: 'string' },
-  TELEGRAM_WEBHOOK_URL: { path: 'alerts.telegram.webhookUrl', type: 'string' },
-  // Email — outbound provider (SES)
-  EMAIL_PROVIDER: { path: 'alerts.email.provider', type: 'string' },
-  EMAIL_FROM_EMAIL: { path: 'alerts.email.fromEmail', type: 'string' },
-  EMAIL_REPLY_TO_EMAIL: { path: 'alerts.email.replyToEmail', type: 'string' },
-  EMAIL_TIMEOUT_MS: { path: 'alerts.email.timeoutMs', type: 'number' },
-  AWS_REGION: { path: 'alerts.email.ses.region', type: 'string' },
-  SES_CONFIGURATION_SET_NAME: { path: 'alerts.email.ses.configurationSetName', type: 'string' },
   // Market data providers
   BIRDEYE_API_KEY: { path: 'marketData.birdeye.apiKey', type: 'string' },
   COINGECKO_API_KEY: { path: 'marketData.geckoterminal.apiKey', type: 'string' },
   COINMARKETCAP_API_KEY: { path: 'marketData.coinMarketCap.apiKey', type: 'string' },
-  // LLM runtime
-  LLM_PROVIDER: { path: 'llm.provider', type: 'string' },
-  LLM_MODEL: { path: 'llm.model', type: 'string' },
-  LLM_BASE_URL: { path: 'llm.baseUrl', type: 'string' },
-  LLM_MAX_TOKENS: { path: 'llm.maxTokens', type: 'number' },
-  LLM_TIMEOUT_MS: { path: 'llm.timeoutMs', type: 'number' },
-  LLM_TICK_INTERVAL_MS: { path: 'llm.tickIntervalMs', type: 'number' },
-  LLM_HEARTBEAT_INTERVAL_MS: { path: 'llm.heartbeatIntervalMs', type: 'number' },
-  LLM_SERVER_COST_USD_PER_HOUR: { path: 'llm.serverCostUsdPerHour', type: 'number' },
-  // Billing
-  BILLING_PRIMARY_PROVIDER: { path: 'billing.primaryProvider', type: 'string' },
-  STRIPE_SECRET_KEY: { path: 'billing.stripe.secretKey', type: 'string' },
-  STRIPE_WEBHOOK_SECRET: { path: 'billing.stripe.webhookSecret', type: 'string' },
-  CREEM_API_KEY: { path: 'billing.creem.apiKey', type: 'string' },
-  CREEM_WEBHOOK_SECRET: { path: 'billing.creem.webhookSecret', type: 'string' },
-  // Auth
-  AUTH_PUBLIC_BASE_URL: { path: 'auth.publicBaseUrl', type: 'string' },
-  AUTH_JWT_SECRET: { path: 'auth.jwtSecret', type: 'string' },
-  AUTH_JWT_TTL_SECS: { path: 'auth.jwtTtlSecs', type: 'number' },
-  GOOGLE_CLIENT_ID: { path: 'auth.googleClientId', type: 'string' },
-  GOOGLE_CLIENT_SECRET: { path: 'auth.googleClientSecret', type: 'string' },
-  // Evaluation
-  EVALUATION_STORAGE_ROOT: { path: 'evaluation.storageRoot', type: 'string' },
-  // Gmail OAuth integration
-  GMAIL_CLIENT_ID: { path: 'integrations.gmail.clientId', type: 'string' },
-  GMAIL_CLIENT_SECRET: { path: 'integrations.gmail.clientSecret', type: 'string' },
-  GMAIL_REDIRECT_URI: { path: 'integrations.gmail.redirectUri', type: 'string' },
-  // Shared-service connectivity — override with private IPs for cluster deployments
-  SHARED_REDIS_HOST: { path: 'sharedServices.redisHost', type: 'string' },
-  SHARED_REDIS_PORT: { path: 'sharedServices.redisPort', type: 'number' },
-  SHARED_POSTGRES_HOST: { path: 'sharedServices.postgresHost', type: 'string' },
-  SHARED_POSTGRES_PORT: { path: 'sharedServices.postgresPort', type: 'number' },
-  SHARED_POSTGRES_USER: { path: 'sharedServices.postgresUser', type: 'string' },
-  SHARED_POSTGRES_PASSWORD: { path: 'sharedServices.postgresPassword', type: 'string' },
-  SHARED_POSTGRES_DATABASE: { path: 'sharedServices.postgresDatabase', type: 'string' },
-  // Platform Assessor
-  PLATFORM_ASSESSOR_ENABLED: { path: 'platformAssessor.enabled', type: 'boolean' },
-  PLATFORM_ASSESSOR_CACHE_FRESHNESS_MS: { path: 'platformAssessor.cacheFreshnessMs', type: 'number' },
-  // Nomad
-  NOMAD_TOKEN: { path: 'nomad.token', type: 'string' },
-  NOMAD_ADDR: { path: 'nomad.addr', type: 'string' },
+  // Traderton divergence (Phase 9b, item A): the platform ENV_OVERRIDES —
+  // alerts/telegram/email(SES), llm, billing(stripe/creem), auth, evaluation,
+  // gmail, sharedServices, platformAssessor, nomad — are deleted. Those config
+  // keys do not exist in Traderton's trading-only AppConfigSchema. This is the
+  // fused-file line-trim (the Phase-1 technique), applied to the loader.
 };
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
@@ -182,21 +134,10 @@ export function loadConfig(configDir?: string): AppConfig {
 
   const config = AppConfigSchema.parse(merged);
 
-  if (env === 'production' && config.billing.primaryProvider === 'mock') {
-    throw new Error(
-      "billing.primaryProvider is 'mock' in a production environment — " +
-      "set BILLING_PRIMARY_PROVIDER=creem (or stripe) in .env.prod or override billing.primaryProvider in config/production.yaml",
-    );
-  }
-
-  // Warn if staging is accidentally connected to a real billing provider.
-  // Staging should always use mock billing unless explicitly testing payments.
-  if (env === 'staging' && config.billing.primaryProvider !== 'mock') {
-    console.warn(
-      `⚠️  staging is using billing.primaryProvider='${config.billing.primaryProvider}' (not mock). ` +
-      'Real charges may apply. Override with BILLING_PRIMARY_PROVIDER=mock in .env.staging if unintended.',
-    );
-  }
+  // Traderton divergence (Phase 9b, item A): the herobids billing prod/staging
+  // guards (env === 'production'/'staging' checks on config.billing.primaryProvider)
+  // are deleted — billing is platform/consumer-owned and absent from the trading
+  // AppConfigSchema. Fused-file line-trim.
 
   return config;
 }

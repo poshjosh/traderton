@@ -842,3 +842,126 @@ export type VwapParams = z.infer<typeof VwapParamsSchema>;
 export type PriceActionParams = z.infer<typeof PriceActionParamsSchema>;
 export type SentimentConfig = z.infer<typeof SentimentConfigSchema>;
 export type TechnicalConfig = z.infer<typeof TechnicalConfigSchema>;
+
+// ---------------------------------------------------------------------------
+// Agent risk defaults (operator layer) — re-synced verbatim from herobids
+// packages/domain/src/config/schema.ts during Phase 9b (item A). All fields are
+// trading risk/halt defaults consumed by the mechanical loop (agent-risk-limits.ts,
+// the risk contract resolver). Copy-and-delete: this schema is entirely trading —
+// no platform fields to trim. Re-opens the Phase-1 over-deletion that removed it
+// with the platform config block. See docs/features/013-9b-authoring-plan.md item A.
+// ---------------------------------------------------------------------------
+export const AgentRiskDefaultsSchema = z.object({
+  /** @deprecated Use dailyMaxLossPct (percent of equity) instead. Ratio-based loss limit. */
+  dailyLossLimitDefaultRatio: z.number().min(0).max(1).default(0.05),
+  maxOpenPositions: z.number().min(1).default(10),
+  maxPositionSizePct: z.number().min(0).max(100).default(100),
+  maxPositionSize: z.number().min(0).default(1_000_000),
+  stopLossPct: z.number().min(0).max(100).default(10),
+  dailyMaxLossPct: z.number().min(0).max(100).default(20),
+  stopLossCooldownMs: z.number().min(0).default(300_000),
+  maxOrderNotionalMultiplier: z.number().min(0).default(1),
+  botConfigInvalidHaltThreshold: z.number().int().min(1).default(1),
+  botExecutionErrorHaltThreshold: z.number().int().min(1).default(5),
+  botLlmProviderErrorHaltThreshold: z.number().int().min(1).default(1),
+  /** Consecutive no_context failures before hardening retryable → false.
+   *  Only applies after the actor has proven it CAN fetch context (first successful fetch). */
+  agentDecisionNoContextThreshold: z.number().int().min(1).default(10),
+  /** Consecutive swap.instrument_format failures before hardening retryable → false. */
+  agentDecisionSwapInstrumentFormatThreshold: z.number().int().min(1).default(5),
+  maxDrawdown: z.number().min(0).default(1_000_000_000),
+  /** Operator default and ceiling for peak-to-current equity drawdown (percent).
+   *  Used when the creator did not set maxDrawdownPct. Agent may adjust downward at runtime. */
+  maxDrawdownPct: z.number().min(0).max(100).default(20),
+  /** Interval in ms for the periodic per-trade stop-loss / take-profit monitor loop. */
+  perTradeLevelMonitorIntervalMs: z.number().min(1000).default(5000),
+  /** Operator default for agent max concurrent bots. Used when the agent row has no maxBots override. */
+  maxBots: z.number().int().min(1).default(5),
+}).default({});
+export type AgentRiskDefaultsConfig = z.infer<typeof AgentRiskDefaultsSchema>;
+
+// ---------------------------------------------------------------------------
+// Traderton-owned AppConfig — re-synced from herobids AppConfigSchema (item A,
+// Phase 9b) by COPY-AND-DELETE (fused-file trim, the Phase-1 technique):
+//   - kept: trading keys (database, redis, venues, execution, simulation, risk,
+//     agentRiskDefaults, reconciliation, streams, marking, backtesting,
+//     marketDataRecording, marketData, liveRollout) + app.{port,logLevel} (base
+//     process config, always operator-owned per decision 1);
+//   - deleted platform keys: api, sharedServices, runtimeBackend, nomad,
+//     agentApprovals (consumer-owned approvals), agentCostEstimates, evaluation,
+//     marketIntelligence, platformAssessor, worker, agentRuntime, llm,
+//     llmValidation, integrations(gmail), alerts, auth, plans, billing,
+//     usageBilling, externalSkills, browserPool, services;
+//   - superRefine trimmed to the TWO trading checks (1inch tokenSafetyNetwork;
+//     jupiter/1inch walletGeneration→apiKey); the platform plans/billing/nomad
+//     validation blocks deleted.
+// This re-opens the Phase-1 over-deletion (AppConfigSchema was removed wholesale
+// as platform). Traderton owns its config (decision 2). The copied config loader
+// test is the parity oracle. See docs/features/013-9b-authoring-plan.md item A.
+// ---------------------------------------------------------------------------
+export const AppConfigSchema = z.object({
+  app: z.object({
+    port: z.number().default(3000),
+    logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  }),
+  database: z.object({
+    url: z.string(),
+    poolMin: z.number().default(2),
+    poolMax: z.number().default(10),
+  }),
+  redis: z.object({
+    url: z.string().default('redis://localhost:6379'),
+  }),
+  venues: z.record(VenueConfigSchema).default({}),
+  execution: z.object({
+    defaultSlippageBps: z.number().min(0).default(50),
+    orderTimeoutMs: z.number().min(1000).default(30_000),
+    maxRetries: z.number().min(0).default(3),
+    shadowPollIntervalMs: z.number().int().min(100).default(2_000),
+    shadowQuoteSlippageBps: z.number().min(0).default(50),
+  }),
+  simulation: z.object({
+    takerFeePct: z.number().min(0).default(0.001),
+    makerFeePct: z.number().min(0).default(0.0005),
+    paperSlippageBps: z.number().min(0).default(5),
+  }).default({}),
+  risk: z.object({
+    globalMaxDrawdownPct: z.number().min(0).max(100).default(20),
+    maxOpenPositions: z.number().min(1).default(10),
+    maxPositionSizePct: z.number().min(0).max(100).default(25),
+  }),
+  agentRiskDefaults: AgentRiskDefaultsSchema,
+  reconciliation: ReconciliationConfigSchema.default({}),
+  streams: StreamConfigSchema.default({}),
+  marking: MarkingConfigSchema.default({}),
+  backtesting: BacktestingConfigSchema.default({}),
+  marketDataRecording: MarketDataRecordingConfigSchema.default({}),
+  marketData: MarketDataConfigSchema.optional(),
+  liveRollout: LiveRolloutConfigSchema.default({}),
+}).superRefine((data, ctx) => {
+  const oneInchConfig = data.venues['1inch'];
+  if (
+    data.marketData?.tokenSafety?.enabled
+    && oneInchConfig
+    && !oneInchConfig.tokenSafetyNetwork
+    && oneInchConfig.chainId != null
+    && !inferOneInchTokenSafetyNetwork(oneInchConfig.chainId)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `venues.1inch.chainId ${String(oneInchConfig.chainId)} requires venues.1inch.tokenSafetyNetwork when marketData.tokenSafety.enabled is true`,
+      path: ['venues', '1inch', 'tokenSafetyNetwork'],
+    });
+  }
+  for (const provider of ['jupiter', '1inch'] as const) {
+    const venue = data.venues[provider];
+    if (venue?.walletGeneration.enabled && !venue.apiKey) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `venues.${provider}.apiKey is required when venues.${provider}.walletGeneration.enabled is true`,
+        path: ['venues', provider, 'apiKey'],
+      });
+    }
+  }
+});
+export type AppConfig = z.infer<typeof AppConfigSchema>;

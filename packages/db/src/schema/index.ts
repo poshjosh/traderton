@@ -18,6 +18,7 @@ export { llmDecisionArtifacts } from './llm-decision-artifacts.js';
 export { datasets } from './datasets.js';
 export { tokenSafetyOverrides } from './token-safety-overrides.js';
 export { decisionFailures } from './decision-failures.js';
-export { decisionApprovals } from './decision-approvals.js';
+// decisionApprovals table removed 2026-09-07 — user-approval lifecycle is
+// platform/consumer-owned (Intentional Divergence, docs/001 + docs/004).
 export { marketAssessmentRuns } from './market-assessment-runs.js';
 export { marketAssessmentArtifacts } from './market-assessment-artifacts.js';

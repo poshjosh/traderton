@@ -4,6 +4,17 @@ import { resolve } from 'node:path';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
+// Traderton note (Phase 9b, item A): this is the herobids config.test.ts trimmed
+// to trading-only (fused-file line-trim, line-traceable to source; NOT byte-diffable
+// since herobids has no trading-only variant). Every surviving test/line is verbatim
+// from herobids modulo the platform removals. Removed WHOLE platform describe/it
+// blocks: `throws when agentRuntime.defaultBudgets is missing`, `applies SES email
+// env overrides`, `LLM runtime env overrides`, `worker config defaults and YAML`,
+// `llm retry, scout, and thinking config`, `agentRuntime config defaults`. Trimmed
+// `BASE_YAML` (dropped the platform `agentRuntime.defaultBudgets` block) and the
+// `overlays NODE_ENV-specific config` overlay (dropped platform `billing.*`, kept the
+// `database.url` assertion it exercises). See docs/features/013-9b-authoring-plan.md.
+
 // Minimal required fields for AppConfigSchema
 const BASE_YAML = `
 app:
@@ -16,14 +27,6 @@ execution:
   defaultSlippageBps: 50
 risk:
   globalMaxDrawdownPct: 20
-agentRuntime:
-  defaultBudgets:
-    maxHistoryMessages: 20
-    maxHistoryTokens: 40000
-    maxRecentToolMessages: 6
-    maxToolResultChars: 4000
-    maxVisibleToolSchemas: 64
-    maxContextBlockChars: 4000
 `;
 
 const MINIMAL_MARKET_DATA_YAML = `
@@ -73,7 +76,7 @@ describe('loadConfig', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(resolve(tmpdir(), 'herobids-config-test-'));
+    tmpDir = mkdtempSync(resolve(tmpdir(), 'traderton-config-test-'));
   });
 
   afterEach(() => {
@@ -94,26 +97,6 @@ venues:
     expect(config.venues['hyperliquid']?.baseUrl).toBe('https://api.hyperliquid.xyz');
   });
 
-  it('throws when agentRuntime.defaultBudgets is missing', () => {
-    writeFileSync(resolve(tmpDir, 'default.yaml'), `
-app:
-  port: 3000
-database:
-  url: postgres://localhost/test
-redis:
-  url: redis://localhost:6379
-execution:
-  defaultSlippageBps: 50
-risk:
-  globalMaxDrawdownPct: 20
-venues:
-  hyperliquid:
-    baseUrl: https://api.hyperliquid.xyz
-`);
-
-    expect(() => loadConfig(tmpDir)).toThrow();
-  });
-
   it('throws when default.yaml is missing', () => {
     expect(() => loadConfig(tmpDir)).toThrow('Config file not found');
   });
@@ -122,18 +105,13 @@ venues:
     writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
     writeFileSync(resolve(tmpDir, 'production.yaml'), `
 database:
-  url: postgres://prod-host/herobids
-billing:
-  primaryProvider: stripe
-  stripe:
-    secretKey: sk_live_test_key
-    webhookSecret: whsec_test_secret
+  url: postgres://prod-host/traderton
 `);
     process.env['NODE_ENV'] = 'production';
 
     const config = loadConfig(tmpDir);
 
-    expect(config.database.url).toBe('postgres://prod-host/herobids');
+    expect(config.database.url).toBe('postgres://prod-host/traderton');
   });
 
   it('applies DATABASE_URL env override', () => {
@@ -143,23 +121,6 @@ billing:
     const config = loadConfig(tmpDir);
 
     expect(config.database.url).toBe('postgres://override-host/overridden');
-  });
-
-  it('applies SES email env overrides', () => {
-    writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
-    process.env['EMAIL_PROVIDER'] = 'ses';
-    process.env['EMAIL_FROM_EMAIL'] = 'noreply@openaidom.com';
-    process.env['EMAIL_REPLY_TO_EMAIL'] = 'support@openaidom.com';
-    process.env['EMAIL_TIMEOUT_MS'] = '20000';
-    process.env['AWS_REGION'] = 'eu-west-1';
-
-    const config = loadConfig(tmpDir);
-
-    expect(config.alerts.email.provider).toBe('ses');
-    expect(config.alerts.email.fromEmail).toBe('noreply@openaidom.com');
-    expect(config.alerts.email.replyToEmail).toBe('support@openaidom.com');
-    expect(config.alerts.email.timeoutMs).toBe(20000);
-    expect(config.alerts.email.ses.region).toBe('eu-west-1');
   });
 
   it('applies BIRDEYE_API_KEY env override without clobbering YAML defaults', () => {
@@ -555,95 +516,6 @@ venues:
     });
   });
 
-  describe('LLM runtime env overrides', () => {
-    it('applies LLM_TICK_INTERVAL_MS env override', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
-      process.env['LLM_TICK_INTERVAL_MS'] = '120000';
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.llm.tickIntervalMs).toBe(120000);
-    });
-
-    it('applies LLM_HEARTBEAT_INTERVAL_MS env override', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
-      process.env['LLM_HEARTBEAT_INTERVAL_MS'] = '10000';
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.llm.heartbeatIntervalMs).toBe(10000);
-    });
-
-    it('rejects LLM_TICK_INTERVAL_MS below schema minimum (5000)', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
-      process.env['LLM_TICK_INTERVAL_MS'] = '1000';
-
-      expect(() => loadConfig(tmpDir)).toThrow();
-    });
-
-    it('loads optional llm trading hours config from YAML', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML + `
-llm:
-  tradingHours:
-    allowedHoursUtc: [9, 10, 11, 12]
-    weekendPause: true
-`);
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.llm.tradingHours).toEqual({
-        allowedHoursUtc: [9, 10, 11, 12],
-        weekendPause: true,
-      });
-    });
-  });
-
-  describe('worker config defaults and YAML', () => {
-    it('applies Zod defaults for worker block when omitted', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.worker.scanIntervalMs).toBe(5000);
-      expect(config.worker.concurrency).toBe(10);
-      expect(config.worker.agents.healthCheckIntervalMs).toBe(2000);
-    });
-
-    it('loads explicit worker config from YAML', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML + `
-worker:
-  scanIntervalMs: 10000
-  concurrency: 5
-  agents:
-    healthCheckIntervalMs: 3000
-`);
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.worker.scanIntervalMs).toBe(10000);
-      expect(config.worker.concurrency).toBe(5);
-      expect(config.worker.agents.healthCheckIntervalMs).toBe(3000);
-    });
-
-    it('rejects worker.scanIntervalMs below minimum (1)', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML + `
-worker:
-  scanIntervalMs: 0
-`);
-
-      expect(() => loadConfig(tmpDir)).toThrow();
-    });
-
-    it('rejects worker.concurrency below minimum (1)', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML + `
-worker:
-  concurrency: 0
-`);
-
-      expect(() => loadConfig(tmpDir)).toThrow();
-    });
-  });
-
   describe('venue public stream config', () => {
     it('preserves Bybit testnet public stream URL from YAML', () => {
       writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML + `
@@ -706,14 +578,6 @@ execution:
   shadowQuoteSlippageBps: 100
 risk:
   globalMaxDrawdownPct: 20
-agentRuntime:
-  defaultBudgets:
-    maxHistoryMessages: 20
-    maxHistoryTokens: 40000
-    maxRecentToolMessages: 6
-    maxToolResultChars: 4000
-    maxVisibleToolSchemas: 64
-    maxContextBlockChars: 4000
 `);
 
       const config = loadConfig(tmpDir);
@@ -744,345 +608,6 @@ marking:
 
       expect(config.marking.oracleTimeoutMs).toBe(5000);
       expect(config.marking.oracleVsCurrency).toBe('eur');
-    });
-  });
-
-  describe('llm retry, scout, and thinking config', () => {
-    it('applies Zod defaults for llm.retry when omitted', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.llm.retry.maxRetries).toBe(2);
-      expect(config.llm.retry.serverErrorBackoffMs).toBe(10000);
-      expect(config.llm.retry.defaultRateLimitBackoffMs).toBe(60000);
-    });
-
-    it('applies Zod defaults for llm.thinking budgets when omitted', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.llm.thinking.lightBudgetTokens).toBe(2048);
-      expect(config.llm.thinking.deepBudgetTokens).toBe(10240);
-    });
-
-    it('loads explicit llm retry config from YAML', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML + `
-llm:
-  retry:
-    maxRetries: 3
-    serverErrorBackoffMs: 15000
-    defaultRateLimitBackoffMs: 90000
-`);
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.llm.retry.maxRetries).toBe(3);
-      expect(config.llm.retry.serverErrorBackoffMs).toBe(15000);
-      expect(config.llm.retry.defaultRateLimitBackoffMs).toBe(90000);
-    });
-
-    it('rejects llm.retry.maxRetries below 0', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML + `
-llm:
-  retry:
-    maxRetries: -1
-`);
-
-      expect(() => loadConfig(tmpDir)).toThrow();
-    });
-  });
-
-  describe('agentRuntime config defaults', () => {
-    it('applies Zod defaults for agentRuntime when omitted', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.agentRuntime.failureBackoff.backoffThreshold).toBe(3);
-      expect(config.agentRuntime.failureBackoff.maxFailures).toBe(5);
-      expect(config.agentRuntime.toolCircuitBreaker.failureThreshold).toBe(3);
-      expect(config.agentRuntime.toolCircuitBreaker.reopenAfterTicks).toBe(1);
-      expect(config.agentRuntime.thinking.drawdownThresholdPct).toBe(-2);
-      expect(config.agentRuntime.contextDiff.fullContextEveryTicks).toBe(10);
-      expect(config.agentRuntime.contextDiff.maxDiffTokens).toBe(200);
-      expect(config.agentRuntime.contextDiff.maxChangedLines).toBe(12);
-      expect(config.agentRuntime.defaultBudgets.maxHistoryMessages).toBe(20);
-      expect(config.agentRuntime.sandboxDefaults.memoryMb).toBe(512);
-      expect(config.agentRuntime.sandboxDefaults.cpuShares).toBe(256);
-      expect(config.agentRuntime.tools.codeExecute.defaultTimeoutMs).toBe(60000);
-      expect(config.agentRuntime.tools.codeExecute.defaultMaxOutputBytes).toBe(51200);
-    });
-
-    it('loads explicit agentRuntime overrides from YAML', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), `
-app:
-  port: 3000
-database:
-  url: postgres://localhost/test
-redis:
-  url: redis://localhost:6379
-execution:
-  defaultSlippageBps: 50
-risk:
-  globalMaxDrawdownPct: 20
-agentRuntime:
-  defaultBudgets:
-    maxHistoryMessages: 20
-    maxHistoryTokens: 40000
-    maxRecentToolMessages: 6
-    maxToolResultChars: 4000
-    maxVisibleToolSchemas: 64
-    maxContextBlockChars: 4000
-  failureBackoff:
-    maxFailures: 10
-  thinking:
-    drawdownThresholdPct: -5
-  sandboxDefaults:
-    memoryMb: 1024
-`);
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.agentRuntime.failureBackoff.maxFailures).toBe(10);
-      expect(config.agentRuntime.thinking.drawdownThresholdPct).toBe(-5);
-      expect(config.agentRuntime.sandboxDefaults.memoryMb).toBe(1024);
-    });
-
-    it('rejects agentRuntime.thinking.drawdownThresholdPct above 0 (must be negative)', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), `
-app:
-  port: 3000
-database:
-  url: postgres://localhost/test
-redis:
-  url: redis://localhost:6379
-execution:
-  defaultSlippageBps: 50
-risk:
-  globalMaxDrawdownPct: 20
-agentRuntime:
-  defaultBudgets:
-    maxHistoryMessages: 20
-    maxHistoryTokens: 40000
-    maxRecentToolMessages: 6
-    maxToolResultChars: 4000
-    maxVisibleToolSchemas: 64
-    maxContextBlockChars: 4000
-  thinking:
-    drawdownThresholdPct: 5
-`);
-
-      expect(() => loadConfig(tmpDir)).toThrow();
-    });
-
-    it('rejects agentRuntime.contextDiff.maxChangedLines below 1', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), `
-app:
-  port: 3000
-database:
-  url: postgres://localhost/test
-redis:
-  url: redis://localhost:6379
-execution:
-  defaultSlippageBps: 50
-risk:
-  globalMaxDrawdownPct: 20
-agentRuntime:
-  defaultBudgets:
-    maxHistoryMessages: 20
-    maxHistoryTokens: 40000
-    maxRecentToolMessages: 6
-    maxToolResultChars: 4000
-    maxVisibleToolSchemas: 64
-    maxContextBlockChars: 4000
-  contextDiff:
-    maxChangedLines: 0
-`);
-
-      expect(() => loadConfig(tmpDir)).toThrow();
-    });
-
-    it('rejects agentRuntime.sandboxDefaults.memoryMb below minimum (64)', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), `
-app:
-  port: 3000
-database:
-  url: postgres://localhost/test
-redis:
-  url: redis://localhost:6379
-execution:
-  defaultSlippageBps: 50
-risk:
-  globalMaxDrawdownPct: 20
-agentRuntime:
-  defaultBudgets:
-    maxHistoryMessages: 20
-    maxHistoryTokens: 40000
-    maxRecentToolMessages: 6
-    maxToolResultChars: 4000
-    maxVisibleToolSchemas: 64
-    maxContextBlockChars: 4000
-  sandboxDefaults:
-    memoryMb: 32
-`);
-
-      expect(() => loadConfig(tmpDir)).toThrow();
-    });
-
-    it('loads agentRuntime.resourceProfiles from YAML', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), `
-app:
-  port: 3000
-database:
-  url: postgres://localhost/test
-redis:
-  url: redis://localhost:6379
-execution:
-  defaultSlippageBps: 50
-risk:
-  globalMaxDrawdownPct: 20
-agentRuntime:
-  defaultBudgets:
-    maxHistoryMessages: 20
-    maxHistoryTokens: 40000
-    maxRecentToolMessages: 6
-    maxToolResultChars: 4000
-    maxVisibleToolSchemas: 64
-    maxContextBlockChars: 4000
-  resourceProfiles:
-    free:
-      memoryLimitMb: 512
-      memoryReservationMb: 256
-      cpuShares: 256
-      maxProcesses: 50
-      tempStorageMb: 100
-    pro:
-      memoryLimitMb: 512
-      cpuShares: 256
-      maxProcesses: 50
-      tempStorageMb: 100
-    enterprise:
-      memoryLimitMb: 4096
-      memoryReservationMb: 2048
-      cpuShares: 1024
-      maxProcesses: 200
-      tempStorageMb: 1000
-      maxWallClockMs: 0
-`);
-
-      const config = loadConfig(tmpDir);
-
-      const profiles = config.agentRuntime.resourceProfiles;
-      expect(profiles['free']).toBeDefined();
-      expect(profiles['free']!.memoryLimitMb).toBe(512);
-      expect(profiles['free']!.memoryReservationMb).toBe(256);
-      expect(profiles['free']!.cpuShares).toBe(256);
-
-      // pro: memoryReservationMb is optional — absent in YAML → undefined
-      expect(profiles['pro']).toBeDefined();
-      expect(profiles['pro']!.memoryLimitMb).toBe(512);
-      expect(profiles['pro']!.memoryReservationMb).toBeUndefined();
-
-      // enterprise: all fields, including optional maxWallClockMs
-      expect(profiles['enterprise']).toBeDefined();
-      expect(profiles['enterprise']!.memoryLimitMb).toBe(4096);
-      expect(profiles['enterprise']!.memoryReservationMb).toBe(2048);
-      expect(profiles['enterprise']!.cpuShares).toBe(1024);
-      expect(profiles['enterprise']!.maxWallClockMs).toBe(0);
-    });
-
-    it('rejects agentRuntime.resourceProfiles with memoryLimitMb below minimum (64)', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), `
-app:
-  port: 3000
-database:
-  url: postgres://localhost/test
-redis:
-  url: redis://localhost:6379
-execution:
-  defaultSlippageBps: 50
-risk:
-  globalMaxDrawdownPct: 20
-agentRuntime:
-  defaultBudgets:
-    maxHistoryMessages: 20
-    maxHistoryTokens: 40000
-    maxRecentToolMessages: 6
-    maxToolResultChars: 4000
-    maxVisibleToolSchemas: 64
-    maxContextBlockChars: 4000
-  resourceProfiles:
-    free:
-      memoryLimitMb: 32
-      cpuShares: 256
-      maxProcesses: 50
-      tempStorageMb: 100
-`);
-
-      expect(() => loadConfig(tmpDir)).toThrow();
-    });
-
-    it('rejects agentRuntime.resourceProfiles with memoryReservationMb > memoryLimitMb', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), `
-app:
-  port: 3000
-database:
-  url: postgres://localhost/test
-redis:
-  url: redis://localhost:6379
-execution:
-  defaultSlippageBps: 50
-risk:
-  globalMaxDrawdownPct: 20
-agentRuntime:
-  defaultBudgets:
-    maxHistoryMessages: 20
-    maxHistoryTokens: 40000
-    maxRecentToolMessages: 6
-    maxToolResultChars: 4000
-    maxVisibleToolSchemas: 64
-    maxContextBlockChars: 4000
-  resourceProfiles:
-    free:
-      memoryLimitMb: 512
-      memoryReservationMb: 1024
-      cpuShares: 256
-      maxProcesses: 50
-      tempStorageMb: 100
-`);
-
-      expect(() => loadConfig(tmpDir)).toThrow(
-        'memoryReservationMb (1024) must be ≤ memoryLimitMb (512)',
-      );
-    });
-
-    it('defaults resourceProfiles to empty record when absent from YAML', () => {
-      writeFileSync(resolve(tmpDir, 'default.yaml'), `
-app:
-  port: 3000
-database:
-  url: postgres://localhost/test
-redis:
-  url: redis://localhost:6379
-execution:
-  defaultSlippageBps: 50
-risk:
-  globalMaxDrawdownPct: 20
-agentRuntime:
-  defaultBudgets:
-    maxHistoryMessages: 20
-    maxHistoryTokens: 40000
-    maxRecentToolMessages: 6
-    maxToolResultChars: 4000
-    maxVisibleToolSchemas: 64
-    maxContextBlockChars: 4000
-`);
-
-      const config = loadConfig(tmpDir);
-
-      expect(config.agentRuntime.resourceProfiles).toEqual({});
     });
   });
 

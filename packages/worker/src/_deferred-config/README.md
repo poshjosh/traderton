@@ -1,27 +1,30 @@
-# `_deferred-config/` — quarantined worker files (Deferred, required for cutover)
+# `_deferred-config/` — quarantined worker files (Deferred)
 
 These files are **verbatim copies** from the herobids source worker (`@herobids/*`
 → `@traderton/*` namespace rename only — no content edits). They are **not
 authored**; they are the copied parity harness for capabilities that cannot yet
 compile in Traderton.
 
-## Why quarantined
+## Config shape — RESOLVED (Phase 9b item A, 2026-09-07)
 
-They depend on a **Traderton-owned config shape that has not been authored yet**:
+The Traderton-owned config shape has now landed (copy-and-delete / fused-file trim of
+the herobids `AppConfigSchema` + `AgentRiskDefaultsSchema` into `@traderton/domain` —
+re-opening the Phase-1 over-deletion). The following files were **un-quarantined**
+(moved back to `packages/worker/src/`) and are green:
 
-- `config.ts` / `config.test.ts` — need `AppConfig` / `AppConfigSchema` from
-  `@traderton/domain`.
-- `agent-risk-limits.ts` / `agent-risk-limits.test.ts` /
-  `agent-risk-limits.parity.test.ts` — need `AgentRiskDefaultsConfig`.
-- `public-stream-routing.ts` / `public-stream-routing.test.ts` — depend on the
-  same config surface.
+- `config.ts` / `config.test.ts` — un-quarantined; the platform `ENV_OVERRIDES`
+  (alerts/telegram/email/llm/billing/auth/evaluation/gmail/sharedServices/
+  platformAssessor/nomad) + billing prod/staging guards were deleted (fused-file
+  line-trim); the copied test was trimmed to trading-only (platform describe/it blocks
+  removed whole; `BASE_YAML` platform block dropped) — line-traceable to source, logged
+  in [013 §A](../../../../docs/features/013-9b-authoring-plan.md).
+- `agent-risk-limits.ts` / `.test.ts` / `.parity.test.ts` — un-quarantined (needed only
+  `AgentRiskDefaultsConfig`, now present); moved verbatim.
+- `public-stream-routing.ts` / `.test.ts` — un-quarantined (needed only
+  `AppConfig['venues']`); moved verbatim.
 
-That config shape is tracked as **`Deferred (required for cutover)`** and is owned
-by **Phase 9 / M1-integration** (see `docs/003-anomalies-and-deviations.md` and
-`docs/features/008-worker-plan.md`). The extraction law is *copy, never author*, so
-the config shape is not stubbed here — it is authored deliberately in Phase 9, at
-which point these files move back into `packages/worker/src/` and rejoin the build
-and test run.
+See [docs/001-parity-ledger.md](../../../../docs/001-parity-ledger.md) (config-shape row)
++ [docs/features/013-9b-authoring-plan.md](../../../../docs/features/013-9b-authoring-plan.md) item A.
 
 ## Quarantined test files (source stays in the build)
 
@@ -47,8 +50,9 @@ deferred in Traderton. The whole file is moved rather than pruned to preserve
 - Excluded from the test run: root `vitest.config.ts` `test.exclude`
   (`**/_deferred-config/**`).
 
-The files remain on disk (retained, not deleted) so that when the config shape
-lands they can be un-quarantined with a move and the exclude entries removed.
+The two remaining files stay on disk (retained, not deleted) so that when their
+deferred subjects land (market-event types for `tick-gates.test.ts`; `tools/trading.ts`
+for `validate-trade-instrument.test.ts`) they can be un-quarantined with a move.
 
 **Do not edit these files** — they must stay verbatim copies for the eventual
 un-quarantine.

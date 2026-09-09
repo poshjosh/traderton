@@ -60,6 +60,8 @@ export {
   SentimentConfigSchema,
   deriveStrategyPreset,
   extractStrategyFromConfig,
+  AgentRiskDefaultsSchema,
+  AppConfigSchema,
 } from './schema.js';
 
 export {
@@ -107,4 +109,6 @@ export type {
   VwapParams,
   PriceActionParams,
   SentimentConfig,
+  AgentRiskDefaultsConfig,
+  AppConfig,
 } from './schema.js';

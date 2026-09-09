@@ -115,6 +115,84 @@ Implication for the split: `llm` stays agent-side; `strategy` is split —
 mechanical (`Dca`, `Mechanical`, `scan-engine`, `regime`) moves, LLM (`Llm`,
 `Hybrid`, `llm-provider`) stays.
 
+### Where mechanical-only is (and is not) enforced — the config-enum question
+
+Recorded 2026-09-07 (M1 holistic review, finding S-1). Mechanical-only shows up at two
+layers, and they are deliberately enforced differently:
+
+- **Registry / runtime layer (enforced now):** the strategy registry never calls
+  `registerAgentDecisionModes({ llm, hybrid })`, so `validateStrategyParams` reports
+  `momentum:llm` / `momentum:hybrid` as unsupported, and `@traderton/strategy` exports only
+  `Mechanical` / `Dca`. This is the copied+trimmed enforcement (source-fix #1) and is the live
+  mechanical-only guarantee today.
+- **Config-enum layer (NOT narrowed yet — by design):** `StrategySchema.decisionMode` is a
+  **verbatim copy** of herobids' `z.enum(['mechanical','llm','hybrid'])`, so a bot config with
+  `decisionMode: 'llm'` still *parses* (the registry then rejects it downstream). The enum was
+  left as-is because narrowing it is a consequential authored behavioural change — exactly the
+  kind this project refuses to make silently during the copy phase.
+
+Why defer the narrowing to 9b rather than do it now: trimming the enum (and its copied
+acceptance test) is *authoring* against a verbatim copy, which breaks copy-never-author and 1:1
+diffability during extraction. Traderton owns its config (decision 2), so the right place to
+express a tighter mechanical-only boundary is the **authored 9b config/composition surface**,
+recorded as a signed-off Intentional Divergence. Two acceptable shapes: (a) narrow the
+Traderton-owned config schema (or a Traderton wrapper over the copied `StrategySchema`) to
+`decisionMode: ['mechanical']` and update the copied test — crispest guarantee; or (b) keep the
+copied enum and rely on the registry rejection, documenting that config parse is
+permissive-by-inheritance while the runtime is mechanical-only. Either way, add an explicit
+live assertion of the mechanical-only guarantee at Traderton's owned boundary (ties to the
+review's harness note that copied tool tests are not type-checked against the Traderton surface).
+This is a 9b design decision, not a pre-9b blocker or a copy defect.
+
+**DECISION (2026-09-07, human-approved): option (a) — narrow-and-diverge.** 9b will tighten the
+Traderton-owned config boundary to `decisionMode: ['mechanical']` (narrowing the Traderton
+`StrategySchema` or a Traderton wrapper over the copied schema), update the copied acceptance
+test to assert `llm`/`hybrid` are rejected at the boundary, and add an explicit live assertion of
+the mechanical-only guarantee. Rationale for (a) over (b): it makes the mechanical-only guarantee
+an explicit product invariant at the boundary Traderton owns, rather than an emergent property of
+downstream registry rejection — closer to decision 3 (own risk/enforcement) and easier to test and
+reason about. This is a sanctioned authored Intentional Divergence on Traderton's owned config
+surface (decision 2), executed in 9b (not during the copy phase).
+
+## Why Traderton does not own human approvals
+
+Decided 2026-09-07 (human-confirmed), during 9b planning, while scoping the intake surface.
+
+The question arose from a config knob (`agentApprovals.ttlMs`) but the real issue is a
+boundary one: **does Traderton own the human-approval lifecycle?** Answer: **no.** The
+consuming agent platform owns it.
+
+The model — "agents ask for approvals": when a consumer's policy says a proposed trade needs
+a human sign-off, the **consumer** decides that, asks the human (its own UI / messaging), holds
+the pending approval (its TTL, short-code, expiry, per-user ownership), and — once the human
+approves — calls Traderton's `submit_decision`, the *same* port a direct (no-approval) decision
+uses. Traderton has **no** notion of a pending approval, an approver, or an authorization mode.
+Traderton owns only decision **execution** (`submit_decision` → risk → planner → executors).
+
+Why this is the right seam (evidence from the herobids source, read 2026-09-07):
+- The approval flow is keyed on the platform **`userId`** (`approval.userId !== userId → not_owned`;
+  it hard-requires "an owned agent with a user"). Traderton takes an opaque `ownerId` and never
+  resolves *who* the user is (decision 10) — so an approval concept keyed on user identity cannot
+  be Traderton's.
+- `authorizationMode` (`direct | approval_required`) is read from the platform `agent.unifiedConfig`.
+- The pending path notifies via the platform messaging surface (Telegram, `InstanceEventPublisher`)
+  — the "ask a human" channel is the messaging platform, which stays in herobids (decisions 7–9).
+- What the approval flow *reuses* from Traderton is only `submitDecisionForExecution` on approve —
+  i.e. the execution Traderton already owns. Everything wrapping it (ask/hold/expire/notify/own-by-user)
+  is platform.
+
+Consequences:
+- The copied `decision_approvals` table + `DecisionApprovalRepository` (Phase 2) were an **orphan**
+  in Traderton (no trading code imported them). They are **deleted** (Intentional Divergence, logged
+  in [001](./001-parity-ledger.md)); the initial migration regenerated (23→22 tables). Deletion is the
+  sanctioned action (copy-and-delete), preserves 1:1 diffability, and is not a silent drop — the
+  *capability* is consumer-owned, and Traderton's obligation (`submit_decision` execution) is unchanged.
+- 9b's intake surface (item C) shrinks accordingly: no `ApprovalService`, no `authorizationMode` fork,
+  no `agentApprovals` config in Traderton. Item C is just the venue-account-direct `DecisionIntakeResolver`
+  + a slim decision handler that drives `submitDecisionForExecution`.
+- This tightens, and is consistent with, the Phase-8 reclassification that already put the
+  intake/approval/session cluster on the platform side.
+
 ## Why `blueprint.ts` is a within-file seam
 
 `blueprint.ts` is platform bot/agent-blueprint policy (agent style, preset
