@@ -45,6 +45,14 @@ findings summarized inline. Governed by [AGENTS.md](../../AGENTS.md), [000](../0
   (a) scope = bot `TradingActor` only (agent-direct + registry → item C); (b) ports = inject `AppConfig`
   + `InstanceLoader`; (c) `idGen` = copy the herobids util verbatim; (d) `createStrategy` = mechanical/dca
   only + defensive throw (llm/hybrid already rejected by `BotConfigSchema` per A′; no new Gap). See §4.
+- **Item C intake decisions LOCKED** (2026-09-07, human-approved; full design [017](./017-item-c-intake-proposal.md), §4 crux resolved):
+  (a) **require a running `ExecutionActor`; DROP the grant-fallback** — no actor → `instance_not_running`
+  (existing copied code); the `AgentIntakeResolver` grant-fallback + `ActorStateOwner` session wrapper are
+  NOT copied (Intentional Divergence — it is the `agentConnections ⋈ connections` grant front-end, the
+  same platform layer decisions 11–13 + the Phase-8 `resolveBotStartupContext` cut already placed
+  consumer-side; legacy pre-actor path demoted 2026-06-14). (b) item B's factory owns the `actorRegistry`
+  `Map<string, ExecutionActor>`; (c) item C constructs + registers the `AgentTradingActor` (lifecycle
+  driver = item D). See §5.
 
 ## 1. Governing invariants for every authored item (the 9b safety rules)
 
@@ -84,7 +92,7 @@ Every 9b item re-tested (2026-09-07, verified against herobids source) against f
 | **A′. S-1 mechanical-only narrowing** ✅ **DONE 2026-09-07** | **AUTHORED (wrapper + test)** | Deliberate divergence (decision 3 / decision 2). **LANDED:** authored `MechanicalStrategySchema` (Traderton wrapper, `decisionMode: ['mechanical']`); re-pointed `BotConfigSchema.strategy` at it; copied `StrategySchema` left byte-verbatim (option a-i, wrapper). Dedicated authored test `config/mechanical-only.test.ts` (9 assertions) pins the guarantee. Build+lint green; 2240 tests pass (+9). Follow-up (item D): narrow the advertised `create_bot.config.strategy` tool-schema. |
 | **A″. `config.ts` loader** | **COPY (fused-file trim)** | Copy the loader; delete the platform `ENV_OVERRIDES` entries + the `billing.primaryProvider` prod guard (line deletions, diff-visible). |
 | **B. Composition root** (`createTradingRuntime` factory, **bot-lifecycle only**) | **AUTHORED** (decisions LOCKED — §4.1) | herobids `index.ts` (~3050 lines) constructs the trading actors *inside* deleted startup/session/intake wiring — no faithful trading subset (confirmed Phase 8). Wired modules all copied; wiring factory authored. **The largest genuinely-authored piece.** Scope = bot `TradingActor` only; agent-direct/registry/intake → item C; drive/tool-registry → item D; event producer → C2 (M1 no-op stubs); maxBots → E. Full brief + herobids trace: [015](./015-composition-root-proposal.md) + §4. Oracle: actor test files build the dep objects (template); herobids-clone A/B. |
-| **C. Intake resolver + slim handler** | **COPY (fused-file) + 1 THIN SEAM** | Verified (agent-intake-resolver.ts): `getIntakeDeps`/`getDecisionContext`/`getPosition`/`buildPersistence` import ONLY copyable deps (db repos, engine `PaperExecutor`/`realClock`/`flatPosition`, `buildAgentRiskLimits`, `validateTradeInstrument`) → **copy the file**. The ONE platform-fused method is `resolveActiveBinding()` (joins platform `agentConnections ⋈ connections`) → **thin seam**: replace with venue-account-direct (injected `venueAccountId`). Handler drops the platform paused/session/telegram/approval branches (copy-and-delete). |
+| **C. Intake router + registry + AgentTradingActor wiring** (decisions LOCKED — §5) | **COPY (already, Phase 8) + AUTHORED wiring/seam + DROP** | Re-verified 2026-09-07 (post-investigation): the actor-owned intake (`AgentTradingActor.getIntakeDeps`/`getDecisionContext`/`getPosition`), `ExecutionActor`, `TradingActor`, `validate-trade-instrument`, `venue-instrument-cache` were **already COPIED in Phase 8** — C reuses them. C **authors** only wiring: a slim decision router (`submitDecision`), a plain `Map<string, ExecutionActor>` registry (owned by B's factory), the venue-account-direct resolver seam (injected `venueAccountId` + the venue-account guards), and `AgentTradingActor` construct+register. It **DROPS** (Intentional Divergence) the `AgentIntakeResolver` grant-fallback + `ActorStateOwner` — the `agentConnections ⋈ connections` grant front-end / agent-session wrapper, both platform (crux resolved = option (a); require a running actor else `instance_not_running`). Handler drops the platform paused/session/telegram/approval branches. |
 | **D. Drive-path tools** (`bots.ts`, `trading.ts`) | **COPY** (after a tiny authored target) | Both copy verbatim once available: their only Traderton-absent dep is `AGENT_MESSAGE_TYPES` (3 trading consts) + an in-process `publishToInbound` target. Author the 3 consts + the drive target (small); then **copy the tools**. Do NOT copy the 1941-line platform broker. |
 | **D-target. In-process drive target** | **AUTHORED (small)** | Routes `DECISION_SUBMIT`→handler (C), `MANAGE_BOT`→bot-lifecycle (E), + the sync reply. Small authored wiring. |
 | **E. maxBots atomic** | **AUTHORED (thin primitive)** | herobids' atomic method row-locked the `agents` table; Traderton has none → re-key the lock to `ownerId` via a Postgres advisory lock inside the count+write txn. Small, isolated, testable authored primitive. Human-confirmed atomic. |
@@ -93,8 +101,10 @@ Every 9b item re-tested (2026-09-07, verified against herobids source) against f
 | **F. M2 REST adapter** | **AUTHORED** (+ COPY-adapt routes) | 005 is a fresh contract with no herobids equivalent (herobids uses JWT `request.userId`, not HMAC boundary) → the shell/auth/idempotency/deadline/dispatcher are authored. The trading route HANDLERS copy-adapt (`userId`→`ownerId`). Sequenced last (M2). |
 | **F-routes. Agent-shaped routes** (`actor-health` = `/agents/:id/health`; `analytics` grouped by agent/session) | **HAND-BACK (Gap)** or boundary-inject | Some quarantined routes are inherently agent endpoints (verified: `agents`/`agentRuntimeSessions` refs). Decided route-by-route at F; agent-only ones stay herobids (signed-off Gap, not silent). |
 
-**Net irreducible AUTHORED surface (the risk):** (1) the composition-root factory [B], (2) the
-`resolveActiveBinding` venue-account-direct seam [C], (3) the in-process drive target [D-target],
+**Net irreducible AUTHORED surface (the risk):** (1) the composition-root factory [B], (2) the intake
+wiring [C] — the slim decision router, the `Map<string,ExecutionActor>` registry, the venue-account-direct
+resolver seam, + `AgentTradingActor` construct/register (over the Phase-8-copied actor intake; the
+grant-fallback is dropped, not authored), (3) the in-process drive target [D-target],
 (4) the atomic maxBots primitive [E], (5) the S-1 one-liner [A′], and — only at M2 — (6) the REST
 shell [F]. Everything else is copy-and-delete or copy. **Improvements (durable event outbox) are
 deferred out of 9b entirely.** This is the honest, minimized creative surface.
@@ -292,40 +302,72 @@ factory is what M1 (herobids in-process) and M2 (REST) both drive ("same ports, 
 > cleanup, 2026-09-07). Item C therefore has **no** `ApprovalService`, no `authorizationMode` fork,
 > no approval config.
 
-**What it is.** An authored in-process intake surface, execution-only:
-- A **venue-account-direct `DecisionIntakeResolver`** replacing herobids `resolveActiveBinding()` (the
-  `agentConnections ⋈ connections` grant join, both platform tables absent from `@traderton/db`). The
-  authored resolver takes an **injected `venueAccountId`** (+ `ownerId`/`actor`) and reproduces the
-  `getIntakeDeps` / `getDecisionContext` / `getPosition` / `buildPersistence` bodies, which use only
-  copied repos + engine + `buildAgentRiskLimits`.
-- A **slim decision handler** that drives the copied engine: resolve intake → context → position → build
-  `Decision` → `validatePerTradeLevels` → `submitDecisionForExecution`. The herobids paused/active-session
-  gates, Telegram notification, and the entire `approval_required` branch are platform → **dropped**
-  (the consumer performs any approval upstream, then submits a plain decision).
+**Full design + evidence: [017-item-c-intake-proposal.md](./017-item-c-intake-proposal.md) (APPROVED
+2026-09-07; §4 crux resolved).** This §5 is the self-contained implementer brief; an implementer works
+from §5 + 017 + the cited copied modules, not this chat.
 
-**Why authored.** The grant-model resolver is built on dropped platform tables; a venue-account-direct
-resolver is authored (the Phase-8 reclassification: DELETE the cluster, author the capability here).
+### 5.1 Locked decisions (2026-09-07, human — do not re-litigate)
 
-**Copied (behaviour reused):** `submitDecisionForExecution`, `validatePerTradeLevels` (engine),
-`buildAgentRiskLimits` (worker), the trading repos in `@traderton/db` (`DecisionRepository`,
-`DecisionFailureRepository`, position/fill/plan/order repos). **Not used:** the deleted
-`DecisionApprovalRepository`.
+- **(a) Require a running actor; DROP the grant-fallback.** Traderton accepts a decision only for a
+  **registered, running `ExecutionActor`**; no actor → `instance_not_running` (an existing copied
+  rejection code in `execution-actor.ts`). The herobids `AgentIntakeResolver` grant-fallback and the
+  `ActorStateOwner` session wrapper are **NOT copied** (Intentional Divergence — see 001 + 003). Rationale:
+  (i) the grant-fallback is the *legacy pre-actor* agent-direct path, demoted to a paper-only fallback
+  when the actor concept landed (herobids 2026-06-14); (ii) it IS the connection-grant front-end —
+  `resolveActiveBinding` resolves `venueAccountId` from `agentConnections ⋈ connections` (a "binding" =
+  the agent↔connection grant), the exact layer decisions 11–13 + the Phase-8 `resolveBotStartupContext`
+  cut already placed **consumer-side**. "Agent with no binding" = a consumer-side grant state; Traderton
+  has no injected `venueAccountId` to execute against → reject. Not a dropped trading capability; the same
+  seam already cut for bots, applied to the agent-direct path.
+- **(b) Item B's factory owns the `actorRegistry`** (`Map<string, ExecutionActor>`) and passes it to the
+  intake handler + exposes register/deregister — B and C compose over one map.
+- **(c) Item C constructs + registers the `AgentTradingActor`** (deferred from B per §4.5a). Its start/stop
+  **lifecycle driver** is item D / the M1 consumer — C authors construct+register + exposes the hook.
 
-**Ports/invariant check.** The resolver **receives** `venueAccountId` (does not resolve grants — that
-stays consumer-side, decisions 11–13); Traderton runs only the venue-account-existence guards it owns
-(`missing_source_venue_account`, `source_venue_account_not_found`). It drives — never re-implements —
-`submitDecisionForExecution`. There is no approval decision in Traderton to injectable-ize, which keeps
-the seam clean.
+### 5.2 What it is (the clean Traderton intake)
 
-**Open decisions (surface to reviewer):**
-1. `InstanceEventPublisher` (herobids-only; emits trading telemetry to Redis streams a platform consumes).
-   Recommend an **authored thin event port** Traderton publishes to and the consumer wires — a value port,
-   not behaviour. Confirm it carries no platform-only payload shape. (Now the only remaining item-C
-   platform-edge question, since approvals are out.)
+An authored **thin decision router + a plain `Map<string, ExecutionActor>` registry** over the
+**already-copied actor-owned intake** (Phase 8 copied `execution-actor.ts` [`ExecutionActor`/`IntakeResult`/
+`isIntakeRejection`], `AgentTradingActor` [with its own `getIntakeDeps`/`getDecisionContext`/`getPosition`],
+`TradingActor`, `validate-trade-instrument.ts`, `venue-instrument-cache.ts`):
+- **Authored slim decision handler** `submitDecision(decision)`: registry lookup of the target
+  `ExecutionActor` → `actor.getIntakeDeps(instrumentId)` (rejection → typed failure) →
+  `actor.getDecisionContext` → `actor.getPosition` → build `Decision` → `validatePerTradeLevels` →
+  `submitDecisionForExecution(...)` → `actor.recordExecutionOutcome`. Drops the herobids
+  paused/active-session gates, the `approval_required` fork, and Telegram/pending-approval (platform /
+  consumer-owned).
+- **Authored `actorRegistry`** — a plain `Map<string, ExecutionActor>` (NOT `ActorStateOwner`, which is
+  agent-session machinery). Owned by item B's factory (§5.1b); actors register on start, deregister on
+  stop/crash.
+- **Authored venue-account-direct resolver seam** — validates the injected `venueAccountId` + the
+  venue-account-existence guards Traderton owns (`missing_source_venue_account`,
+  `source_venue_account_not_found`); replaces `resolveActiveBinding`'s grant join. Never resolves
+  connection grants (consumer-side).
+- **Authored `AgentTradingActor` construction + registration** — build its deps from the item-B singletons
+  + `buildAgentRiskLimits` + a per-actor `createFillFirstMarkSource`; register in `actorRegistry`.
 
-**Resolves.** `submit_decision` intake **execution** surface (Deferred-required). The approval half of the
-former reclassified cluster is now explicitly consumer-owned (Intentional Divergence), not a Traderton
-authoring obligation.
+### 5.3 Copied vs authored (manifest — full table in 017 §5)
+- **Already COPIED (Phase 8, reused):** the `ExecutionActor` contract, actor-owned intake
+  (`AgentTradingActor.getIntakeDeps/...`), `validate-trade-instrument`, `venue-instrument-cache`, engine
+  `submitDecisionForExecution`/`validatePerTradeLevels`/`DecisionContextHashMismatchError`,
+  `buildAgentRiskLimits`, the trading repos.
+- **AUTHORED (wiring/seam):** the slim decision handler, the `actorRegistry` map, the venue-account-direct
+  resolver seam, `AgentTradingActor` construct+register.
+- **DROPPED (Intentional Divergence):** `AgentIntakeResolver` grant-fallback + `ActorStateOwner` session
+  wrapper (connection-grant front-end + agent session lifecycle — platform).
+
+**Ports/invariant check.** The handler routes a decision **value** to the actor-owned intake + drives the
+engine; the registry holds actor references; the resolver receives an injected `venueAccountId`. No port
+injects risk/planner/executor behaviour. ✓
+
+### 5.4 Verification (authored — no copy oracle)
+Build/lint green; existing 2244 tests stay green. Authored handler test (labelled): a registered stub
+`ExecutionActor` receives a routed decision → handler drives `submitDecisionForExecution`; an unregistered
+actor → `instance_not_running`; a `validatePerTradeLevels` failure → typed rejection. Trace the handler's
+path to herobids `agent-decision-handler.ts` (the non-approval branch) for reviewability.
+
+**Resolves.** `submit_decision` intake **execution** surface (`Deferred (required for cutover)`). The
+approval half + the grant-fallback are consumer-owned (Intentional Divergence), not Traderton obligations.
 
 ---
 
