@@ -41,6 +41,10 @@ findings summarized inline. Governed by [AGENTS.md](../../AGENTS.md), [000](../0
 - **Async delivery = poll-first + opt-in register-once webhook** (2026-09-07, human-confirmed); the
   durable event log (Postgres+Redis) is an **improvement, tracked separately** in
   [014](./014-decision-response-and-event-model.md), NOT smuggled into 9b — see §1a "Improvements".
+- **Item B composition-root decisions LOCKED** (2026-09-07, human-approved; full brief [015](./015-composition-root-proposal.md)):
+  (a) scope = bot `TradingActor` only (agent-direct + registry → item C); (b) ports = inject `AppConfig`
+  + `InstanceLoader`; (c) `idGen` = copy the herobids util verbatim; (d) `createStrategy` = mechanical/dca
+  only + defensive throw (llm/hybrid already rejected by `BotConfigSchema` per A′; no new Gap). See §4.
 
 ## 1. Governing invariants for every authored item (the 9b safety rules)
 
@@ -79,7 +83,7 @@ Every 9b item re-tested (2026-09-07, verified against herobids source) against f
 | **A. Config shape** (`AppConfigSchema`/`AppConfig` + `AgentRiskDefaultsSchema`) ✅ **DONE 2026-09-07** | **COPY (fused-file trim)** | herobids `AppConfigSchema` is one `z.object({…})` (schema.ts:1648) interleaving ~15 trading keys with ~20 platform keys + a platform `superRefine` — the SAME shape as the Phase-1 `config/schema.ts` monolith. Copy-and-delete = re-sync the object literal from source and delete the platform keys/`superRefine` in place. Re-opened the Phase-1 over-deletion; sub-schemas already present. **LANDED:** re-synced `AppConfigSchema`/`AppConfig` + `AgentRiskDefaultsSchema`/`AgentRiskDefaultsConfig`; un-quarantined `config.ts`+`config.test.ts` (loader trimmed of platform ENV_OVERRIDES/billing-guards; test trimmed to trading-only), `agent-risk-limits.*`, `public-stream-routing.*`. Build+lint green; 2231 tests pass (+100). Note: `candleFetch*` NOT brought across — the live loop takes those as injected deps (item B), not via config. **Not authoring** (except the deferred S-1 line, A′). |
 | **A′. S-1 mechanical-only narrowing** ✅ **DONE 2026-09-07** | **AUTHORED (wrapper + test)** | Deliberate divergence (decision 3 / decision 2). **LANDED:** authored `MechanicalStrategySchema` (Traderton wrapper, `decisionMode: ['mechanical']`); re-pointed `BotConfigSchema.strategy` at it; copied `StrategySchema` left byte-verbatim (option a-i, wrapper). Dedicated authored test `config/mechanical-only.test.ts` (9 assertions) pins the guarantee. Build+lint green; 2240 tests pass (+9). Follow-up (item D): narrow the advertised `create_bot.config.strategy` tool-schema. |
 | **A″. `config.ts` loader** | **COPY (fused-file trim)** | Copy the loader; delete the platform `ENV_OVERRIDES` entries + the `billing.primaryProvider` prod guard (line deletions, diff-visible). |
-| **B. Composition root** | **AUTHORED** | herobids `index.ts` (~2000 lines) constructs the trading actors *inside* deleted startup/session/intake wiring — no faithful trading subset exists (confirmed Phase 8). The wired modules are all copied; the wiring factory is authored. **The largest genuinely-authored piece.** Oracle: the actor test files already build the dep objects (template); herobids-clone A/B for behaviour. |
+| **B. Composition root** (`createTradingRuntime` factory, **bot-lifecycle only**) | **AUTHORED** (decisions LOCKED — §4.1) | herobids `index.ts` (~3050 lines) constructs the trading actors *inside* deleted startup/session/intake wiring — no faithful trading subset (confirmed Phase 8). Wired modules all copied; wiring factory authored. **The largest genuinely-authored piece.** Scope = bot `TradingActor` only; agent-direct/registry/intake → item C; drive/tool-registry → item D; event producer → C2 (M1 no-op stubs); maxBots → E. Full brief + herobids trace: [015](./015-composition-root-proposal.md) + §4. Oracle: actor test files build the dep objects (template); herobids-clone A/B. |
 | **C. Intake resolver + slim handler** | **COPY (fused-file) + 1 THIN SEAM** | Verified (agent-intake-resolver.ts): `getIntakeDeps`/`getDecisionContext`/`getPosition`/`buildPersistence` import ONLY copyable deps (db repos, engine `PaperExecutor`/`realClock`/`flatPosition`, `buildAgentRiskLimits`, `validateTradeInstrument`) → **copy the file**. The ONE platform-fused method is `resolveActiveBinding()` (joins platform `agentConnections ⋈ connections`) → **thin seam**: replace with venue-account-direct (injected `venueAccountId`). Handler drops the platform paused/session/telegram/approval branches (copy-and-delete). |
 | **D. Drive-path tools** (`bots.ts`, `trading.ts`) | **COPY** (after a tiny authored target) | Both copy verbatim once available: their only Traderton-absent dep is `AGENT_MESSAGE_TYPES` (3 trading consts) + an in-process `publishToInbound` target. Author the 3 consts + the drive target (small); then **copy the tools**. Do NOT copy the 1941-line platform broker. |
 | **D-target. In-process drive target** | **AUTHORED (small)** | Routes `DECISION_SUBMIT`→handler (C), `MANAGE_BOT`→bot-lifecycle (E), + the sync reply. Small authored wiring. |
@@ -170,37 +174,100 @@ Log the divergence in [001](../001-parity-ledger.md) (mechanical-only row) — a
 
 ## 4. Item B — Trading composition root
 
-**What it is.** An authored `createTradingRuntime(config, injected)` factory (not a top-level script)
-that constructs and wires the trading half of herobids `apps/worker/src/index.ts`: the trading repos
-(all in `@traderton/db`), `idGen`, `VenueAdapterFactory`, mark source/selector, price + market-data
-registry, scanner infra (`CandleFetchBreaker`, rate limiter, scanner candle fetcher), the mechanical
-strategies (`@traderton/strategy`), the stream pool, `WorkerRuntime`, the actor factory
-(`TradingActor`/`AgentTradingActor`), the tool registry (`createToolRegistry` re-materialized), and the
-M1 intake wiring (item C). It also populates `packages/worker/src/index.ts` (currently `export {};`) as
-the package's public surface.
+**Full design + evidence: [015-composition-root-proposal.md](./015-composition-root-proposal.md)
+(APPROVED 2026-09-07).** This section is the self-contained implementer brief; 015 carries the
+line-by-line herobids trace and the dep-field maps. An implementer should not need this chat — read
+this §4 + 015 + the cited copied modules.
 
-**Why authored.** herobids `index.ts` is a ~2000-line platform-fused startup script with no faithful
-trading subset (confirmed Phase 8). The trading modules it wires are already copied; only the wiring is
-authored.
+**What it is.** An authored `createTradingRuntime(ports)` **factory** (not a top-level script) that
+wires the ALREADY-COPIED trading modules into a runnable **bot-lifecycle** runtime. Authored = wiring
+only; every trading primitive is already copied and is not re-implemented or overridden.
 
-**Strong template available:** `TradingActorDeps`, `AgentTradingActorDeps`, and `WorkerRuntime` are
-already present and exported in `@traderton/worker`, and the existing actor test files already construct
-these dep objects — the authored root supplies the real repos/ports in place of the test stubs.
+**Why authored.** herobids `apps/worker/src/index.ts` (~3050 lines) is platform-fused and constructs the
+trading actors inside deleted startup/session/intake wiring — no faithful trading-only subset exists
+(confirmed Phase 8). The modules it wires are all copied into `@traderton/*`; only the wiring is authored.
 
-**Ports/invariant check.** Wiring only. The factory injects config values + platform-owned values
-(`venueAccountId`, `ownerId`) into the copied modules; it does not re-implement or override any engine
-primitive. `createToolRegistry` + `assertToolCatalogMatchesRegistry` are re-materialized as the authored
-composition (LOW-1 in the review).
+### 4.1 Approved decisions (2026-09-07, human — these are LOCKED, not open)
 
-**Sub-item:** `ActorStateOwner` (herobids `agents/actor-state-owner.ts`) — a thin `Map<string, ExecutionActor>`
-owner. Trading-adjacent; author (or copy if it's clean) as part of the root.
+- **(a) Scope = bot `TradingActor` ONLY.** B builds the bot-lifecycle runtime. The `AgentTradingActor`
+  (agent-direct) + its `actorRegistry` decision-routing are **excluded → item C** (they need the intake
+  surface). `TradingActor` implements `InstanceActor` (the clean `WorkerRuntime` fit); `AgentTradingActor`
+  implements `ExecutionActor` and is out of scope here.
+- **(b) Ports = inject `AppConfig` + `InstanceLoader`.** The factory receives the whole Traderton-owned
+  `AppConfig` (item A) + `redis` + an `instanceLoader` callback (the consumer's running-bot loader). Reuse
+  the copied `WorkerRuntime` types; no new bespoke port surface.
+- **(c) `idGen` = copy the herobids id-gen util verbatim** (it is trading scaffolding — a UUIDv7 generator
+  with `planId()`/`decisionId()`). Locate the discrete herobids source file and copy it; do NOT author a
+  new one. If no discrete file exists, STOP and surface it (do not hand-author an id scheme).
+- **(d) `createStrategy` = mechanical/dca ONLY + defensive `throw`.** `LlmStrategy`/`HybridStrategy` are
+  absent from `@traderton/strategy` (correct — mechanical-only, decisions 7–9). `BotConfigSchema` (item
+  A′) already rejects `llm`/`hybrid` upstream, so those branches are unreachable via a valid bot config;
+  the authored `createStrategy` handles `dca` + `mechanical` and throws on anything else (belt-and-braces).
+  This is covered by the existing mechanical-only Intentional Divergence — **no new Gap/ledger row**, just
+  a cross-reference.
 
-**Resolves / un-quarantines.** The Trading-loop "assembled runtime / composition Deferred-required" row;
-makes `@traderton/worker` consumable through its barrel (review §7 caveat).
+### 4.2 Construction recipe (authored, from copied modules — see 015 §2.1 for herobids line refs)
 
-**Open decision (surface to reviewer):** factory (`createTradingRuntime`) vs a thin top-level entry that
-calls it. Recommend a **factory + a tiny bin entry** — the factory is what M1 (herobids in-process) and
-M2 (REST) both drive, honoring "same ports, two adapters."
+Singletons, once: `createDatabase(config.database.url)` → 8 trading repos + `PgJournal`; `idGen` (4.1c);
+`createProviderRegistry(config.marketData)` (optional) → scanner infra (`TokenBucketRateLimiter` ×2 +
+`createScannerCandleFetcher` + `CandleFetchBreaker`); mark sources (`OracleMarkSource` +
+`HyperliquidMarkSource` + `MarkSelector` composite fallback); `PublicStreamPool` via
+`buildPublicStreamConnectors(config.venues)`; `VenueAdapterFactory({db, journal, venues, streamConfig})`;
+`InstanceLease(redis, workerId)`; then `new WorkerRuntime(cfg, actorFactory, instanceLoader, lease)`.
+
+### 4.3 Per-bot `ActorFactory` closure (the crux — traced to herobids index.ts:1878–2249)
+
+`async (botId, rawConfig) => TradingActor`:
+1. `BotConfigSchema.safeParse(rawConfig)` — now the mechanical-only schema (A′); throws on llm/hybrid.
+2. Read the **injected `venueAccountId`** from the parsed config — NOT `resolveBotStartupContext` (that
+   platform grant front-end was deleted Phase 8; venueAccountId is injected per decisions 11–13).
+3. `venueAdapterFactory.buildOrderbookAdapter(...)` / `buildSwapAdapter(...)` — credential decrypt via the
+   retained `venue_accounts`/`user_credentials` tables + `CREDENTIAL_ENCRYPTION_KEY` (copied factory does this).
+4. `createStrategy(config.strategy, candleFetcher)` — mechanical/dca (4.1d).
+5. `riskLimits` built INLINE from `config.risk` (bots do this; agents use `buildAgentRiskLimits` — not here).
+6. per-bot `createFillFirstMarkSource({ actorId: botId, fallbackSource: markSelector, fillLookup: fillRepo })`.
+7. scoped `streamPool` (orderbook) / undefined (swap).
+8. assemble `TradingActorDeps` (operator-config fields from `config`) + `new TradingActor(botId, config.strategy.params, deps)`.
+
+### 4.4 Injected vs constructed
+- **Injected (consumer supplies):** `AppConfig`, `redis`, `instanceLoader` (running bots, each config
+  carrying the resolved `venueAccountId` + soft `ownerId`).
+- **Constructed internally:** everything in 4.2 (all copied modules).
+- **Ports/invariant check:** the factory takes config **values** + a bot **loader** (data) + injects the
+  `venueAccountId` (value) per bot. No port injects risk/planner/executor behaviour — those are
+  engine-owned and not overridable. ✓
+
+### 4.5 Exclusions — what B does NOT include, and where each goes
+
+| Excluded from B | Deferred to | Note |
+|-----------------|-------------|------|
+| `AgentTradingActor` + `actorRegistry` decision routing | **item C (intake)** | needs the venue-account-direct resolver |
+| `submitDecision` intake / decision handler | **item C** | B exposes the seams; C attaches |
+| Who publishes lifecycle jobs / in-process `publishToInbound` | **item D (drive)** | B builds the BullMQ *consumer* side (`WorkerRuntime`); D is the producer |
+| `onJournalEvent` / `emitAgentWake` / status publishes (`onStarted`/`onStopped`/`onStartFailed`/`onCrashed`/`onHalted` bodies) | **item C2 (event producer)** | M1 default = **no-op stubs**; keep `onCrashed → runtime.handleActorCrash(botId)` |
+| per-`ownerId` maxBots enforcement | **item E** | — |
+| M2 REST boundary | **item F** | — |
+| the advertised `create_bot.config.strategy` JSON tool-schema narrowing | **item D** | flagged in item A′ follow-up |
+
+B exposes the constructed `WorkerRuntime` + singletons on its return value so C/D/C2 attach without
+re-opening B. **Note (correction of an earlier draft):** the `createToolRegistry`/`assertToolCatalogMatchesRegistry`
+tool-registry composition and `ActorStateOwner` are NOT part of B — the tool registry belongs with the
+tool surface (item D) and `ActorStateOwner` with the agent-direct/intake path (item C). B is the
+bot-lifecycle runtime only.
+
+### 4.6 Verification plan (no copy oracle — how B is validated)
+- Build + lint green; existing **2240 copied tests stay green** (B adds a surface, changes no module).
+- **Authored smoke test (clearly labeled, not a copied oracle):** `createTradingRuntime` with a
+  paper/in-memory config + stub `instanceLoader` returns a `TradingRuntime`; `start()`/`shutdown()` are
+  clean; a paper bot config rehydrates into a `TradingActor` that ticks.
+- **herobids-as-oracle:** 4.3 is traced line-for-line to `index.ts:1878–2249` (see 015); review the
+  authored closure against that reference. Optional deeper check: clone-herobids2-and-drive-Traderton A/B.
+
+**Resolves / un-quarantines.** The Trading-loop "assembled runtime / composition `Deferred (required for
+cutover)`" row; makes `@traderton/worker` consumable through its barrel (review §7 caveat).
+
+**Shape decision (resolved):** a factory (`createTradingRuntime`) + a tiny bin entry that calls it — the
+factory is what M1 (herobids in-process) and M2 (REST) both drive ("same ports, two adapters").
 
 ---
 
@@ -359,7 +426,7 @@ Buckets (§1a): **COPY** = verbatim / fused-file line-trim; **SEAM** = copied fi
 | A config schema | COPY (fused-file trim) | re-sync `AppConfigSchema` object literal + `AgentRiskDefaultsSchema` + `candleFetch*`; delete platform keys + `superRefine` in place | — | (enables `_deferred-config/*`) |
 | A′ S-1 narrowing | AUTHORED (1 line + test) | (copied `StrategySchema` untouched — wrapper) | mechanical-only wrapper + live assertion | — |
 | A″ config loader | COPY (fused-file trim) | `config.ts`, `public-stream-routing.ts`, `agent-risk-limits.ts` (+tests); delete platform `ENV_OVERRIDES` + billing guard | — | `_deferred-config/*` |
-| B composition root | AUTHORED | (wires already-copied modules; actor test files = dep template) | `createTradingRuntime` factory, worker `index.ts` barrel, re-materialized `createToolRegistry`, `ActorStateOwner` | worker barrel |
+| B composition root (bot-lifecycle only) | AUTHORED | (wires already-copied modules; actor test files = dep template) | `createTradingRuntime(ports)` factory + tiny bin entry + worker `index.ts` barrel + copied `idGen` util + authored smoke test. (NOT here: tool registry → D; `ActorStateOwner`/agent-direct → C.) | worker barrel |
 | C intake | COPY (fused-file) + 1 SEAM | copy `agent-intake-resolver` bodies (`getIntakeDeps`/context/position/`buildPersistence`) + slim handler; delete platform paused/session/telegram/approval branches | `resolveActiveBinding` → venue-account-direct (injected `venueAccountId`) | intake execution capability |
 | D drive tools | COPY (after small target) | **`tools/bots.ts`, `tools/trading.ts` verbatim** | 3 trading `AGENT_MESSAGE_TYPES` consts + in-process `publishToInbound` target + bot-lifecycle handler | `validate-trade-instrument.test.ts`, `schema.test.ts` |
 | E maxBots | AUTHORED (thin primitive) | — | per-`ownerId` atomic count+write via advisory lock | — |
