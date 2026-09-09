@@ -154,7 +154,8 @@ See the copy-vs-author manifest in [017 §5](./017-item-c-intake-proposal.md). F
   authored/improvement), §4 item B (done), §5 item C, §9 manifest, §10 stop-gates.
 - [017-item-c-intake-proposal.md](./017-item-c-intake-proposal.md) — item C design record (APPROVED; §4 crux RESOLVED = (a)).
 - [015-composition-root-proposal.md](./015-composition-root-proposal.md) — item B design record + herobids trace (APPROVED).
-- [016-item-b-implementer-prompt.md](./016-item-b-implementer-prompt.md) — the template for a self-contained implementer prompt.
+- [016-item-b-implementer-prompt.md](./016-item-b-implementer-prompt.md) — the template for a self-contained implementer prompt (item B).
+- [019-item-c-implementer-prompt.md](./019-item-c-implementer-prompt.md) — **the item-C implementer prompt (ready to hand off).**
 - [011-m1-holistic-review-report.md](./011-m1-holistic-review-report.md) — the pre-9b review (verdict: sound; bounded 9b scope).
 - [014-decision-response-and-event-model.md](./014-decision-response-and-event-model.md) — sync/async response + the deferred durable event outbox (improvement, NOT 9b).
 - [001-parity-ledger.md](../001-parity-ledger.md) — live status of every capability (source of truth for done-vs-pending).
@@ -166,12 +167,12 @@ See the copy-vs-author manifest in [017 §5](./017-item-c-intake-proposal.md). F
 **The §4 crux is RESOLVED (a) and the decisions are recorded** (013 §0 + §5, 001 + 003 Intentional
 Divergence rows, 017 marked APPROVED). Remaining:
 
-1. Write `019-item-c-implementer-prompt.md` — self-contained, modelled on
-   [016](./016-item-b-implementer-prompt.md). Source of truth for its content = [013 §5](./013-9b-authoring-plan.md)
-   (§5.1 locked decisions, §5.2 what-it-is, §5.3 copied-vs-authored-vs-dropped manifest, §5.4 verification)
-   + [017](./017-item-c-intake-proposal.md). It must stand alone (assume the implementer has no chat context).
-2. Run the coordinator loop: Implementer → CodeReviewer → fix-loop (no CRITICAL/HIGH) → commit → mark C
-   DONE in 013 + 001.
+1. ✅ DONE — [019-item-c-implementer-prompt.md](./019-item-c-implementer-prompt.md) written (self-contained,
+   modelled on [016](./016-item-b-implementer-prompt.md); sourced from [013 §5](./013-9b-authoring-plan.md)
+   + [017](./017-item-c-intake-proposal.md); traces herobids `agent-decision-handler.ts` step 4→8 + the
+   composite resolver's `actor?.isRunning` arm, and enumerates the dropped branches).
+2. Run the coordinator loop: Implementer (hand it 019) → CodeReviewer → fix-loop (no CRITICAL/HIGH) →
+   commit → mark C DONE in 013 + 001.
 3. Pause before item D.
 
 The implementer authors ONLY wiring (slim decision router + `Map<string,ExecutionActor>` registry +

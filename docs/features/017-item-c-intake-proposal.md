@@ -189,5 +189,7 @@ toward (b) and a bigger authored surface — worth knowing before I spec it.
 3. `AgentTradingActor` in C vs later: confirm C constructs+registers it (per 013 §4.5a it was deferred
    from B to C), with its start/stop lifecycle driver as item D.
 
-On your call for §4 (and 2/3), I write `018-item-c-implementer-prompt.md` (self-contained, like 016) and
-lock the decisions into 013 §5 — then implement, review, commit, and pause before item D.
+On the call for §4 (and 2/3), the decisions were locked into [013 §5](./013-9b-authoring-plan.md) and the
+self-contained implementer prompt written as [019-item-c-implementer-prompt.md](./019-item-c-implementer-prompt.md)
+(modelled on 016) — next: implement, review, commit, and pause before item D. (The number is 019, not 018;
+018 is the 9b continuity handoff.)
