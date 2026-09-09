@@ -61,6 +61,15 @@ findings summarized inline. Governed by [AGENTS.md](../../AGENTS.md), [000](../0
   `BOT_QUERY` routing. The investigation reshaped item D: `handleManageBot` is NOT copyable (agent/grant/
   LLM shell — dropped); the authored handler traces only its trading core over the copied `WorkerRuntime`.
   See §6.
+- **Item E maxBots decisions LOCKED** (2026-09-07, human-approved; full design [022](./022-item-e-maxbots-proposal.md)):
+  E is **mostly-COPY** (reframed after two human challenges). (1) `maxBots` = a value arg resolved from
+  `config.agentRiskDefaults.maxBots` + injected per-owner override (Traderton owns default+enforcement;
+  the consumer injects an override value only); (2) mirror herobids' two-call create→mark (`stopped`→
+  `running`) — the `running` mark is the `reclaimOrphans` crash-recovery contract, load-bearing; (3) the
+  advisory lock **copies** the herobids API-path `pg_advisory_xact_lock(classId, hashtext(ownerId))` form
+  (already in Traderton `_deferred-authoring/api-routes/bots.ts:135`), re-keyed `agents`-row→`ownerId`;
+  (4) scope = 2 re-keyed `BotRepository` methods + `createTradingRuntime` seam wiring + the item-D
+  `createAndStart` create→mark call. Only the seam wiring is authored. See §7.
 
 ## 1. Governing invariants for every authored item (the 9b safety rules)
 
@@ -103,7 +112,7 @@ Every 9b item re-tested (2026-09-07, verified against herobids source) against f
 | **C. Intake router + registry + AgentTradingActor wiring** ✅ **DONE 2026-09-07** (decisions LOCKED — §5) | **COPY (already, Phase 8) + AUTHORED wiring/seam + DROP** | Re-verified 2026-09-07 (post-investigation): the actor-owned intake (`AgentTradingActor.getIntakeDeps`/`getDecisionContext`/`getPosition`), `ExecutionActor`, `TradingActor`, `validate-trade-instrument`, `venue-instrument-cache` were **already COPIED in Phase 8** — C reuses them. C **authors** only wiring: a slim decision router (`submitDecision`), a plain `Map<string, ExecutionActor>` registry (owned by B's factory), the venue-account-direct resolver seam (injected `venueAccountId` + the venue-account guards), and `AgentTradingActor` construct+register. It **DROPS** (Intentional Divergence) the `AgentIntakeResolver` grant-fallback + `ActorStateOwner` — the `agentConnections ⋈ connections` grant front-end / agent-session wrapper, both platform (crux resolved = option (a); require a running actor else `instance_not_running`). Handler drops the platform paused/session/telegram/approval branches. |
 | **D. Drive-path tools** (`bots.ts`, `trading.ts`) ✅ **DONE 2026-09-07** (decisions LOCKED — §6) | **COPY** (verbatim) | **LANDED:** both files copied verbatim (diff = `@herobids`→`@traderton` + the sanctioned `TradingToolContext`/`AgentTool<TradingToolContext>` convention only) + their herobids parity tests (9 + 25). `ctx.agentId`/`creatorType='agent'` scope untouched (decision (a); injected `ownerId` binds at the persistence seam). Platform broker NOT copied. Tools use only `DECISION_SUBMIT`+`MANAGE_BOT`. See §6.5. |
 | **D-target. In-process drive target + bot-lifecycle handler + enqueue seam** ✅ **DONE 2026-09-07** | **AUTHORED (seam/wiring) + DROP** | **LANDED:** authored the 3-const `AGENT_MESSAGE_TYPES` (values verbatim); `createDriveTarget` `publishToInbound` (`DECISION_SUBMIT`→item C `submitDecision` + reply-write; `MANAGE_BOT`→handler; no `BOT_QUERY` route); `handleManageBot` **tracing `handleManageBot`'s trading core over the copied `WorkerRuntime`**; `WorkerRuntime.enqueueLifecycle`. **DROPPED** the agent-session + connection-grant + LLM-model-policy shell (platform, decisions 7–13). maxBots limit + create/start persist = one injected `BotLimitSeam` → item E (pre-E → `bot_limit_unavailable`). Build+lint green; 2303 tests. See §6.5. |
-| **E. maxBots atomic** | **AUTHORED (thin primitive)** | herobids' atomic method row-locked the `agents` table; Traderton has none → re-key the lock to `ownerId` via a Postgres advisory lock inside the count+write txn. Small, isolated, testable authored primitive. Human-confirmed atomic. |
+| **E. maxBots atomic** (decisions LOCKED — §7) | **COPY (bodies + advisory-lock pattern) + AUTHORED wiring** | Reframed 2026-09-07 (mostly-COPY, not "authored primitive"): the count/insert/mark bodies mirror the herobids broker method (`repositories.ts:905–1027`); the atomicity **copies** herobids' own API-path `pg_advisory_xact_lock(classId, hashtext(ownerId))` (already in Traderton `_deferred-authoring/api-routes/bots.ts:135`), re-keyed `agents`-row→`ownerId`. Two-call create→mark preserved (`running` = the `reclaimOrphans` contract). Only the `createTradingRuntime` seam wiring (+ `maxBots` resolution + the item-D create→mark call) is authored. Human-confirmed atomic. |
 | **C2/G. Event producer — vocabulary + emitter** | **COPY** | The event envelope + per-event emitter methods (the trading subset, §ledger table) are clean and copyable (trading types). |
 | **C2/G. Event producer — durable persistence + Redis relay (outbox)** | **IMPROVEMENT (deferred)** | herobids is Redis-Streams-window-only for outbound events (verified: `xadd MAXLEN ~`, no Postgres). Postgres+Redis durable outbox is an improvement BEYOND parity → tracked in [014](./014-decision-response-and-event-model.md), decided separately, NOT built inside 9b. At 9b-parity: reproduce the Redis-window emitter (copy-shaped). |
 | **F. M2 REST adapter** | **AUTHORED** (+ COPY-adapt routes) | 005 is a fresh contract with no herobids equivalent (herobids uses JWT `request.userId`, not HMAC boundary) → the shell/auth/idempotency/deadline/dispatcher are authored. The trading route HANDLERS copy-adapt (`userId`→`ownerId`). Sequenced last (M2). |
@@ -632,29 +641,75 @@ original 2303 are the swap-symbol-guard cases added when closing CodeReviewer M-
 
 ## 7. Item E — Per-`ownerId` maxBots enforcement
 
-**What it is.** Authored limit-enforced `create_bot`/`start_bot` in the item-D bot-lifecycle handler:
-count running bots for the injected `ownerId`, reject at the limit with the herobids-parity error
-(`max_bots_reached` / `409`). Limit value = `AgentRiskDefaultsConfig.maxBots` (default 5) as operator
-default, overridable per-owner (injected/config).
+> **Reframed by investigation (2026-09-07, two human challenges): E is MOSTLY-COPY, not "highest
+> authored-content."** The count/insert/mark bodies mirror the herobids broker method line-for-line; the
+> atomicity re-key **copies herobids' own API-path advisory-lock pattern** (already in Traderton); the only
+> genuinely authored surface is the thin seam wiring. **Full design + evidence:
+> [022-item-e-maxbots-proposal.md](./022-item-e-maxbots-proposal.md) (APPROVED 2026-09-07).** This §7 is the
+> self-contained implementer brief; an implementer works from §7 + 022 + the cited sources, not this chat.
 
-**Why authored.** herobids' method row-locked the platform `agents` table (per-agent key), deleted in
-Phase 2. The per-`ownerId` key + enforcement point is a Traderton tenancy decision (decided 2026-09-06).
-**Highest authored-content item in 9b** — this is authored trading behaviour, not a copy.
+**What it is.** Fill the two-method `BotLimitSeam` item D left injected-optional, so `create_bot`/`start_bot`
+are limit-enforced per-`ownerId`. Author `tryCreateBotWithLimit` + `tryMarkBotRunningWithLimit` on the
+`@traderton/db` `BotRepository` (re-keyed per-`ownerId`), wire them into `createTradingRuntime`'s
+`DriveTargetInjection.botLimit`, and add the item-D `createAndStart` second seam call (create→mark). At the
+limit, reject with the herobids-parity message the item-D handler already throws.
 
-**Open decision (surface to reviewer):** atomicity. herobids row-locked `agents`; Traderton has no
-`agents` table. Options: (E-i) a Postgres **advisory lock keyed by `ownerId`** around the count+insert
-(closest to the atomic original); (E-ii) the non-atomic read-count-then-check the quarantined API
-`bots.ts` already uses (simpler, small race window). Recommend **(E-i)** — the original was atomic;
-"not weaker than herobids-today" (000) argues for preserving atomicity.
+### 7.1 Locked decisions (2026-09-07, human — do not re-litigate)
+- **(1) `maxBots` = a value arg.** The repo methods take `maxBots` as a parameter; the
+  `createTradingRuntime` seam wiring resolves it from `config.agentRiskDefaults.maxBots` (Traderton operator
+  default, schema default 5) + any consumer-injected per-`ownerId` override. The db method is a pure
+  value-taking primitive. **Traderton owns the default + enforcement; the consumer may inject a per-owner
+  override value, never enforces.**
+- **(2) Mirror herobids' two-call create→mark.** `tryCreateBotWithLimit` inserts `status:'stopped'`, then
+  `tryMarkBotRunningWithLimit` marks `running`. This is **load-bearing, not incidental**: `running` is the
+  `WorkerRuntime.reclaimOrphans` contract (copied Phase 8 — bots WHERE `status='running'` with no live actor
+  are re-started). Keeping insert as `stopped` + a separate atomic `running` slot-claim keeps persistence
+  and the reclaim contract coherent across a crash. Do NOT insert-as-running.
+- **(3) Advisory lock = COPY the API-path form.** Copy `_deferred-authoring/api-routes/bots.ts:135`'s
+  `SELECT pg_advisory_xact_lock(classId, hashtext(key))` two-int form, re-keyed to `ownerId`, with a
+  reserved `classId` (copied routes use `1`/`13` — pick an unused int + note it). Replaces the deleted
+  `SELECT agents … FOR UPDATE`. `_xact_` auto-releases at commit/rollback.
+- **(4) Scope.** E = the two `BotRepository` methods (re-keyed) + the `createTradingRuntime` seam wiring
+  (bind methods + resolve `maxBots`) + the item-D `createAndStart` second seam call (create→mark, closing
+  CodeReviewer MEDIUM-2). E does NOT touch the copied tools or the drive-handler routing beyond populating
+  the seam + that one call.
 
-**Ports/invariant check.** The **limit decision/value** may be injected by the consumer at M1; the
-**enforcement** is Traderton's and not bypassable through a seam. Must not ship weaker than herobids-today.
+### 7.2 What it is (the re-keyed primitive)
+Each method is `this.db.transaction(async (tx) => …)` mirroring the herobids broker body
+(`packages/db/src/repositories.ts:905–1027`) with the lock re-keyed:
+1. **Serialize:** `await tx.execute(sql\`SELECT pg_advisory_xact_lock(${CLASS_ID}, hashtext(${ownerId}))\`)`
+   (copied API-path form; replaces `SELECT agents … FOR UPDATE`).
+2. **Count** running bots for the `ownerId` (limit key): `WHERE ownerId = $ownerId AND status='running'`;
+   if `count >= maxBots` → `false` / `{created:false}`.
+3. **Write:** `tryMarkBotRunningWithLimit` → `UPDATE … status='running'`, preserving `startedAt` if already
+   running (mirrors herobids); `tryCreateBotWithLimit` → `INSERT … status='stopped'` with
+   `crypto.randomUUID()`, columns re-keyed (`ownerId`, no `userId`/`connectionId`), return `{created:true, botId}`.
+The existing `countRunningBotsByCreator` shows the count shape; `markBotRunning` shows the startedAt-preserving mark.
+
+### 7.3 Copied vs authored (manifest — full table in 022 §4)
+- **Mirrors COPY:** the count/insert/mark bodies (herobids broker `repositories.ts:905–1027`); the
+  create→mark two-call sequence (herobids broker `agent-message-broker.ts:719+741`).
+- **COPY (pattern, re-keyed):** the `pg_advisory_xact_lock(classId, hashtext(ownerId))` serialization
+  (herobids API path, already in Traderton `_deferred-authoring/api-routes/bots.ts:135`).
+- **AUTHORED (the only authored surface — wiring):** the `BotLimitSeam` binding in `createTradingRuntime`
+  (+ `maxBots` resolution from `agentRiskDefaults` + injected override) + the item-D `createAndStart`
+  second seam call.
+
+**Ports/invariant check.** The **limit value** may be injected (per-owner override); the **enforcement** is
+Traderton's, atomic, and not bypassable through a seam. Not weaker than herobids-today (000).
+
+### 7.4 Verification (authored wiring; no herobids unit-test oracle for the methods)
+herobids had **no unit test** for these methods (exercised via the broker), so verify against the source
+behaviour + a concurrency test. Build/lint green; existing suite stays green (currently 2308/15). Authored
+unit test (labelled): under-limit create/start succeed; at-limit → `{created:false}`/`false`; count keyed
+on `ownerId` (a second owner unaffected); reclaim (already-running) start exempt. **Authored concurrency
+integration test** (`*.integration.test.ts`, DATABASE_URL-gated — matching `journal-pg.integration.test.ts`):
+N concurrent `tryCreateBotWithLimit` for one `ownerId` at limit k create exactly k (the advisory lock holds).
+Wire-through: item D's `create_and_start`/`start` no longer return `bot_limit_unavailable`.
 
 **Resolves.** The `create_bot`/`start_bot` `Deferred (required for cutover)` sub-capability + the cutover
-gate "All Deferred (required for cutover) entries resolved."
-
-**Divergence to log:** per-agent → per-owner reshape (Intentional Divergence, [001](../001-parity-ledger.md)
-+ [004](../004-decision-log.md)).
+gate "All Deferred (required for cutover) entries resolved." **Divergence to log:** per-agent → per-`ownerId`
+reshape (Intentional Divergence, [001](../001-parity-ledger.md) + [004](../004-decision-log.md)).
 
 --- END OF M1 ---
 
@@ -703,7 +758,7 @@ Buckets (§1a): **COPY** = verbatim / fused-file line-trim; **SEAM** = copied fi
 | B composition root (bot-lifecycle only) | AUTHORED | (wires already-copied modules; actor test files = dep template) | `createTradingRuntime(ports)` factory + tiny bin entry + worker `index.ts` barrel + copied `idGen` util + authored smoke test. (NOT here: tool registry → D; `ActorStateOwner`/agent-direct → C.) | worker barrel |
 | C intake | COPY (fused-file) + 1 SEAM | copy `agent-intake-resolver` bodies (`getIntakeDeps`/context/position/`buildPersistence`) + slim handler; delete platform paused/session/telegram/approval branches | `resolveActiveBinding` → venue-account-direct (injected `venueAccountId`) | intake execution capability |
 | D drive tools | COPY + AUTHORED seam + DROP | **`tools/bots.ts`, `tools/trading.ts` verbatim** (+ their copied parity tests) | 3-const `AGENT_MESSAGE_TYPES` (values verbatim) + in-process `publishToInbound` target + bot-lifecycle handler (traces `handleManageBot` trading core over the copied `WorkerRuntime`) + `WorkerRuntime.enqueueLifecycle`. DROP: `handleManageBot` agent/grant/LLM shell (platform). maxBots seam → E. | `validate-trade-instrument.test.ts`, `schema.test.ts` |
-| E maxBots | AUTHORED (thin primitive) | — | per-`ownerId` atomic count+write via advisory lock | — |
+| E maxBots | COPY (bodies + advisory pattern) + AUTHORED wiring | count/insert/mark bodies (herobids broker `repositories.ts:905–1027`); `pg_advisory_xact_lock` form (herobids API `api-routes/bots.ts:135`, re-keyed `ownerId`) | the `createTradingRuntime` `BotLimitSeam` wiring (+ `maxBots` resolution) + the item-D `createAndStart` create→mark call | (drive-path create/start go fully live) |
 | G events (vocab/emitter) | COPY | event envelope + per-event trading emitter methods (Redis-window, parity) | — | — |
 | G events (durable outbox) | IMPROVEMENT (deferred) | — | — (tracked in [014](./014-decision-response-and-event-model.md), NOT 9b) | — |
 | F REST adapter | AUTHORED + COPY-adapt | trading route handlers (`userId`→`ownerId`); agent-only routes hand-back (Gap) | Fastify shell, HMAC, envelope/idempotency/deadline, dispatcher, health | `_deferred-authoring/api-routes/**` |
