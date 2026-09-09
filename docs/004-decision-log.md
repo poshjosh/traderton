@@ -144,11 +144,14 @@ live assertion of the mechanical-only guarantee at Traderton's owned boundary (t
 review's harness note that copied tool tests are not type-checked against the Traderton surface).
 This is a 9b design decision, not a pre-9b blocker or a copy defect.
 
-**DECISION (2026-09-07, human-approved): option (a) — narrow-and-diverge.** 9b will tighten the
-Traderton-owned config boundary to `decisionMode: ['mechanical']` (narrowing the Traderton
-`StrategySchema` or a Traderton wrapper over the copied schema), update the copied acceptance
-test to assert `llm`/`hybrid` are rejected at the boundary, and add an explicit live assertion of
-the mechanical-only guarantee. Rationale for (a) over (b): it makes the mechanical-only guarantee
+**DECISION (2026-09-07, human-approved): option (a) — narrow-and-diverge. IMPLEMENTED (item A′).**
+9b tightened the Traderton-owned config boundary via a **wrapper** (not by editing the copied
+`StrategySchema`): a new `MechanicalStrategySchema` (`decisionMode: z.enum(['mechanical']).optional()`
++ the same dca-or-required refine) is what `BotConfigSchema.strategy` validates against. The copied
+`StrategySchema` stays byte-verbatim (its copied test asserting `llm` is accepted stays true — the
+narrowing lives on the Traderton wrapper). A dedicated authored test (`config/mechanical-only.test.ts`)
+asserts the guarantee (llm/hybrid rejected; mechanical/dca accepted). This chose the wrapper (a-i)
+over editing the copy (a-ii) to keep 1:1 diffability of `StrategySchema`. Rationale for (a) over (b): it makes the mechanical-only guarantee
 an explicit product invariant at the boundary Traderton owns, rather than an emergent property of
 downstream registry rejection — closer to decision 3 (own risk/enforcement) and easier to test and
 reason about. This is a sanctioned authored Intentional Divergence on Traderton's owned config

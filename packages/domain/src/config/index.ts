@@ -62,6 +62,7 @@ export {
   extractStrategyFromConfig,
   AgentRiskDefaultsSchema,
   AppConfigSchema,
+  MechanicalStrategySchema,
 } from './schema.js';
 
 export {
@@ -111,4 +112,5 @@ export type {
   SentimentConfig,
   AgentRiskDefaultsConfig,
   AppConfig,
+  MechanicalStrategy,
 } from './schema.js';

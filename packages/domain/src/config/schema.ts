@@ -628,6 +628,34 @@ export const StrategySchema = z.object({
   { message: 'decisionMode is required for non-DCA strategies', path: ['decisionMode'] },
 );
 
+// ---------------------------------------------------------------------------
+// AUTHORED (Phase 9b, item A′ / S-1) — mechanical-only bot strategy boundary.
+//
+// Traderton bots are MECHANICAL-ONLY (decisions 7–9): intelligence is the agent's
+// job; llm/hybrid decision modes relocate agent-side. herobids' `StrategySchema`
+// (copied verbatim above) still accepts `mechanical | llm | hybrid` for its own
+// agent paths, and the strategy registry already refuses to resolve `momentum:llm`
+// / `momentum:hybrid` at the runtime layer. This narrowing makes the guarantee
+// EXPLICIT at Traderton's owned bot-config boundary (a signed-off Intentional
+// Divergence — S-1 option (a), narrow-and-diverge; see docs/004-decision-log.md
+// + docs/features/013-9b-authoring-plan.md item A′), rather than leaving it as an
+// emergent property of downstream registry rejection.
+//
+// This is the ONLY authored trading-shape divergence in item A. `StrategySchema`
+// is left byte-verbatim (its copied acceptance test for `llm` stays true); the
+// mechanical-only rule lives HERE, on the Traderton-owned wrapper, and is what
+// `BotConfigSchema.strategy` validates against.
+// ---------------------------------------------------------------------------
+export const MechanicalStrategySchema = z.object({
+  type: z.enum(['momentum', 'range', 'contrarian', 'swing', 'scalper', 'dca']),
+  decisionMode: z.enum(['mechanical']).optional(),
+  params: z.record(z.unknown()).optional(),
+}).refine(
+  (s) => s.type === 'dca' || s.decisionMode !== undefined,
+  { message: 'decisionMode is required for non-DCA strategies', path: ['decisionMode'] },
+);
+export type MechanicalStrategy = z.infer<typeof MechanicalStrategySchema>;
+
 /**
  * Execution defaults — canonicalized from the agent executionMode / maxSlippageBps.
  * Shared by both bots and agents. This is the canonical name;
@@ -722,7 +750,9 @@ export const BotRiskSchema = z.object({
 export type BotRisk = z.infer<typeof BotRiskSchema>;
 
 export const BotConfigSchema = z.object({
-  strategy: StrategySchema,
+  // Mechanical-only bot boundary (S-1, item A′): narrowed decisionMode. herobids
+  // used the broad StrategySchema here; Traderton bots are mechanical-only.
+  strategy: MechanicalStrategySchema,
   risk: BotRiskSchema.default({}),
   execution: ExecutionDefaultsSchema.default({}),
   /** Token-safety guardrails for swap/DEX venues. Prefer this over the deprecated risk.* fields. */
