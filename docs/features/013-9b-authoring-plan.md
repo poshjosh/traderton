@@ -560,10 +560,11 @@ string values verbatim from herobids `agent-protocol.ts` — `agent.decision.sub
 `publishToInbound` + `handleManageBot` tracing the trading core); `packages/worker/src/runtime.ts` thin
 `enqueueLifecycle(command, botId, config?)`; `create-trading-runtime.ts` exposes `enqueueLifecycle` +
 `createDriveTarget(injection)` + a `BotRepository` singleton on `TradingRuntime`; `worker/src/index.ts`
-barrel; `composition/drive-target.test.ts` (16 authored cases). COPIED verbatim (modulo `@herobids`→
+barrel; `composition/drive-target.test.ts` (21 authored cases — 16 original + 5 swap-symbol-guard). COPIED verbatim (modulo `@herobids`→
 `@traderton` + the sanctioned `TradingToolContext`/`AgentTool<TradingToolContext>` convention):
 `tools/trading.ts`, `tools/bots.ts` + their herobids parity tests (`bots.test.ts` 9, `trading.test.ts` 25).
-Build+lint green; **2303 tests / 15 skipped / 0 failed** (+50; no copied test altered).
+Build+lint green; **2308 tests / 15 skipped / 0 failed** (+55; no copied test altered — the +5 over the
+original 2303 are the swap-symbol-guard cases added when closing CodeReviewer M-1).
 
 **Authored-vs-copied-vs-dropped manifest.**
 - **COPY (verbatim):** `tools/trading.ts`, `tools/bots.ts` + both parity tests. `ctx.agentId`/
@@ -573,11 +574,28 @@ Build+lint green; **2303 tests / 15 skipped / 0 failed** (+50; no copied test al
   drive target (`DECISION_SUBMIT`→item C `submitDecision` + `lpush`/`expire` reply write matching
   `trading.ts`'s `blpop`; `MANAGE_BOT`→handler; no `BOT_QUERY` route); `handleManageBot` tracing the
   herobids trading core over the copied `WorkerRuntime`; `WorkerRuntime.enqueueLifecycle`.
+- **COPY (verbatim KEEP trading validation inside `createAndStart`):** the **swap-venue symbol-format
+  guard** — copied verbatim from herobids `agent-message-broker.ts:693–714`. Gated on the INJECTED
+  `deps.venueType === 'swap'` (not agent-provided config) + `validatedConfig.symbol`, it runs AFTER the
+  `BotConfigSchema` + mode-escalation checks and BEFORE the item-E `botLimit` seam, rejecting at
+  bot-CREATION time: (a) a non-string symbol; (b) a symbol not in `BASE/QUOTE` form
+  (`parts.length !== 2 || !parts[0] || !parts[1]`); (c) either side matching `looksLikeAddress`
+  (`s.startsWith('0x') || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s)`). This is **pure trading validation, NOT
+  part of the dropped agent/session/connection-grant/LLM shell**: it is not covered by `BotConfigSchema`
+  (plain `z.string()`) and is distinct from the later per-decision `swap.instrument_format` intake gate in
+  `agent-trading-actor.ts`. Error messages copied verbatim. (Closes CodeReviewer M-1 — see below.)
 - **DROPPED (Intentional Divergence — platform/consumer-owned, decisions 7–13):** the `handleManageBot`
   agent-session shell (`agentRepo.getAgent`/`getActiveSession`), connection-grant resolution
   (`getRuntimeCapabilityDescriptor`/`getResolvedVenueAccount`/`isConnectionOwnedBy`), LLM-model policy
   (`resolveEffectiveLlmSelection`/`getUserAiModelConfig`), `applyAgentCapitalLimit`, `emitInstanceStatus`
-  (→ item C2, M1 no-op). venue/venueType/venueAccountId/ownerId injected; ownership by injected `ownerId`.
+  (→ item C2, M1 no-op), and the plan-level `botLiveCheck`/`checkLiveEnabled` live-execution eligibility
+  gate (herobids `agent-message-broker.ts`, keyed on `userPlanId` — a platform plans/entitlements concern,
+  the same class as the plan-cap maxBots already recorded; Traderton enforces live-readiness via its own
+  operator-config `assertLiveReadiness` (`live-gate.ts`) at actor start, wired in item B). venue/venueType/
+  venueAccountId/ownerId injected; ownership by injected `ownerId`.
+  **NOT dropped:** the swap-venue symbol-format guard that lived alongside this shell in `handleManageBot`
+  is a KEEP trading validation — it is COPIED into `createAndStart` (see the COPY bullet above), not part
+  of the dropped platform shell.
 
 **Surfaced seams (refine 021, carried to item E — nothing silently dropped).**
 - **create/start persist+limit is ONE item-E seam.** `@traderton/db` `BotRepository` has no bot-insert
@@ -594,6 +612,13 @@ Build+lint green; **2303 tests / 15 skipped / 0 failed** (+50; no copied test al
   Phase 1). Left quarantined + surfaced (do not author the dropped schema or edit the copy).
 
 **Outstanding Issues (CodeReviewer, 2026-09-07 — no CRITICAL/HIGH; verdict PASS):**
+- **[item D] CodeReviewer M-1 (gap-focused review) — swap-venue symbol-format guard was silently dropped.**
+  **RESOLVED.** The KEEP trading validation from herobids `agent-message-broker.ts:693–714` (the swap
+  `BASE/QUOTE` / `looksLikeAddress` guard) was faithfully COPIED into `createAndStart` (venue-gated on the
+  injected `deps.venueType`, after schema + mode-escalation, before the `botLimit` seam) with its four
+  checks + error messages verbatim, and covered by 5 added deterministic `drive-target.test.ts` cases
+  (raw `0x`/base58 address sides, non-`BASE/QUOTE` string → rejected before the create-limit seam; valid
+  `BASE/QUOTE` passes; orderbook venues unaffected). Build+lint green; **2308 tests / 15 skipped / 0 failed**.
 - **[item D] MEDIUM-1 — done-criteria doc updates.** Applied by the coordinator (this §6.5 + the 001
   ledger rows). Resolved.
 - **[item D] MEDIUM-2 — `create_and_start` running-slot claim deferred to E.** Carried as the item-E

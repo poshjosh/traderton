@@ -251,6 +251,38 @@ async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload):
     throw new Error(modeCheck.error);
   }
 
+  // Swap-venue symbol-format guard — copied VERBATIM from herobids
+  // `agent-message-broker.ts:693–714` (a KEEP trading-domain validation, gated on
+  // the INJECTED `venueType === 'swap'`). Each swap-venue binding maps to a specific
+  // chain; reject bot creation when the symbol format is wrong or the symbol parts
+  // look like raw addresses instead of human-readable tickers. NOT covered by
+  // `BotConfigSchema` (plain `z.string()`), and distinct from the later per-decision
+  // `swap.instrument_format` intake gate. Per-token network validity is enforced
+  // downstream by token safety.
+  if (deps.venueType === 'swap' && validatedConfig.symbol) {
+    const symbol = validatedConfig.symbol;
+    if (typeof symbol !== 'string') {
+      throw new Error(
+        `Invalid symbol type. Expected a string BASE/QUOTE format (e.g. "ETH/USDC"), got ${typeof symbol}.`,
+      );
+    }
+    const parts = symbol.split('/');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      throw new Error(
+        `Invalid symbol format "${symbol}". ` +
+        `Swap venues require BASE/QUOTE format (e.g. "ETH/USDC" for 1inch on Base).`,
+      );
+    }
+    // Reject raw addresses — agents must use human-readable symbols.
+    const looksLikeAddress = (s: string) => s.startsWith('0x') || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s);
+    if (looksLikeAddress(parts[0]!) || looksLikeAddress(parts[1]!)) {
+      throw new Error(
+        `Symbol "${symbol}" looks like a raw token address. ` +
+        `Use a human-readable symbol (e.g. "ETH/USDC"), not a contract address.`,
+      );
+    }
+  }
+
   // Atomic per-`ownerId` limit + persist (item E seam). herobids did this via
   // `tryCreateBotWithLimit` (broker :707–718) then `botStart` (:748). Absent at
   // M1 (pre-E) → refuse rather than persist without the limit.

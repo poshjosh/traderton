@@ -226,6 +226,96 @@ describe('drive target — MANAGE_BOT create_and_start', () => {
 
     expect(stubs.enqueueLifecycle).not.toHaveBeenCalled();
   });
+
+  // Swap-venue symbol-format guard — copied KEEP behaviour (herobids
+  // agent-message-broker.ts:693–714). Gated on the INJECTED venueType === 'swap';
+  // rejects at CREATION time before the item-E create-limit seam is touched.
+  describe('swap-venue symbol guard', () => {
+    // A valid swap config: swapAssets is required and paper mode is forbidden for
+    // swap venues (BotConfigSchema refinements), so use shadow mode.
+    function validSwapConfig(symbol: string): Record<string, unknown> {
+      return validBotConfig({
+        symbol,
+        execution: { mode: 'shadow' },
+        swapAssets: { baseAsset: 'ETH', quoteAsset: 'USDC', baseDecimals: 18, quoteDecimals: 6 },
+      });
+    }
+
+    it('rejects a raw 0x address symbol before the create-limit seam', async () => {
+      const { deps, stubs } = makeDeps({ venue: 'jupiter', venueType: 'swap', ownerMode: 'shadow' });
+      const publishToInbound = createDriveTarget(deps);
+
+      await expect(
+        publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
+          action: 'create_and_start',
+          config: validSwapConfig('0x1234567890abcdef/USDC'),
+        }),
+      ).rejects.toThrow(/looks like a raw token address/);
+
+      expect(stubs.botLimit.tryCreateBotWithLimit).not.toHaveBeenCalled();
+      expect(stubs.enqueueLifecycle).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-BASE/QUOTE symbol before the create-limit seam', async () => {
+      const { deps, stubs } = makeDeps({ venue: 'jupiter', venueType: 'swap', ownerMode: 'shadow' });
+      const publishToInbound = createDriveTarget(deps);
+
+      await expect(
+        publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
+          action: 'create_and_start',
+          config: validSwapConfig('ETHUSDC'),
+        }),
+      ).rejects.toThrow(/Invalid symbol format/);
+
+      expect(stubs.botLimit.tryCreateBotWithLimit).not.toHaveBeenCalled();
+      expect(stubs.enqueueLifecycle).not.toHaveBeenCalled();
+    });
+
+    it('rejects a base58-address side before the create-limit seam', async () => {
+      const { deps, stubs } = makeDeps({ venue: 'jupiter', venueType: 'swap', ownerMode: 'shadow' });
+      const publishToInbound = createDriveTarget(deps);
+
+      await expect(
+        publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
+          action: 'create_and_start',
+          // 44-char base58 mint address on the base side.
+          config: validSwapConfig('So11111111111111111111111111111111111111112/USDC'),
+        }),
+      ).rejects.toThrow(/looks like a raw token address/);
+
+      expect(stubs.botLimit.tryCreateBotWithLimit).not.toHaveBeenCalled();
+      expect(stubs.enqueueLifecycle).not.toHaveBeenCalled();
+    });
+
+    it('passes a valid BASE/QUOTE swap symbol through the guard to the create seam', async () => {
+      const { deps, stubs } = makeDeps({ venue: 'jupiter', venueType: 'swap', ownerMode: 'shadow' });
+      const publishToInbound = createDriveTarget(deps);
+
+      await publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
+        action: 'create_and_start',
+        config: validSwapConfig('ETH/USDC'),
+      });
+
+      expect(stubs.botLimit.tryCreateBotWithLimit).toHaveBeenCalledTimes(1);
+      expect(stubs.enqueueLifecycle).toHaveBeenCalledTimes(1);
+      expect(stubs.enqueueLifecycle.mock.calls[0][0]).toBe('start');
+    });
+
+    it('does not apply the swap guard for orderbook venues', async () => {
+      // An orderbook venue with a bare (non-BASE/QUOTE) symbol is fine — the guard
+      // is gated on venueType === 'swap'.
+      const { deps, stubs } = makeDeps();
+      const publishToInbound = createDriveTarget(deps);
+
+      await publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
+        action: 'create_and_start',
+        config: validBotConfig({ symbol: 'BTC' }),
+      });
+
+      expect(stubs.botLimit.tryCreateBotWithLimit).toHaveBeenCalledTimes(1);
+      expect(stubs.enqueueLifecycle).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 // ── MANAGE_BOT: start / stop — ownership + enqueue ───────────────────────────
