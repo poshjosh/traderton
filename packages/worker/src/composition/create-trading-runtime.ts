@@ -1,0 +1,505 @@
+import type { Redis } from 'ioredis';
+import type {
+  AppConfig,
+  MarketSnapshot,
+  OrderbookVenuePort,
+  SwapVenuePort,
+  Strategy,
+  StrategyConfig,
+  CandleFetcher,
+} from '@traderton/domain';
+import { BotConfigSchema } from '@traderton/domain';
+import {
+  createDatabase,
+  PgJournal,
+  FillRepository,
+  PositionRepository,
+  ExecutionPlanRepository,
+  OrderRepository,
+  BalanceSnapshotRepository,
+  ReconciliationEventRepository,
+  DecisionRepository,
+  BacktestingRepository,
+} from '@traderton/db';
+import { MarkSelector, createFillFirstMarkSource } from '@traderton/engine';
+import {
+  OracleMarkSource,
+  HyperliquidMarkSource,
+  PublicStreamPool,
+  VenueCandleFetcher,
+} from '@traderton/venues';
+import type { SwapConfirmationPoller } from '@traderton/venues';
+import { createProviderRegistry } from '@traderton/market-data';
+import type { ProviderRegistry, RedisEvalClient } from '@traderton/market-data';
+import { MechanicalStrategy, DcaStrategy } from '@traderton/strategy';
+import { MarketDataRecorder } from '@traderton/backtesting';
+
+import { createLogger } from '../logger.js';
+import { createIdGen } from './id-gen.js';
+import { InstanceLease } from '../instance-lease.js';
+import {
+  WorkerRuntime,
+  type InstanceLoader,
+  type WorkerRuntimeConfig,
+} from '../runtime.js';
+import { TradingActor, type TradingActorDeps } from '../trading-actor.js';
+import { VenueAdapterFactory } from '../venue-adapter-factory.js';
+import { buildPublicStreamConnectors, createScopedStreamPoolHandle } from '../public-stream-routing.js';
+import { assertLiveReadiness } from '../live-gate.js';
+import { resolveSwapNetwork } from './../resolve-swap-assets.js';
+
+const logger = createLogger('create-trading-runtime');
+
+/**
+ * Ports for the trading composition root (Phase 9b item B).
+ *
+ * Ports-carry-values (000/004): these are config **values** and platform-owned
+ * **values** only — never a port that injects trading behaviour. The risk gate,
+ * planner, executors, and reconciliation are constructed internally from the
+ * copied engine and are not overridable.
+ */
+export interface TradingRuntimePorts {
+  /** Operator config — the Traderton-owned AppConfig (item A). */
+  config: AppConfig;
+  /** Redis client (BullMQ lifecycle-job connection + instance lease). */
+  redis: Redis;
+  /**
+   * Loads bots to rehydrate (status='running'). Each PersistedInstance.config
+   * carries the INJECTED venueAccountId + soft ownerId (decisions 11–13) — NOT
+   * connectionId/userId. This is the M1 injection point.
+   */
+  instanceLoader: InstanceLoader;
+  /** Interval (ms) between strategy scan ticks. Default: WorkerRuntime default. */
+  scanIntervalMs?: number;
+  /** Number of instances this worker runs simultaneously. Default: WorkerRuntime default. */
+  concurrency?: number;
+}
+
+/**
+ * The assembled bot-lifecycle trading runtime (Phase 9b item B).
+ *
+ * Later items attach to the exposed seams without re-opening B:
+ *  - item C (intake): submitDecision + the ExecutionActor registry.
+ *  - item D (drive): enqueues lifecycle jobs onto `runtime`.
+ */
+export interface TradingRuntime {
+  /** Start rehydration + lifecycle-job consumer + reclaim loop. */
+  start(): Promise<void>;
+  /** Graceful shutdown. */
+  shutdown(): Promise<void>;
+  /** The BullMQ-backed lifecycle control — exposed so item D / M2 can enqueue jobs. */
+  runtime: WorkerRuntime;
+}
+
+/**
+ * createStrategy — mechanical/dca only (locked decision 013 §4.1d).
+ *
+ * `llm`/`hybrid` are absent from `@traderton/strategy` (bots are mechanical-only,
+ * decisions 7–9) and are already rejected upstream by the mechanical-only
+ * `BotConfigSchema` (item A′) before this runs, so those branches are unreachable
+ * via a valid bot config. The defensive `throw` is belt-and-braces. This is
+ * covered by the existing mechanical-only Intentional Divergence in the parity
+ * ledger — no new Gap/ledger row.
+ *
+ * Traced to herobids apps/worker/src/index.ts:1620–1657 (llm/hybrid branches
+ * dropped — those strategies do not exist in Traderton).
+ */
+function createStrategy(
+  idGen: ReturnType<typeof createIdGen>,
+  strategyConfig: StrategyConfig,
+  candleFetcher?: CandleFetcher,
+): Strategy {
+  // DCA is timer-driven, no signal evaluation — route to DCA executor
+  if (strategyConfig.type === 'dca') {
+    return new DcaStrategy();
+  }
+
+  // For non-DCA, key on decisionMode to select the engine
+  switch (strategyConfig.decisionMode) {
+    case 'mechanical': {
+      if (!candleFetcher) {
+        throw new Error(`'mechanical' strategy requires marketData to be configured (CandleFetcher unavailable)`);
+      }
+      return new MechanicalStrategy(candleFetcher, null, () => idGen.decisionId());
+    }
+
+    default:
+      // llm/hybrid are rejected by BotConfigSchema (item A′) before this runs.
+      throw new Error(`Unsupported decisionMode: ${String(strategyConfig.decisionMode)}`);
+  }
+}
+
+/**
+ * createTradingRuntime — the trading composition root (Phase 9b item B).
+ *
+ * Authored WIRING ONLY. Every trading primitive (risk gate, planner, executors,
+ * actors, mark sources, venue adapters, strategies, reconciliation) is already
+ * copied into `@traderton/*` and is constructed — never re-implemented — here.
+ *
+ * Scope is BOT `TradingActor` only (013 §4.1a). AgentTradingActor, the actor
+ * registry, decision intake, the tool registry, and maxBots are later items.
+ */
+export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime {
+  const { config, redis, instanceLoader } = ports;
+
+  // ── Once-per-process singletons (traced to herobids index.ts ~209–334, 771–791) ──
+  const workerId = `worker-${crypto.randomUUID().slice(0, 8)}`;
+  const lease = new InstanceLease(redis, workerId, 30);
+
+  const db = createDatabase(config.database.url);
+  const journal = new PgJournal(db);
+  const fillRepo = new FillRepository(db);
+  const positionRepo = new PositionRepository(db);
+  const planRepo = new ExecutionPlanRepository(db);
+  const orderRepo = new OrderRepository(db);
+  const balanceSnapshotRepo = new BalanceSnapshotRepository(db);
+  const reconciliationRepo = new ReconciliationEventRepository(db);
+  const decisionRepo = new DecisionRepository(db);
+  const backtestingRepo = new BacktestingRepository(db);
+
+  const idGen = createIdGen();
+
+  // Market-data provider registry — optional (undefined when marketData absent).
+  // Feeds the per-bot candle fetcher used by the mechanical strategy.
+  // `createProviderRegistry` is async (it validates provider keys at startup),
+  // so the once-per-process registry is constructed in `start()` — before any
+  // bot rehydrates — and captured here for the ActorFactory closure.
+  let sharedMarketDataRegistry: ProviderRegistry | undefined;
+
+  // Reconciliation config sourced from operator config.
+  const reconciliationConfig = config.reconciliation;
+
+  // Worker-scoped mark sources (stateless, safe to share).
+  // Composite fallback: Hyperliquid mids first (all listed perps), then CoinGecko.
+  const oracleMarkSource = new OracleMarkSource({
+    baseUrl: config.marking.oracleBaseUrl,
+    timeoutMs: config.marking.oracleTimeoutMs,
+    vsCurrency: config.marking.oracleVsCurrency,
+  });
+  const hyperliquidMarkSource = new HyperliquidMarkSource({
+    timeoutMs: config.marking.oracleTimeoutMs,
+  });
+  const compositeFallbackSource = new MarkSelector(
+    { stalenessThresholdMs: 30_000 },
+    hyperliquidMarkSource,
+    oracleMarkSource,
+  );
+
+  // Worker-scoped public stream pool — one WebSocket per venue, fan-out to all
+  // actors. Undefined when no orderbook venue has a wsUrl configured.
+  const streamConnectors = buildPublicStreamConnectors(config.venues);
+  const publicStreamPool = streamConnectors.size > 0
+    ? new PublicStreamPool(config.streams.public, streamConnectors)
+    : undefined;
+
+  // Shared venue adapter factory — credential resolution + adapter construction.
+  const venueAdapterFactory = new VenueAdapterFactory({
+    db,
+    journal,
+    venues: config.venues,
+    streamConfig: config.streams.private,
+  });
+
+  // ── Per-bot ActorFactory closure (traced to herobids index.ts:1878–2249) ──
+  // Diverges from herobids only where 013 §4 directs: injected venueAccountId
+  // (no resolveBotStartupContext), mechanical-only strategy, no-op status
+  // callbacks (agent/status wiring is item C/C2).
+  const actorFactory = async (botId: string, rawConfig: Record<string, unknown>): Promise<TradingActor> => {
+    // 1. Validate instance config — fail fast (mechanical-only schema, item A′).
+    const parseResult = BotConfigSchema.safeParse(rawConfig);
+    if (!parseResult.success) {
+      throw new Error(
+        `Invalid config for bot ${botId}: ${parseResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+      );
+    }
+    const config_ = parseResult.data;
+    // venue and venueType are stamped by the consumer before persistence.
+    const venue = config_.venue!;
+    const venueType = config_.venueType!;
+
+    // 2. Read the INJECTED venueAccountId (decisions 11–13). The platform grant
+    //    front-end (resolveBotStartupContext) was deleted Phase 8 — the consumer
+    //    resolves the grant and injects venueAccountId onto the persisted config.
+    const venueAccountId = rawConfig['venueAccountId'] as string | undefined;
+    if (!venueAccountId) {
+      throw new Error(`Bot ${botId} has no injected venueAccountId — refusing to start`);
+    }
+
+    let testnet = false;
+    let resolvedCredentialId: string | undefined;
+    let credentialsPresent = false;
+    let signerPresent = false;
+    let venueAdapter: OrderbookVenuePort | undefined;
+    let swapVenue: SwapVenuePort | undefined;
+    let swapConfirmationPoller: SwapConfirmationPoller | undefined;
+
+    // 3. Resolve adapters via the shared factory (credentials decrypt inside it).
+    if (venueType !== 'swap') {
+      const result = await venueAdapterFactory.buildOrderbookAdapter({
+        venueAccountId,
+        venue,
+        actorType: 'bot',
+        actorId: botId,
+        executionMode: config_.execution.mode,
+      });
+      venueAdapter = result.venuePort;
+      testnet = result.credentials.testnet;
+      resolvedCredentialId = result.credentialId;
+      credentialsPresent = !!(result.credentials.apiKey.trim() && result.credentials.secret.trim());
+    } else if (config_.swapAssets) {
+      const result = await venueAdapterFactory.buildSwapAdapter({
+        venueAccountId,
+        venue,
+        swapAssets: config_.swapAssets,
+        actorType: 'bot',
+        actorId: botId,
+      });
+      swapVenue = result.swapVenue;
+      signerPresent = result.signerPresent;
+      swapConfirmationPoller = result.confirmationPoller;
+    } else {
+      throw new Error(
+        `swapAssets config required for swap venue bot ${botId} — cannot route swaps without explicit asset identifiers and decimals`,
+      );
+    }
+
+    // 4. Live-mode startup gate (fail-closed). Sources the effective per-order
+    //    notional cap that feeds riskLimits below.
+    const liveGateResult = assertLiveReadiness(config.liveRollout, {
+      executionMode: config_.execution.mode,
+      venue,
+      venueType,
+      venueAccountId,
+      credentialsFromDb: !!resolvedCredentialId,
+      credentialsPresent,
+      signerPresent,
+      driftAlertOnly: config.reconciliation.driftAlertOnly,
+      instanceMaxOrderNotional: config_.risk.maxOrderNotional != null ? String(config_.risk.maxOrderNotional) : undefined,
+    });
+
+    const streamConfig = config.streams.private;
+
+    const fetchPrice = async (): Promise<MarketSnapshot | null> => {
+      if (!venueAdapter) return null; // Swap venues don't use orderbook ticker
+      const result = await venueAdapter.fetchTicker(config_.symbol);
+      if (!result.ok) {
+        logger.warn({ botId, symbol: config_.symbol, error: result.error }, 'fetchTicker failed');
+        return null;
+      }
+      return {
+        symbol: config_.symbol,
+        price: result.data.last,
+        timestamp: result.data.timestamp,
+      };
+    };
+
+    // Live market-data recording — captures top-of-book snapshots + reference
+    // marks into a replay corpus when operator config enables it. Copied wiring
+    // from herobids apps/worker/src/index.ts:1980–2033 (namespace-adapted:
+    // appConfig→config, instanceUserId→the injected soft ownerId, and the
+    // platform startupContext.connectionId metadata field dropped — the
+    // connection grant front-end was deleted Phase 8). MarketDataRecorder is
+    // copied + exported from @traderton/backtesting; backtestingRepo carries
+    // insertCorpus/insertMarketEventsBatch/updateCorpusWindow.
+    let recordMarketSnapshot: TradingActorDeps['recordMarketSnapshot'];
+    let recordReferenceMark: TradingActorDeps['recordReferenceMark'];
+
+    if (config.marketDataRecording.enabled) {
+      const recorder = new MarketDataRecorder(venue);
+      const corpusId = await backtestingRepo.insertCorpus({
+        name: `${botId}-${new Date().toISOString()}`,
+        source: 'live-recording',
+        venue,
+        symbols: [config_.symbol],
+        ownerId: rawConfig['ownerId'] as string | undefined,
+        metadata: {
+          botId,
+          venueAccountId,
+          captureTrades: config.marketDataRecording.captureTrades,
+          captureTopOfBook: config.marketDataRecording.captureTopOfBook,
+          captureCandles: config.marketDataRecording.captureCandles,
+        },
+      });
+
+      let corpusStartAt: Date | undefined;
+      let corpusEndAt: Date | undefined;
+
+      const flushRecordedEvents = async (): Promise<void> => {
+        const events = recorder.flush();
+        if (events.length === 0) return;
+
+        await backtestingRepo.insertMarketEventsBatch(events.map((event) => ({
+          corpusId,
+          venue: event.venue,
+          symbol: event.symbol,
+          eventType: event.eventType,
+          price: event.price,
+          eventAt: event.eventAt,
+          data: event.data,
+        })));
+
+        const batchStart = events[0]!.eventAt;
+        const batchEnd = events[events.length - 1]!.eventAt;
+        corpusStartAt = corpusStartAt && corpusStartAt < batchStart ? corpusStartAt : batchStart;
+        corpusEndAt = corpusEndAt && corpusEndAt > batchEnd ? corpusEndAt : batchEnd;
+        await backtestingRepo.updateCorpusWindow(corpusId, corpusStartAt, corpusEndAt);
+      };
+
+      recordMarketSnapshot = async (snapshot) => {
+        if (!config.marketDataRecording.captureTopOfBook) return;
+        recorder.recordSnapshot(snapshot);
+        await flushRecordedEvents();
+      };
+
+      recordReferenceMark = async (mark) => {
+        recorder.recordMark(mark.symbol, mark.price, mark.source, mark.timestamp);
+        await flushRecordedEvents();
+      };
+    }
+
+    const swapNetwork = resolveSwapNetwork(venue, undefined, config.venues['1inch']);
+
+    // Per-bot candle fetcher — mechanical strategy phases consume OHLCV. Undefined
+    // when marketData is not configured (paper bots without a mechanical strategy).
+    const candleFetcher: CandleFetcher | undefined = sharedMarketDataRegistry
+      ? new VenueCandleFetcher(
+          sharedMarketDataRegistry.configs.binance,
+          swapNetwork != null
+            ? { config: sharedMarketDataRegistry.configs.geckoterminal, network: swapNetwork }
+            : null,
+          venueType === 'swap' ? 'swap' : 'orderbook',
+        )
+      : undefined;
+
+    // 5. Strategy — mechanical/dca only (013 §4.1d).
+    const strategy = createStrategy(idGen, config_.strategy, candleFetcher);
+
+    const deps: TradingActorDeps = {
+      strategy,
+      journal,
+      fillRepo,
+      positionRepo,
+      planRepo,
+      orderRepo,
+      decisionRepo,
+      backtestingRepo,
+      balanceSnapshotRepo,
+      reconciliationRepo,
+      // riskLimits built INLINE from config.risk (bots do this; agents use
+      // buildAgentRiskLimits). Field mapping traced to herobids index.ts:2079–2086.
+      riskLimits: {
+        maxOpenPositions: config_.risk.maxOpenPositions ?? 5,
+        maxPositionSizePct: config_.risk.maxPositionSizePct,
+        dailyMaxLossPct: config_.risk.dailyMaxLossPct,
+        stopLossCooldownMs: config_.risk.stopLossCooldownMs,
+        stopLossMaxUnrealizedLossPct: config_.risk.stopLossPct,
+        maxOrderNotional: liveGateResult.effectiveMaxOrderNotional,
+      },
+      idGen,
+      fetchPrice,
+      venuePort: config_.execution.mode === 'paper' ? undefined : (venueAdapter ?? undefined),
+      reconciliationConfig,
+      executionMode: config_.execution.mode,
+      streamConfig,
+      venue,
+      symbol: config_.symbol,
+      venueAccountId,
+      venueType,
+      swapAssets: config_.swapAssets,
+      swapNetwork,
+      swapBaseTokenAddress: venueType === 'swap' ? config_.swapAssets?.baseAsset : undefined,
+      swapVenue,
+      streamPool: venueType !== 'swap'
+        ? createScopedStreamPoolHandle(publicStreamPool, venue, testnet)
+        : undefined,
+      markSource: createFillFirstMarkSource({
+        fillLookup: fillRepo,
+        actorId: botId,
+        fallbackSource: compositeFallbackSource,
+        stalenessThresholdMs: config.marking.stalenessThresholdMs,
+      }),
+      // Live market-data recording hooks — wired from the recorder block above
+      // (undefined when config.marketDataRecording.enabled is false). Copied from
+      // herobids index.ts:1980–2033.
+      recordMarketSnapshot,
+      recordReferenceMark,
+      shadowPollIntervalMs: config_.shadowPollIntervalMs ?? config.execution.shadowPollIntervalMs,
+      shadowQuoteSlippageBps: config.execution.shadowQuoteSlippageBps,
+      credentialId: resolvedCredentialId,
+      // swapTokenSafety: DEFERRED — the copied token-safety adapter's resolveTokenData
+      // closure depends on the herobids inline helper `enrichTokenWithDiscovery`
+      // (index.ts:93), which was not copied. Reproducing it here is non-wiring
+      // authoring, so it is deferred. The dep is optional; undefined preserves
+      // adapter behaviour for orderbook/paper bots — affects swap-venue bots ONLY,
+      // which must not run live until this is resolved. The paired 1inch swapNetwork
+      // fail-closed guard (herobids index.ts:2043–2047) is dropped for the same
+      // reason. See the "swap-venue token-safety gating" rows in
+      // docs/001-parity-ledger.md + docs/003-anomalies-and-deviations.md.
+      swapTokenSafety: undefined,
+      feeConfig: config.simulation,
+      maxConsecutiveVenueErrors: config.liveRollout.maxConsecutiveVenueErrors,
+      slippageAlertBps: config.liveRollout.slippageAlertBps,
+      crashPolicy: config.liveRollout.crashPolicy,
+      botConfigInvalidHaltThreshold: config.agentRiskDefaults.botConfigInvalidHaltThreshold,
+      botExecutionErrorHaltThreshold: config.agentRiskDefaults.botExecutionErrorHaltThreshold,
+      botLlmProviderErrorHaltThreshold: config.agentRiskDefaults.botLlmProviderErrorHaltThreshold,
+      liveOrderTimeoutPolicy: {
+        limitOrderTimeoutMs: config.liveRollout.limitOrderTimeoutMs,
+        marketOrderTimeoutMs: config.liveRollout.marketOrderTimeoutMs,
+      },
+      swapConfirmationPoller,
+      candleFetcher,
+      swapTokenSafetyThresholds: (config_.tokenSafety?.minLiquidityUsd != null || config_.tokenSafety?.minVolume24hUsd != null || config_.tokenSafety?.minAgeHours != null || config_.tokenSafety?.allowOverrides != null)
+        ? {
+            minLiquidityUsd: config_.tokenSafety!.minLiquidityUsd,
+            minVolume24hUsd: config_.tokenSafety!.minVolume24hUsd,
+            minAgeHours: config_.tokenSafety!.minAgeHours,
+            allowOverrides: config_.tokenSafety!.allowOverrides,
+          }
+        : undefined,
+      riskPlaybook: (config_.risk.maxNewPositionsPerDay != null || config_.risk.avoidParabolicMovePct != null)
+        ? {
+            maxNewPositionsPerDay: config_.risk.maxNewPositionsPerDay,
+            avoidParabolicMovePct: config_.risk.avoidParabolicMovePct,
+          }
+        : undefined,
+      // onCrashed keeps trading lifecycle intact (013 §4.4). The herobids body
+      // also published agent/status telemetry — that is item C2; here it reduces
+      // to the runtime crash handoff only.
+      onCrashed: async (instanceId: string) => {
+        await runtime.handleActorCrash(instanceId);
+        logger.error({ botId: instanceId }, 'Bot crashed — removed from runtime');
+      },
+    };
+
+    return new TradingActor(botId, config_.strategy.params as Record<string, unknown>, deps);
+  };
+
+  // ── WorkerRuntime (the BullMQ lifecycle-job consumer) ──
+  // M1 status callbacks are no-op stubs (their herobids bodies update the bots
+  // table + publish status → item C2). onCrashed lives on TradingActorDeps above.
+  const runtimeConfig: WorkerRuntimeConfig = {
+    redis,
+    ...(ports.scanIntervalMs != null ? { scanIntervalMs: ports.scanIntervalMs } : {}),
+    ...(ports.concurrency != null ? { concurrency: ports.concurrency } : {}),
+    onStartFailed: async () => {},
+    onStopped: () => {},
+    onStarted: () => {},
+  };
+
+  const runtime = new WorkerRuntime(runtimeConfig, actorFactory, instanceLoader, lease);
+
+  return {
+    start: async () => {
+      if (config.marketData) {
+        sharedMarketDataRegistry = await createProviderRegistry(config.marketData, {
+          redisClient: redis as unknown as RedisEvalClient,
+          discoverySeenClient: redis,
+        });
+      }
+      await runtime.start();
+    },
+    shutdown: () => runtime.shutdown(),
+    runtime,
+  };
+}

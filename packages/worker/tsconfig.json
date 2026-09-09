@@ -12,6 +12,7 @@
     { "path": "../engine" },
     { "path": "../market-data" },
     { "path": "../strategy" },
-    { "path": "../venues" }
+    { "path": "../venues" },
+    { "path": "../backtesting" }
   ]
 }

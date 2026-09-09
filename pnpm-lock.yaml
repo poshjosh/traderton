@@ -129,6 +129,9 @@ importers:
 
   packages/worker:
     dependencies:
+      '@traderton/backtesting':
+        specifier: workspace:*
+        version: link:../backtesting
       '@traderton/db':
         specifier: workspace:*
         version: link:../db
