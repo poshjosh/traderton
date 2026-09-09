@@ -172,7 +172,17 @@ Log the divergence in [001](../001-parity-ledger.md) (mechanical-only row) — a
 
 ---
 
-## 4. Item B — Trading composition root
+## 4. Item B — Trading composition root ✅ DONE 2026-09-07 (commit 5834402)
+
+**Landed:** `createTradingRuntime` factory (`packages/worker/src/composition/create-trading-runtime.ts`)
++ relocated `id-gen.ts` + `bin/worker.ts` + authored smoke test + worker barrel export. Bot-lifecycle
+scope only (per §4.1a); wiring-only over copied modules; live-gate + market-data recorder wired;
+status callbacks are M1 no-op stubs. Reviewed (no critical/high). Build green, lint clean, 2244 tests
+pass (+4 smoke). **Outstanding (recorded, not silent):** swap-venue token-safety gating is
+`Deferred (required for cutover — swap bots only)` — `swapTokenSafety: undefined` + the paired 1inch
+`swapNetwork` fail-closed guard dropped, both blocked on the uncopied `enrichTokenWithDiscovery`; see
+[001](../001-parity-ledger.md) + [003](../003-anomalies-and-deviations.md). Exclusions (§4.5) all
+routed to their owning items (C/D/C2/E/F) — none authored here.
 
 **Full design + evidence: [015-composition-root-proposal.md](./015-composition-root-proposal.md)
 (APPROVED 2026-09-07).** This section is the self-contained implementer brief; 015 carries the
