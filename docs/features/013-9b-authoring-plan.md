@@ -112,7 +112,7 @@ Every 9b item re-tested (2026-09-07, verified against herobids source) against f
 | **C. Intake router + registry + AgentTradingActor wiring** ✅ **DONE 2026-09-07** (decisions LOCKED — §5) | **COPY (already, Phase 8) + AUTHORED wiring/seam + DROP** | Re-verified 2026-09-07 (post-investigation): the actor-owned intake (`AgentTradingActor.getIntakeDeps`/`getDecisionContext`/`getPosition`), `ExecutionActor`, `TradingActor`, `validate-trade-instrument`, `venue-instrument-cache` were **already COPIED in Phase 8** — C reuses them. C **authors** only wiring: a slim decision router (`submitDecision`), a plain `Map<string, ExecutionActor>` registry (owned by B's factory), the venue-account-direct resolver seam (injected `venueAccountId` + the venue-account guards), and `AgentTradingActor` construct+register. It **DROPS** (Intentional Divergence) the `AgentIntakeResolver` grant-fallback + `ActorStateOwner` — the `agentConnections ⋈ connections` grant front-end / agent-session wrapper, both platform (crux resolved = option (a); require a running actor else `instance_not_running`). Handler drops the platform paused/session/telegram/approval branches. |
 | **D. Drive-path tools** (`bots.ts`, `trading.ts`) ✅ **DONE 2026-09-07** (decisions LOCKED — §6) | **COPY** (verbatim) | **LANDED:** both files copied verbatim (diff = `@herobids`→`@traderton` + the sanctioned `TradingToolContext`/`AgentTool<TradingToolContext>` convention only) + their herobids parity tests (9 + 25). `ctx.agentId`/`creatorType='agent'` scope untouched (decision (a); injected `ownerId` binds at the persistence seam). Platform broker NOT copied. Tools use only `DECISION_SUBMIT`+`MANAGE_BOT`. See §6.5. |
 | **D-target. In-process drive target + bot-lifecycle handler + enqueue seam** ✅ **DONE 2026-09-07** | **AUTHORED (seam/wiring) + DROP** | **LANDED:** authored the 3-const `AGENT_MESSAGE_TYPES` (values verbatim); `createDriveTarget` `publishToInbound` (`DECISION_SUBMIT`→item C `submitDecision` + reply-write; `MANAGE_BOT`→handler; no `BOT_QUERY` route); `handleManageBot` **tracing `handleManageBot`'s trading core over the copied `WorkerRuntime`**; `WorkerRuntime.enqueueLifecycle`. **DROPPED** the agent-session + connection-grant + LLM-model-policy shell (platform, decisions 7–13). maxBots limit + create/start persist = one injected `BotLimitSeam` → item E (pre-E → `bot_limit_unavailable`). Build+lint green; 2303 tests. See §6.5. |
-| **E. maxBots atomic** (decisions LOCKED — §7) | **COPY (bodies + advisory-lock pattern) + AUTHORED wiring** | Reframed 2026-09-07 (mostly-COPY, not "authored primitive"): the count/insert/mark bodies mirror the herobids broker method (`repositories.ts:905–1027`); the atomicity **copies** herobids' own API-path `pg_advisory_xact_lock(classId, hashtext(ownerId))` (already in Traderton `_deferred-authoring/api-routes/bots.ts:135`), re-keyed `agents`-row→`ownerId`. Two-call create→mark preserved (`running` = the `reclaimOrphans` contract). Only the `createTradingRuntime` seam wiring (+ `maxBots` resolution + the item-D create→mark call) is authored. Human-confirmed atomic. |
+| **E. maxBots atomic** ✅ **DONE 2026-09-07** (decisions LOCKED — §7) | **COPY (bodies + advisory-lock pattern) + AUTHORED wiring** | **LANDED:** the two re-keyed `BotRepository` methods (bodies mirror herobids broker `repositories.ts:905–1027`; atomicity **copies** the API-path `pg_advisory_xact_lock(classId, hashtext(ownerId))` form, `MAXBOTS_LOCK_CLASS=17`, re-keyed `agents`-row→`ownerId`; count by `ownerId`; INSERT re-keyed no `userId`/`connectionId`) + the `createTradingRuntime` seam wiring (`maxBots` from `agentRiskDefaults` + injected `maxBotsOverride`) + the item-D `createAndStart` create→mark call. Two-call create→mark preserved (`running` = the `reclaimOrphans` contract). Build+lint green; 2315 tests (+7; +2 gated). See §7.5. |
 | **C2/G. Event producer — vocabulary + emitter** | **COPY** | The event envelope + per-event emitter methods (the trading subset, §ledger table) are clean and copyable (trading types). |
 | **C2/G. Event producer — durable persistence + Redis relay (outbox)** | **IMPROVEMENT (deferred)** | herobids is Redis-Streams-window-only for outbound events (verified: `xadd MAXLEN ~`, no Postgres). Postgres+Redis durable outbox is an improvement BEYOND parity → tracked in [014](./014-decision-response-and-event-model.md), decided separately, NOT built inside 9b. At 9b-parity: reproduce the Redis-window emitter (copy-shaped). |
 | **F. M2 REST adapter** | **AUTHORED** (+ COPY-adapt routes) | 005 is a fresh contract with no herobids equivalent (herobids uses JWT `request.userId`, not HMAC boundary) → the shell/auth/idempotency/deadline/dispatcher are authored. The trading route HANDLERS copy-adapt (`userId`→`ownerId`). Sequenced last (M2). |
@@ -710,6 +710,32 @@ Wire-through: item D's `create_and_start`/`start` no longer return `bot_limit_un
 **Resolves.** The `create_bot`/`start_bot` `Deferred (required for cutover)` sub-capability + the cutover
 gate "All Deferred (required for cutover) entries resolved." **Divergence to log:** per-agent → per-`ownerId`
 reshape (Intentional Divergence, [001](../001-parity-ledger.md) + [004](../004-decision-log.md)).
+
+### 7.5 LANDED — item E DONE (2026-09-07)
+**Files.** `packages/db/src/repositories.ts` — the two re-keyed `BotRepository` methods
+(`tryMarkBotRunningWithLimit`/`tryCreateBotWithLimit`), bodies mirroring herobids `repositories.ts:905–1027`
+line-for-line with the three re-keys (advisory lock ↔ `SELECT agents … FOR UPDATE`; COUNT by `ownerId`;
+INSERT re-keyed `ownerId`, no `userId`/`connectionId`). Advisory lock copies the API-path form
+(`_deferred-authoring/api-routes/bots.ts:135`), `MAXBOTS_LOCK_CLASS = 17` (1/13 taken). `maxBots` is a value
+arg (no config read in the db layer). `create-trading-runtime.ts` — the `BotLimitSeam` wiring (resolves
+`maxBots` from `config.agentRiskDefaults.maxBots`, or a consumer-injected `maxBotsOverride` VALUE on
+`DriveTargetInjection`; no new config table). `drive-target.ts` — the one item-D `createAndStart` create→mark
+add (mirrors herobids broker `:738–743`). Tests: `db/src/__tests__/bot-limit.test.ts` (6 authored unit,
+mock-`tx`), `db/src/bot-limit.integration.test.ts` (2 DATABASE_URL-gated concurrency), `drive-target.test.ts`
+(create→mark→enqueue + mark-not-claimed). Build+lint green; **2315 tests / 17 skipped / 0 failed** (+7; +2
+gated skips; no regression; the seam-absent `bot_limit_unavailable` tests still pass).
+
+**Manifest.** Mirrors COPY: the count/insert/mark bodies + the two-call create→mark. COPY (re-keyed): the
+`pg_advisory_xact_lock(classId, hashtext(ownerId))` form. AUTHORED (only surface): the `createTradingRuntime`
+seam wiring + the `createAndStart` create→mark call. Reviewed (CodeReviewer PASS — no CRITICAL/HIGH).
+
+**Outstanding Issues (CodeReviewer, 2026-09-07 — no CRITICAL/HIGH):**
+- **[item E] LOW-1 — integration test proves serialization at the MARK step**, not the create step (creates
+  insert `stopped`, which never trips the limit; all N creates succeed, the marks are gated). Valid
+  serialization proof + exercises the create→mark pipeline, but the case name slightly over-claims "create."
+  Fold into Phase 10 when the DATABASE_URL-gated test runs against live Postgres (rename, or add a
+  seed-k-running-then-N-concurrent-creates variant). No behavioural cost.
+- **[item E] LOW-2 — redundant type annotation** in the integration test. Trivial; no action.
 
 --- END OF M1 ---
 

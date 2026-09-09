@@ -162,10 +162,39 @@ describe('drive target — MANAGE_BOT create_and_start', () => {
     expect(createSpec.config.venue).toBe('hyperliquid');
     expect(createSpec.config.venueType).toBe('orderbook');
 
-    // Then a start lifecycle job for the newly created bot.
+    // Then the running slot is CLAIMED (create → mark), mirroring the herobids
+    // broker (agent-message-broker.ts:738–743): the created bot reads `stopped`
+    // until this mark transitions it to `running` (the reclaimOrphans contract).
+    expect(stubs.botLimit.tryMarkBotRunningWithLimit).toHaveBeenCalledTimes(1);
+    const markSpec = stubs.botLimit.tryMarkBotRunningWithLimit.mock.calls[0][0];
+    expect(markSpec.botId).toBe('bot-new');
+    expect(markSpec.ownerId).toBe(OWNER_ID);
+    expect(markSpec.creatorType).toBe('agent');
+    expect(markSpec.creatorId).toBe(ACTOR_ID);
+
+    // Then a start lifecycle job for the newly created bot (create → mark → enqueue).
     expect(stubs.enqueueLifecycle).toHaveBeenCalledTimes(1);
     expect(stubs.enqueueLifecycle.mock.calls[0][0]).toBe('start');
     expect(stubs.enqueueLifecycle.mock.calls[0][1]).toBe('bot-new');
+  });
+
+  it('rejects (no enqueue) when the create-path running-slot mark is not claimed', async () => {
+    // Create succeeds (bot persisted as stopped) but the atomic running-slot claim
+    // fails at the limit — the herobids-parity limit error is thrown before enqueue.
+    const { deps, stubs } = makeDeps();
+    stubs.botLimit.tryMarkBotRunningWithLimit.mockResolvedValueOnce(false);
+    const publishToInbound = createDriveTarget(deps);
+
+    await expect(
+      publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
+        action: 'create_and_start',
+        config: validBotConfig(),
+      }),
+    ).rejects.toThrow(/max concurrent bots/);
+
+    expect(stubs.botLimit.tryCreateBotWithLimit).toHaveBeenCalledTimes(1);
+    expect(stubs.botLimit.tryMarkBotRunningWithLimit).toHaveBeenCalledTimes(1);
+    expect(stubs.enqueueLifecycle).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid config before touching the create seam or the runtime', async () => {

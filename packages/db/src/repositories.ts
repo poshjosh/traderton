@@ -857,16 +857,141 @@ export class BotRepository {
     return rows.length;
   }
 
-  // tryMarkBotRunningWithLimit + tryCreateBotWithLimit REMOVED (Phase 2).
-  // These enforced a per-AGENT maxBots limit by row-locking the platform `agents`
-  // table — a platform-coupled implementation (Intentional Divergence). Their only
-  // callers are the platform agent-broker + worker runtime (stay in herobids).
-  // Limit-enforced bot creation/start is a Deferred-REQUIRED Traderton capability
-  // (herobids will rely on Traderton's create_bot/start_bot tools): owned by the
-  // bot-lifecycle phase, where the limit key (per-owner / per-venue-account /
-  // operator config) and a trading-owned concurrency guard are decided. See the
-  // "herobids becomes a consumer" section in 000-vision + the decision log (004) +
-  // the ledger's create_bot/start_bot rows.
+  // tryMarkBotRunningWithLimit + tryCreateBotWithLimit re-instated per-`ownerId`
+  // at Phase 9b item E. Their bodies MIRROR the herobids broker methods
+  // (packages/db/src/repositories.ts:905–1027) line-for-line, changing ONLY:
+  //  (a) the serialization — the deleted `SELECT agents … FOR UPDATE` (which
+  //      row-locked the platform `agents` table, dropped Phase 2) is replaced by
+  //      the Postgres advisory-lock form COPIED from Traderton's own API path
+  //      (`packages/worker/src/_deferred-authoring/api-routes/bots.ts:135`),
+  //      re-keyed to `ownerId`;
+  //  (b) the count keyed on `ownerId` (the Traderton limit key, decision 004) —
+  //      not the herobids per-agent `creatorType`/`creatorId`;
+  //  (c) the INSERT columns re-keyed (`ownerId`, no `userId`/`connectionId` — the
+  //      Phase-2 `bots` schema, schema/bots.ts).
+  // `maxBots` is a value arg (013 §7 decision 1) — the db layer never reads config;
+  // the `createTradingRuntime` seam wiring resolves it. See 013 §7 / 022.
+
+  /**
+   * Advisory-lock class id reserved for the per-`ownerId` maxBots serialization.
+   * Convention: the copied API routes use `1` (bot-create) + `13` (credentials);
+   * this lock uses a distinct reserved int so the two-int
+   * `pg_advisory_xact_lock(classId, hashtext(ownerId))` form does not collide.
+   */
+  private static readonly MAXBOTS_LOCK_CLASS = 17;
+
+  /**
+   * Atomically enforce the per-`ownerId` maxBots limit and mark a bot running.
+   * Returns true if the running slot was claimed, false if the owner is at capacity.
+   *
+   * Mirrors herobids `tryMarkBotRunningWithLimit` (repositories.ts:905–969); the
+   * `agents`-row `FOR UPDATE` is replaced by a per-`ownerId` advisory lock and the
+   * count is keyed on `ownerId`. `startedAt` is preserved when the bot is already
+   * running (reclaim). `maxBots` is a value arg (013 §7 decision 1).
+   */
+  async tryMarkBotRunningWithLimit(params: {
+    botId: string;
+    ownerId: string;
+    creatorType: string;
+    creatorId: string;
+    maxBots: number;
+  }): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      // Serialize concurrent lifecycle ops for the same owner. Copied from the
+      // API path (bots.ts:135): hashtext() returns int4; the two-arg form takes
+      // (int4, int4). `_xact_` auto-releases at commit/rollback (no manual unlock).
+      // Without this, two concurrent transactions under READ COMMITTED both see
+      // the same count and both proceed.
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${BotRepository.MAXBOTS_LOCK_CLASS}, hashtext(${params.ownerId}))`,
+      );
+
+      const runningRows = await tx
+        .select({ id: bots.id })
+        .from(bots)
+        .where(and(eq(bots.ownerId, params.ownerId), eq(bots.status, 'running')));
+
+      if (runningRows.length >= params.maxBots) return false;
+
+      const now = new Date();
+      const [current] = await tx
+        .select({ status: bots.status, startedAt: bots.startedAt })
+        .from(bots)
+        .where(eq(bots.id, params.botId))
+        .limit(1);
+
+      const startedAt = current?.status === 'running' && current.startedAt
+        ? current.startedAt
+        : now;
+
+      await tx
+        .update(bots)
+        .set({
+          status: 'running',
+          startedAt,
+          stoppedAt: null,
+          updatedAt: now,
+        })
+        .where(eq(bots.id, params.botId));
+
+      return true;
+    });
+  }
+
+  /**
+   * Atomically enforce the per-`ownerId` maxBots limit and create a new bot
+   * (status: 'stopped'). Returns { created: true, botId } when under the limit,
+   * or { created: false } when the owner is at capacity.
+   *
+   * Mirrors herobids `tryCreateBotWithLimit` (repositories.ts:972–1027); the
+   * `agents`-row `FOR UPDATE` is replaced by a per-`ownerId` advisory lock, the
+   * count is keyed on `ownerId`, and the INSERT is re-keyed to the Phase-2 `bots`
+   * schema (`ownerId`, no `userId`/`connectionId`). Inserts `status:'stopped'` —
+   * the separate `running` mark is the `reclaimOrphans` contract (013 §7 decision
+   * 2). `maxBots` is a value arg (013 §7 decision 1).
+   */
+  async tryCreateBotWithLimit(params: {
+    ownerId: string;
+    venueAccountId: string;
+    config: Record<string, unknown>;
+    creatorType: string;
+    creatorId: string;
+    maxBots: number;
+  }): Promise<{ created: boolean; botId?: string }> {
+    return this.db.transaction(async (tx) => {
+      // Serialize concurrent lifecycle ops for the same owner (see
+      // tryMarkBotRunningWithLimit for rationale). Copied API-path form,
+      // re-keyed to `ownerId`.
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${BotRepository.MAXBOTS_LOCK_CLASS}, hashtext(${params.ownerId}))`,
+      );
+
+      const runningRows = await tx
+        .select({ id: bots.id })
+        .from(bots)
+        .where(and(eq(bots.ownerId, params.ownerId), eq(bots.status, 'running')));
+
+      if (runningRows.length >= params.maxBots) {
+        return { created: false };
+      }
+
+      const id = crypto.randomUUID();
+      const now = new Date();
+      await tx.insert(bots).values({
+        id,
+        ownerId: params.ownerId,
+        venueAccountId: params.venueAccountId,
+        config: params.config,
+        status: 'stopped',
+        creatorType: params.creatorType,
+        creatorId: params.creatorId,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      return { created: true, botId: id };
+    });
+  }
 
   /** Update bot config JSON in place. */
   async updateBotConfig(botId: string, config: Record<string, unknown>): Promise<void> {

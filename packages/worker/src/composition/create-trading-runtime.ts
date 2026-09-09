@@ -180,7 +180,21 @@ export interface DriveTargetInjection {
   venue: string;
   venueType: 'orderbook' | 'swap';
   venueAccountId: string;
-  /** Per-`ownerId` maxBots limit + create/start persistence seam (item E). */
+  /**
+   * Optional per-`ownerId` maxBots override VALUE (ports-carry-values). When
+   * supplied, the item-E seam wiring uses this cap for the owner instead of the
+   * operator default (`config.agentRiskDefaults.maxBots`). Traderton owns the
+   * default + the enforcement; the consumer may only inject a limit VALUE, never
+   * the enforcement. Omit to use the operator default. (013 §7 decision 1.)
+   */
+  maxBotsOverride?: number;
+  /**
+   * ESCAPE HATCH: a fully consumer-supplied `BotLimitSeam` (item E). Normally the
+   * seam is built HERE from the `BotRepository` singleton + the resolved
+   * `maxBots`, so a consumer never needs this — it exists only so a caller (e.g.
+   * a test, or a future non-Postgres backing) can substitute the seam wholesale.
+   * When set, it takes precedence over the internally-built seam.
+   */
   botLimit?: BotLimitSeam;
 }
 
@@ -781,19 +795,36 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
     stopAndDeregisterAgentActor: (actor) =>
       stopAndDeregisterAgentActor({ register: registerActor, deregister: deregisterActor }, actor),
     enqueueLifecycle: (command, botId, config) => runtime.enqueueLifecycle(command, botId, config),
-    createDriveTarget: (injection) =>
-      createDriveTarget({
+    createDriveTarget: (injection) => {
+      // ── Item-E maxBots seam wiring (AUTHORED — the only authored surface) ──
+      // Build the per-`ownerId` BotLimitSeam from the BotRepository singleton,
+      // closing over the resolved `maxBots` VALUE (013 §7 decision 1): the
+      // operator default (config.agentRiskDefaults.maxBots) unless the consumer
+      // injects a per-owner override VALUE (`maxBotsOverride`). The db methods stay
+      // pure value-taking primitives — the "which limit for this owner" policy
+      // lives here in the injectable wiring, never the db layer.
+      //
+      // A per-`ownerId`→override table is a consumer-side extension point, NOT a
+      // Traderton-owned config table (013 §7): supply `maxBotsOverride` per drive
+      // target if a caller needs a non-default cap for a specific owner.
+      const maxBots = injection.maxBotsOverride ?? config.agentRiskDefaults.maxBots;
+      const botLimit: BotLimitSeam = injection.botLimit ?? {
+        tryCreateBotWithLimit: (spec) => botRepo.tryCreateBotWithLimit({ ...spec, maxBots }),
+        tryMarkBotRunningWithLimit: (spec) => botRepo.tryMarkBotRunningWithLimit({ ...spec, maxBots }),
+      };
+      return createDriveTarget({
         runtime,
         submitDecision: (input) => submitDecision(actorRegistry, input),
         botRepo,
         redis,
-        ...(injection.botLimit !== undefined ? { botLimit: injection.botLimit } : {}),
+        botLimit,
         ownerId: injection.ownerId,
         actorId: injection.actorId,
         ownerMode: injection.ownerMode,
         venue: injection.venue,
         venueType: injection.venueType,
         venueAccountId: injection.venueAccountId,
-      }),
+      });
+    },
   };
 }

@@ -302,6 +302,22 @@ async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload):
   const botId = createResult.botId;
   logger.info({ ownerId: deps.ownerId, botId }, 'Bot created via manage_bot');
 
+  // Claim the running slot (create → mark), mirroring the herobids broker
+  // (agent-message-broker.ts:738–743): the create inserts `status:'stopped'`, then
+  // this atomic mark transitions to `running` before the start job enqueues. The
+  // `running` mark is the `WorkerRuntime.reclaimOrphans` crash-recovery contract
+  // (013 §7 decision 2). Absent the limit slot → reject with the herobids-parity
+  // message (item E).
+  const claimed = await deps.botLimit.tryMarkBotRunningWithLimit({
+    botId,
+    ownerId: deps.ownerId,
+    creatorType: 'agent',
+    creatorId: deps.actorId,
+  });
+  if (!claimed) {
+    throw new Error('Agent has reached its max concurrent bots limit. Stop a bot before creating a new one.');
+  }
+
   // Enqueue the start lifecycle job. venueAccountId flows via the persisted config
   // + the injected instance loader (resolved at job-processing time), mirroring
   // herobids' "no longer passed in the config payload" note (broker :822–824).
