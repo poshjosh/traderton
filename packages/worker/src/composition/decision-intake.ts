@@ -23,6 +23,7 @@ import { createLogger } from '../logger.js';
 import type { ExecutionActor } from '../execution-actor.js';
 import { isIntakeRejection } from '../execution-actor.js';
 import { AgentTradingActor, type AgentTradingActorDeps } from '../agent-trading-actor.js';
+import type { VenueInstrumentCache } from '../venue-instrument-cache.js';
 import { buildAgentRiskLimits } from '../agent-risk-limits.js';
 import { POSITION_GROWING_INTENTS, formatLevelValidationMessage } from '../shared/decision-validation.js';
 
@@ -369,6 +370,32 @@ export interface AgentActorRuntimeDeps {
   agentRiskDefaults: AgentRiskDefaultsConfig;
   /** Staleness threshold for the per-actor fill-first mark source (marking config). */
   markStalenessThresholdMs: number;
+  /**
+   * Worker-scoped venue instrument cache for symbol validation at decision
+   * intake (traced to herobids index.ts:1273 — the `instrumentCache` field).
+   * Constructed + warmed once per process in item B's factory and shared by all
+   * agent actors. When present + ready, the actor's copied
+   * `validateTradeInstrument` gate (`agent-trading-actor.ts:~886`,
+   * `if (this.deps.instrumentCache?.isReady())`) rejects `instrument_unknown`;
+   * without it that copied KEEP behaviour silently fails open.
+   */
+  instrumentCache: VenueInstrumentCache;
+  /**
+   * 1inch operator config for swap-venue network resolution inside
+   * `validateTradeInstrument` (herobids index.ts:1274 — `config.venues['1inch']`).
+   */
+  oneInchConfig?: { tokenSafetyNetwork?: string; chainId?: number };
+  /**
+   * Canonical token definitions for swap-venue quote-address validation
+   * (herobids index.ts:1276 — `config.marketData?.tokenSafety?.canonicalTokens`).
+   */
+  canonicalTokens?: Record<string, Record<string, { address: string; name: string; aliases: string[] }>>;
+  /**
+   * Interval (ms) for the actor's per-trade stop-loss / take-profit monitor loop
+   * (herobids index.ts:1279 — `config.agentRiskDefaults.perTradeLevelMonitorIntervalMs`).
+   * Absent → the actor falls back to its hardcoded 5000ms default.
+   */
+  perTradeLevelMonitorIntervalMs?: number;
 }
 
 /**
@@ -397,6 +424,13 @@ export interface ActorRegistryHooks {
  *    here (optional deps; the actor runs without a scan loop).
  *  - swapTokenSafety left as item B left it (undefined — the existing Deferred
  *    token-safety divergence covers it; not re-opened).
+ *  - instrumentCache + oneInchConfig + canonicalTokens +
+ *    perTradeLevelMonitorIntervalMs threaded from the item-B runtime deps
+ *    (traced to herobids index.ts:1273–1279) so the copied
+ *    `validateTradeInstrument` `instrument_unknown` gate is live. `bindingProfile`
+ *    is NOT wired — herobids sources it from the agent binding (`binding.profile`,
+ *    index.ts:1275), a consumer/agent-container value not in Traderton config; it
+ *    stays the actor's optional-undefined default.
  *
  * Does NOT start the actor or drive its lifecycle — that is item D / the M1
  * consumer. Returns the constructed actor; the caller starts it.
@@ -458,6 +492,17 @@ export function constructAndRegisterAgentActor(
     swapBaseTokenAddress: spec.venueType === 'swap' ? spec.swapAssets?.baseAsset : undefined,
     // swapTokenSafety: undefined — existing Deferred divergence (item B); not re-opened.
     swapTokenSafety: undefined,
+    // Venue-specific instrument validation deps (traced to herobids
+    // index.ts:1273–1279). instrumentCache is the load-bearing one — it gates the
+    // copied `instrument_unknown` rejection (agent-trading-actor.ts:~886). Without
+    // it that KEEP behaviour fails open. oneInchConfig/canonicalTokens support
+    // swap-venue network + quote-address resolution inside validateTradeInstrument.
+    // bindingProfile is NOT wired (agent-binding value, not config — left as the
+    // actor's optional-undefined default).
+    instrumentCache: runtimeDeps.instrumentCache,
+    oneInchConfig: runtimeDeps.oneInchConfig,
+    canonicalTokens: runtimeDeps.canonicalTokens,
+    perTradeLevelMonitorIntervalMs: runtimeDeps.perTradeLevelMonitorIntervalMs,
     ...(spec.capital != null ? { capital: spec.capital } : {}),
     feeConfig: runtimeDeps.feeConfig,
     maxConsecutiveVenueErrors: runtimeDeps.maxConsecutiveVenueErrors,

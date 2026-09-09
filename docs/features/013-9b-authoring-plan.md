@@ -300,7 +300,9 @@ router + the `DecisionSubmitInput`/`DecisionSubmitResult` value types + the venu
 `submitDecision`/agent-actor construct+stop, and to register bots in the map); `packages/worker/src/index.ts`
 (barrel exports for item D); `packages/worker/src/composition/decision-intake.test.ts` (AUTHORED test, 8
 assertions). Build green, lint clean, **2252 tests / 15 skipped / 0 failed** (+8 authored; no copied test
-altered).
+altered). **Gap-fix follow-up (2026-09-07):** `VenueInstrumentCache` wired through the agent construct (see
+the WIRED-COPIED manifest entry + the resolved HIGH in Outstanding Issues); +1 authored assertion →
+**2253 tests / 15 skipped / 0 failed**.
 
 **Authored-vs-copied-vs-dropped manifest (what was actually written):**
 - **AUTHORED (wiring):** the `submitDecision` router; the `actorRegistry` map + register/deregister hooks
@@ -314,6 +316,27 @@ altered).
   The herobids `missing_source_venue_account`/`source_venue_account_not_found` codes lived in the deleted
   `startup-context.ts` (the connection-grant front-end cut in Phase 8) — **no parallel grant resolver
   authored** (confirmed the actor already carries the seam, per the §5 instruction).
+- **WIRED-COPIED — `VenueInstrumentCache` / `instrument_unknown` (2026-09-07, gap-fix follow-up).** The
+  copied agent intake gates its venue-specific instrument validation behind
+  `if (this.deps.instrumentCache?.isReady())` (`agent-trading-actor.ts:~886`), rejecting `instrument_unknown`
+  — a **KEEP behaviour** of the copied intake. A gap-focused review found `VenueInstrumentCache` was never
+  constructed/wired in the composition root and `constructAndRegisterAgentActor` had no attachment point,
+  so the dep was permanently `undefined` and the rejection silently **failed open** for every agent
+  decision. **Now wired (pure copied-module WIRING, no authored trading logic):** item B's factory
+  constructs the cache once (herobids `index.ts:797`), builds `VenueSymbolProvider[]` from the configured
+  venues using the copied `HyperliquidAdapter`+`normalizeHyperliquidSymbol`, `BybitAdapter`+`normalizeBybitSymbol`,
+  `JupiterSwapAdapter`+`identityNormalize` (herobids `index.ts:1684–1733`; **1inch intentionally skipped** —
+  its `fetchAvailableSymbols()` is a curated list, verbatim rationale preserved), and calls
+  `warmup(providers)` then `startPeriodicRefresh(providers, 60·60·1000)` in `start()` (herobids
+  `index.ts:1743–1744`; warmup is fail-open by design). `constructAndRegisterAgentActor` gained an
+  `instrumentCache` attachment point on `AgentActorRuntimeDeps` and threads it — plus `oneInchConfig`
+  (`config.venues['1inch']`), `canonicalTokens` (`config.marketData?.tokenSafety?.canonicalTokens`), and
+  `perTradeLevelMonitorIntervalMs` (`config.agentRiskDefaults.perTradeLevelMonitorIntervalMs`) — into the
+  actor's deps (herobids `index.ts:1273–1279`). `bindingProfile` (herobids `index.ts:1275`) is **NOT wired**:
+  it is an agent-binding value, not Traderton config, so it stays the actor's optional-undefined default.
+  Bots (`TradingActor`) do NOT receive the cache — agent-construct-specific, matching herobids. An authored
+  deterministic assertion in `decision-intake.test.ts` (constructor spy; never-warmed cache, no network)
+  confirms the constructed actor now receives a defined `instrumentCache`.
 - **COPIED (Phase 8/3, reused unchanged):** `ExecutionActor`/`IntakeResult`/`isIntakeRejection`, the
   actor-owned intake (`AgentTradingActor.getIntakeDeps`/`getDecisionContext`/`getPosition`), `TradingActor`,
   `AgentTradingActorDeps`, `buildAgentRiskLimits`, `createFillFirstMarkSource`, engine
@@ -341,6 +364,14 @@ altered).
   a seam. Recorded here for divergence-ledger completeness (not a silent drop).
 
 **Outstanding Issues (CodeReviewer, 2026-09-07 — no CRITICAL/HIGH; verdict PASS):**
+- **[item C] HIGH — `VenueInstrumentCache` unwired → `instrument_unknown` failed open. RESOLVED
+  (2026-09-07, gap-fix follow-up).** Surfaced by a later gap-focused review, not the original CodeReviewer
+  pass. The cache was never constructed/wired and `constructAndRegisterAgentActor` had no attachment point,
+  so the copied `instrument_unknown` rejection silently failed open for every agent decision — a degraded
+  copied behaviour. **Fixed by pure copied-module WIRING** (construct cache + build providers + warmup/refresh
+  in item B's factory; thread `instrumentCache`/`oneInchConfig`/`canonicalTokens`/`perTradeLevelMonitorIntervalMs`
+  into the agent actor). See the WIRED-COPIED manifest entry above. Build green, lint clean, 2253 tests pass
+  / 15 skipped / 0 failed (+1 authored assertion).
 - **[item C] LOW-1 — `risk.daily_max_loss_exceeded` message enrichment dropped.** Recorded above (dropped-
   behaviour list) — message-only, behaviour-preserving. No code change required for M1.
 - **[item C] LOW-2 — `agentActorRuntimeDeps` assembled eagerly** in `create-trading-runtime.ts` even in a

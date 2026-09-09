@@ -27,6 +27,9 @@ import {
   HyperliquidMarkSource,
   PublicStreamPool,
   VenueCandleFetcher,
+  HyperliquidAdapter,
+  BybitAdapter,
+  JupiterSwapAdapter,
 } from '@traderton/venues';
 import type { SwapConfirmationPoller } from '@traderton/venues';
 import { createProviderRegistry } from '@traderton/market-data';
@@ -45,6 +48,13 @@ import {
 import { TradingActor, type TradingActorDeps } from '../trading-actor.js';
 import { VenueAdapterFactory } from '../venue-adapter-factory.js';
 import { buildPublicStreamConnectors, createScopedStreamPoolHandle } from '../public-stream-routing.js';
+import {
+  VenueInstrumentCache,
+  normalizeHyperliquidSymbol,
+  normalizeBybitSymbol,
+  identityNormalize,
+  type VenueSymbolProvider,
+} from '../venue-instrument-cache.js';
 import { assertLiveReadiness } from '../live-gate.js';
 import { resolveSwapNetwork } from './../resolve-swap-assets.js';
 import type { ExecutionActor } from '../execution-actor.js';
@@ -263,6 +273,78 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
     venues: config.venues,
     streamConfig: config.streams.private,
   });
+
+  // ── Venue instrument cache — symbol validation at decision intake ──
+  // Traced to herobids apps/worker/src/index.ts:797 (construct once, before
+  // actors) + :1684–1733 (build providers). The cache gates the copied
+  // `instrument_unknown` rejection in the agent actor's intake
+  // (agent-trading-actor.ts:~886, `if (this.deps.instrumentCache?.isReady())`).
+  // Without it that KEEP behaviour silently fails open for every agent decision.
+  // Warmup + periodic refresh happen in start() (after the runtime is assembled,
+  // before any actor accepts decisions). Until isReady() flips true validation
+  // is a fail-open no-op — the warmup is fail-open by design and must not crash.
+  const instrumentCache = new VenueInstrumentCache(logger);
+
+  // Build providers from the configured venues using lightweight adapters
+  // constructed with empty / validation-only credentials — fetchAvailableSymbols()
+  // hits public endpoints (loadMarkets for Hyperliquid/Bybit; token lists for
+  // Jupiter), so no real credentials are needed. Adapter shapes copied verbatim
+  // from herobids index.ts:1690 / :1706 / :1721.
+  const venueSymbolProviders: VenueSymbolProvider[] = [];
+
+  if (config.venues['hyperliquid']) {
+    const hlTestnet = config.venues['hyperliquid'].testnet ?? false;
+    const adapter = new HyperliquidAdapter({
+      credentials: { apiKey: '', secret: '', walletAddress: '', testnet: hlTestnet },
+    });
+    venueSymbolProviders.push({
+      venue: 'hyperliquid',
+      normalizeSymbol: normalizeHyperliquidSymbol,
+      fetchSymbols: async () => {
+        const result = await adapter.fetchAvailableSymbols();
+        if (!result.ok) throw new Error(`Failed to fetch Hyperliquid symbols: ${result.error.message}`);
+        return result.data;
+      },
+    });
+  }
+
+  if (config.venues['bybit']) {
+    const bybitTestnet = config.venues['bybit'].testnet ?? false;
+    const adapter = new BybitAdapter({
+      credentials: { apiKey: '', secret: '', testnet: bybitTestnet },
+    });
+    venueSymbolProviders.push({
+      venue: 'bybit',
+      normalizeSymbol: normalizeBybitSymbol,
+      fetchSymbols: async () => {
+        const result = await adapter.fetchAvailableSymbols();
+        if (!result.ok) throw new Error(`Failed to fetch Bybit symbols: ${result.error.message}`);
+        return result.data;
+      },
+    });
+  }
+
+  if (config.venues['jupiter']) {
+    const jupiterAdapter = new JupiterSwapAdapter({
+      walletAddress: 'SYMBOL_VALIDATION_ONLY',
+    });
+    venueSymbolProviders.push({
+      venue: 'jupiter',
+      normalizeSymbol: identityNormalize,
+      fetchSymbols: async () => {
+        const result = await jupiterAdapter.fetchAvailableSymbols();
+        if (!result.ok) throw new Error(`Failed to fetch Jupiter symbols: ${result.error.message}`);
+        return result.data;
+      },
+    });
+  }
+
+  // 1inch is intentionally skipped — its fetchAvailableSymbols() returns a
+  // hardcoded curated list of token addresses per chain. Validating against
+  // that list would reject legitimate tokens not in the curated set.
+  // Additionally, constructing a OneInchSwapAdapter requires real credentials
+  // (EvmSigner validates the private key at construction time). Preserved from
+  // herobids index.ts:1735–1739.
 
   // ── Per-bot ActorFactory closure (traced to herobids index.ts:1878–2249) ──
   // Diverges from herobids only where 013 §4 directs: injected venueAccountId
@@ -598,6 +680,17 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
     },
     agentRiskDefaults: config.agentRiskDefaults,
     markStalenessThresholdMs: config.marking.stalenessThresholdMs,
+    // Venue-specific instrument-validation deps (traced to herobids
+    // index.ts:1273–1279). instrumentCache is load-bearing — it gates the copied
+    // `instrument_unknown` rejection in the agent intake. oneInchConfig +
+    // canonicalTokens support swap-venue network/quote-address resolution;
+    // perTradeLevelMonitorIntervalMs overrides the actor's 5000ms fallback.
+    // bindingProfile (herobids index.ts:1275) is NOT wired — it is an
+    // agent-binding value, not Traderton config; left as the actor's default.
+    instrumentCache,
+    oneInchConfig: config.venues['1inch'],
+    canonicalTokens: config.marketData?.tokenSafety?.canonicalTokens,
+    perTradeLevelMonitorIntervalMs: config.agentRiskDefaults.perTradeLevelMonitorIntervalMs,
   };
 
   return {
@@ -608,9 +701,20 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
           discoverySeenClient: redis,
         });
       }
+      // Warm the venue instrument cache + start its hourly refresh before any
+      // actor accepts decisions (traced to herobids index.ts:1743–1744). Warmup
+      // is fail-open by design — the copied VenueInstrumentCache.warmup handles
+      // per-venue fetch failure internally, so it must not crash the runtime.
+      await instrumentCache.warmup(venueSymbolProviders);
+      instrumentCache.startPeriodicRefresh(venueSymbolProviders, 60 * 60 * 1000);
       await runtime.start();
     },
-    shutdown: () => runtime.shutdown(),
+    shutdown: async () => {
+      // Stop the instrument-cache refresh interval so it doesn't outlive the
+      // runtime (the copied stop() is idempotent).
+      instrumentCache.stop();
+      await runtime.shutdown();
+    },
     runtime,
     actorRegistry,
     registerActor,

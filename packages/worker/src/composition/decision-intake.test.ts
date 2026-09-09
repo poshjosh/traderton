@@ -21,7 +21,7 @@
  *  - a risk rejection from the engine → the typed risk rejection.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { price, quantity, type DecisionIntent } from '@traderton/domain';
+import { price, quantity, AgentRiskDefaultsSchema, type DecisionIntent } from '@traderton/domain';
 
 // ── Engine boundary stub — mock ONLY submitDecisionForExecution ──────────────
 // The rest of @traderton/engine (validatePerTradeLevels, the hash-mismatch
@@ -35,7 +35,28 @@ vi.mock('@traderton/engine', async (importOriginal) => {
   return { ...actual, submitDecisionForExecution: submitDecisionForExecutionMock };
 });
 
-import { submitDecision, type DecisionSubmitInput } from './decision-intake.js';
+// ── AgentTradingActor constructor spy — capture the deps passed to construct ──
+// The actor is heavy (venue adapters, timers) and its `deps` are private, so we
+// stub the class and record the constructor argument. This lets us assert
+// deterministically — with no network, DB, or real cache warmup — that
+// constructAndRegisterAgentActor threads a defined `instrumentCache` into the
+// actor's deps (the gap this fix closes).
+const { agentActorCtorSpy } = vi.hoisted(() => ({ agentActorCtorSpy: vi.fn() }));
+vi.mock('../agent-trading-actor.js', () => ({
+  AgentTradingActor: class {
+    agentId: string;
+    isRunning = false;
+    constructor(deps: { agentId: string }) {
+      agentActorCtorSpy(deps);
+      this.agentId = deps.agentId;
+    }
+    async stop(): Promise<void> {}
+  },
+}));
+
+import { submitDecision, constructAndRegisterAgentActor, type DecisionSubmitInput, type AgentActorRuntimeDeps, type AgentActorSpec } from './decision-intake.js';
+import type { AgentTradingActorDeps } from '../agent-trading-actor.js';
+import { VenueInstrumentCache } from '../venue-instrument-cache.js';
 import type { ExecutionActor, IntakeResult } from '../execution-actor.js';
 import type { DecisionContext, PositionState, DecisionIntakeDeps } from '@traderton/engine';
 
@@ -236,5 +257,63 @@ describe('submitDecision (AUTHORED — Phase 9b item C)', () => {
     expect(result.status).toBe('error');
     if (result.status === 'error') expect(result.code).toBe('execution.timeout');
     expect(actor.recordExecutionOutcome).toHaveBeenCalledWith(false);
+  });
+});
+
+describe('constructAndRegisterAgentActor — instrumentCache wiring (AUTHORED — item C gap fix)', () => {
+  beforeEach(() => {
+    agentActorCtorSpy.mockReset();
+  });
+
+  /**
+   * Build a minimal AgentActorRuntimeDeps. Only the fields
+   * constructAndRegisterAgentActor reads before constructing the (stubbed) actor
+   * matter (agentRiskDefaults for buildAgentRiskLimits, fillRepo + fallbackMarkSource
+   * + markStalenessThresholdMs for createFillFirstMarkSource, and the new
+   * instrument-validation deps). The repos/singletons the stubbed actor never
+   * touches are cast — this test asserts wiring, not actor internals.
+   */
+  function buildRuntimeDeps(cache: VenueInstrumentCache): AgentActorRuntimeDeps {
+    return {
+      fillRepo: { getLatestFillByInstrument: async () => null },
+      fallbackMarkSource: { fetchMark: async () => ({ ok: false, error: { code: 'unavailable', message: 'stub' } }) },
+      markStalenessThresholdMs: 30_000,
+      agentRiskDefaults: AgentRiskDefaultsSchema.parse({}),
+      instrumentCache: cache,
+      oneInchConfig: { tokenSafetyNetwork: 'ethereum', chainId: 1 },
+      canonicalTokens: {},
+      perTradeLevelMonitorIntervalMs: 7_000,
+    } as unknown as AgentActorRuntimeDeps;
+  }
+
+  const spec: AgentActorSpec = {
+    agentId: 'agent-cache-1',
+    executionMode: 'paper',
+    venueAccountId: 'va-1',
+    venue: 'hyperliquid',
+    venueType: 'orderbook',
+  };
+
+  it('threads a defined instrumentCache (never warmed → fail-open) into the actor deps', () => {
+    // Real cache, but never warmed — deterministic, no network. isReady() is false
+    // so the actor's validateTradeInstrument gate stays fail-open in this test,
+    // but the DEP is present (the gap was a permanently-undefined dep).
+    const cache = new VenueInstrumentCache({ info: () => {}, warn: () => {}, error: () => {} } as never);
+    const registry = { register: vi.fn(), deregister: vi.fn() };
+
+    const actor = constructAndRegisterAgentActor(registry, buildRuntimeDeps(cache), spec);
+
+    expect(actor.agentId).toBe('agent-cache-1');
+    expect(registry.register).toHaveBeenCalledWith('agent-cache-1', actor);
+    expect(agentActorCtorSpy).toHaveBeenCalledOnce();
+    const deps = agentActorCtorSpy.mock.calls[0]![0] as AgentTradingActorDeps;
+    expect(deps.instrumentCache).toBeDefined();
+    expect(deps.instrumentCache).toBe(cache);
+    // The paired validation deps are threaded too (herobids index.ts:1274–1279).
+    expect(deps.oneInchConfig).toEqual({ tokenSafetyNetwork: 'ethereum', chainId: 1 });
+    expect(deps.canonicalTokens).toEqual({});
+    expect(deps.perTradeLevelMonitorIntervalMs).toBe(7_000);
+    // bindingProfile is intentionally NOT wired (agent-binding value, not config).
+    expect(deps.bindingProfile).toBeUndefined();
   });
 });
