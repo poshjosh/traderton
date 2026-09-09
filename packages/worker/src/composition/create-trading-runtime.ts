@@ -47,6 +47,17 @@ import { VenueAdapterFactory } from '../venue-adapter-factory.js';
 import { buildPublicStreamConnectors, createScopedStreamPoolHandle } from '../public-stream-routing.js';
 import { assertLiveReadiness } from '../live-gate.js';
 import { resolveSwapNetwork } from './../resolve-swap-assets.js';
+import type { ExecutionActor } from '../execution-actor.js';
+import {
+  submitDecision,
+  constructAndRegisterAgentActor,
+  stopAndDeregisterAgentActor,
+  type DecisionSubmitInput,
+  type DecisionSubmitResult,
+  type AgentActorSpec,
+  type AgentActorRuntimeDeps,
+} from './decision-intake.js';
+import type { AgentTradingActor } from '../agent-trading-actor.js';
 
 const logger = createLogger('create-trading-runtime');
 
@@ -76,11 +87,13 @@ export interface TradingRuntimePorts {
 }
 
 /**
- * The assembled bot-lifecycle trading runtime (Phase 9b item B).
+ * The assembled bot-lifecycle trading runtime (Phase 9b items B + C).
  *
- * Later items attach to the exposed seams without re-opening B:
- *  - item C (intake): submitDecision + the ExecutionActor registry.
- *  - item D (drive): enqueues lifecycle jobs onto `runtime`.
+ * Item B owns the ONE `actorRegistry` (decision (b)); both bots (`TradingActor`)
+ * and agents (`AgentTradingActor`) register on it. Item C's surfaces
+ * (`submitDecision`, agent-actor construct/register) compose over that same map.
+ * Item D (drive) enqueues lifecycle jobs onto `runtime` and calls
+ * `submitDecision` / `constructAndRegisterAgentActor` / `stopAndDeregisterAgentActor`.
  */
 export interface TradingRuntime {
   /** Start rehydration + lifecycle-job consumer + reclaim loop. */
@@ -89,6 +102,28 @@ export interface TradingRuntime {
   shutdown(): Promise<void>;
   /** The BullMQ-backed lifecycle control — exposed so item D / M2 can enqueue jobs. */
   runtime: WorkerRuntime;
+  /**
+   * The single ExecutionActor registry (decision (b)) — a plain map keyed by
+   * actor id (bot id or agent id). Exposed read-only for inspection; register /
+   * deregister go through the hooks below so bots and agents share one map.
+   */
+  actorRegistry: ReadonlyMap<string, ExecutionActor>;
+  /** Register an actor (used by C's agent construct/register + the bot factory). */
+  registerActor(actorId: string, actor: ExecutionActor): void;
+  /** Deregister an actor (stop/crash). */
+  deregisterActor(actorId: string): void;
+  /**
+   * Route a submitted decision to the registered, running actor and drive the
+   * copied engine (item C). Item D calls this from the drive path.
+   */
+  submitDecision(input: DecisionSubmitInput): Promise<DecisionSubmitResult>;
+  /**
+   * Construct + register the agent-direct `AgentTradingActor` (item C, decision
+   * (c)). Does NOT start it — the lifecycle driver is item D / the M1 consumer.
+   */
+  constructAndRegisterAgentActor(spec: AgentActorSpec): AgentTradingActor;
+  /** Stop + deregister an agent actor (paired teardown hook — item C). */
+  stopAndDeregisterAgentActor(actor: AgentTradingActor): Promise<void>;
 }
 
 /**
@@ -130,6 +165,28 @@ function createStrategy(
 }
 
 /**
+ * Bind the venue-scoped public-stream-pool handle for a specific agent actor.
+ *
+ * The base AgentActorRuntimeDeps carries every worker-scoped singleton EXCEPT
+ * `createStreamPoolHandle`, which is venue-scoped (the pool fans out one socket
+ * per venue). The agent's venue comes from its spec, so the closure is bound
+ * here — mirroring the per-bot `createScopedStreamPoolHandle(publicStreamPool,
+ * venue, testnet)` wiring in the ActorFactory. Swap venues get no handle.
+ */
+function buildAgentActorRuntimeDeps(
+  base: AgentActorRuntimeDeps,
+  publicStreamPool: PublicStreamPool | undefined,
+  spec: AgentActorSpec,
+): AgentActorRuntimeDeps {
+  return {
+    ...base,
+    createStreamPoolHandle: spec.venueType !== 'swap'
+      ? (testnet: boolean) => createScopedStreamPoolHandle(publicStreamPool, spec.venue, testnet)
+      : undefined,
+  };
+}
+
+/**
  * createTradingRuntime — the trading composition root (Phase 9b item B).
  *
  * Authored WIRING ONLY. Every trading primitive (risk gate, planner, executors,
@@ -158,6 +215,13 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
   const backtestingRepo = new BacktestingRepository(db);
 
   const idGen = createIdGen();
+
+  // ── The ONE ExecutionActor registry (decision (b), Phase 9b item C) ──
+  // A plain Map (NOT ActorStateOwner — that is agent-session machinery). Both
+  // bots (TradingActor, registered in the ActorFactory below) and agents
+  // (AgentTradingActor, via constructAndRegisterAgentActor) register here. The
+  // decision handler resolves the target actor from this same map.
+  const actorRegistry = new Map<string, ExecutionActor>();
 
   // Market-data provider registry — optional (undefined when marketData absent).
   // Feeds the per-bot candle fetcher used by the mechanical strategy.
@@ -465,14 +529,19 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
         : undefined,
       // onCrashed keeps trading lifecycle intact (013 §4.4). The herobids body
       // also published agent/status telemetry — that is item C2; here it reduces
-      // to the runtime crash handoff only.
+      // to the runtime crash handoff + registry deregistration.
       onCrashed: async (instanceId: string) => {
+        actorRegistry.delete(instanceId);
         await runtime.handleActorCrash(instanceId);
-        logger.error({ botId: instanceId }, 'Bot crashed — removed from runtime');
+        logger.error({ botId: instanceId }, 'Bot crashed — removed from runtime + registry');
       },
     };
 
-    return new TradingActor(botId, config_.strategy.params as Record<string, unknown>, deps);
+    const actor = new TradingActor(botId, config_.strategy.params as Record<string, unknown>, deps);
+    // Register the bot on the ONE shared registry (decision (b)) so decisions
+    // route to it via the item-C handler. Deregistered on crash (onCrashed above).
+    actorRegistry.set(botId, actor);
+    return actor;
   };
 
   // ── WorkerRuntime (the BullMQ lifecycle-job consumer) ──
@@ -489,6 +558,48 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
 
   const runtime = new WorkerRuntime(runtimeConfig, actorFactory, instanceLoader, lease);
 
+  // ── Item-C registry hooks + agent-actor runtime deps (shared singletons) ──
+  const registerActor = (actorId: string, actor: ExecutionActor): void => {
+    actorRegistry.set(actorId, actor);
+  };
+  const deregisterActor = (actorId: string): void => {
+    actorRegistry.delete(actorId);
+  };
+
+  // The item-B singletons the agent-direct actor shares with bots (013 §6 / 019
+  // §6). Assembled once; threaded into each agent actor's deps so B and C
+  // compose over the same infrastructure.
+  const agentActorRuntimeDeps: AgentActorRuntimeDeps = {
+    venueAdapterFactory,
+    journal,
+    idGen,
+    positionRepo,
+    fillRepo,
+    planRepo,
+    orderRepo,
+    decisionRepo,
+    balanceSnapshotRepo,
+    backtestingRepo,
+    reconciliationRepo,
+    fallbackMarkSource: compositeFallbackSource,
+    // createStreamPoolHandle is venue-scoped and bound per-actor in
+    // buildAgentActorRuntimeDeps (the venue comes from the AgentActorSpec).
+    reconciliationConfig,
+    streamConfig: config.streams.private,
+    liveRollout: config.liveRollout,
+    driftAlertOnly: config.reconciliation.driftAlertOnly,
+    feeConfig: config.simulation,
+    maxConsecutiveVenueErrors: config.liveRollout.maxConsecutiveVenueErrors,
+    slippageAlertBps: config.liveRollout.slippageAlertBps,
+    crashPolicy: config.liveRollout.crashPolicy,
+    liveOrderTimeoutPolicy: {
+      limitOrderTimeoutMs: config.liveRollout.limitOrderTimeoutMs,
+      marketOrderTimeoutMs: config.liveRollout.marketOrderTimeoutMs,
+    },
+    agentRiskDefaults: config.agentRiskDefaults,
+    markStalenessThresholdMs: config.marking.stalenessThresholdMs,
+  };
+
   return {
     start: async () => {
       if (config.marketData) {
@@ -501,5 +612,17 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
     },
     shutdown: () => runtime.shutdown(),
     runtime,
+    actorRegistry,
+    registerActor,
+    deregisterActor,
+    submitDecision: (input) => submitDecision(actorRegistry, input),
+    constructAndRegisterAgentActor: (spec) =>
+      constructAndRegisterAgentActor(
+        { register: registerActor, deregister: deregisterActor },
+        buildAgentActorRuntimeDeps(agentActorRuntimeDeps, publicStreamPool, spec),
+        spec,
+      ),
+    stopAndDeregisterAgentActor: (actor) =>
+      stopAndDeregisterAgentActor({ register: registerActor, deregister: deregisterActor }, actor),
   };
 }
