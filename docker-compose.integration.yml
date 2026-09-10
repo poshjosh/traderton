@@ -1,0 +1,50 @@
+# L1 integration harness infra (docs/features/025 §3 / 026 §2) — DEV/TEST ONLY.
+#
+# Stands up the real Postgres + Redis the L1 harness runs against. Authored
+# freely: this is test/dev scaffolding, not @traderton/* trading code. The
+# `scripts/it.sh` wrapper brings it up, applies the @traderton/db migration,
+# runs the gated harness, and tears it down (down -v) on exit.
+#
+# Credentials/db name match packages/db/drizzle.config.ts's default DATABASE_URL
+# so drizzle-kit migrate resolves; scripts/it.sh constructs and exports the full
+# DATABASE_URL/REDIS_URL from the host ports below so the migration + harness
+# both target THIS throwaway stack.
+#
+# DATA-LOSS SAFETY: the host ports are DELIBERATELY non-default (55432 / 56379,
+# overridable via PG_PORT / REDIS_PORT) so these throwaway containers can never
+# collide with a developer's LOCAL Postgres (5432) / Redis (6379). The harness
+# `TRUNCATE`s between scenarios and `scripts/it.sh` tears the stack down with
+# `down -v`; both must only ever touch containers this compose file provisioned.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: traderton
+      POSTGRES_PASSWORD: traderton
+      POSTGRES_DB: traderton
+    ports:
+      # Host port is non-default + overridable (PG_PORT); the container still
+      # listens on 5432 internally. scripts/it.sh builds DATABASE_URL from PG_PORT.
+      - '${PG_PORT:-55432}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U traderton -d traderton']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    # tmpfs the data dir — the harness truncates between scenarios and the whole
+    # stack is torn down with `down -v`, so durability is neither needed nor wanted.
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      # Host port is non-default + overridable (REDIS_PORT); the container still
+      # listens on 6379 internally. scripts/it.sh builds REDIS_URL from REDIS_PORT.
+      - '${REDIS_PORT:-56379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 30

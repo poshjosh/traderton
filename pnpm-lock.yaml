@@ -178,6 +178,9 @@ importers:
       '@types/node':
         specifier: ^25.9.1
         version: 25.9.5
+      postgres:
+        specifier: ^3.4.0
+        version: 3.4.9
 
 packages:
 
