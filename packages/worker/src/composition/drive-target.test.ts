@@ -50,6 +50,7 @@ function makeBotRecord(overrides: Partial<DriveBotRecord> = {}): DriveBotRecord 
     creatorType: 'agent',
     creatorId: ACTOR_ID,
     ownerId: OWNER_ID,
+    venueAccountId: 'va-1',
     startedAt: null,
     stoppedAt: null,
     ...overrides,
@@ -176,6 +177,15 @@ describe('drive target — MANAGE_BOT create_and_start', () => {
     expect(stubs.enqueueLifecycle).toHaveBeenCalledTimes(1);
     expect(stubs.enqueueLifecycle.mock.calls[0][0]).toBe('start');
     expect(stubs.enqueueLifecycle.mock.calls[0][1]).toBe('bot-new');
+
+    // REGRESSION GUARD (drive-target.ts stamping fix): the ENQUEUED config MUST
+    // carry the INJECTED venueAccountId + ownerId — the ActorFactory reads both
+    // from the job config directly on `start`. A refactor that drops the stamping
+    // must fail this DEFAULT-suite assertion (the gated integration scenario does
+    // not run under `pnpm test`).
+    const enqueuedConfig = stubs.enqueueLifecycle.mock.calls[0][2] as Record<string, unknown>;
+    expect(enqueuedConfig.venueAccountId).toBe('va-1');
+    expect(enqueuedConfig.ownerId).toBe(OWNER_ID);
   });
 
   it('rejects (no enqueue) when the create-path running-slot mark is not claimed', async () => {
@@ -360,6 +370,14 @@ describe('drive target — MANAGE_BOT start', () => {
     expect(stubs.enqueueLifecycle).toHaveBeenCalledTimes(1);
     expect(stubs.enqueueLifecycle.mock.calls[0][0]).toBe('start');
     expect(stubs.enqueueLifecycle.mock.calls[0][1]).toBe('bot-1');
+
+    // REGRESSION GUARD (drive-target.ts stamping fix): the ENQUEUED config MUST
+    // carry the PERSISTED row's venueAccountId + ownerId (the bot's actual
+    // account), so `processJob('start')` starts the actor self-sufficiently. A
+    // refactor that drops the stamping must fail this DEFAULT-suite assertion.
+    const enqueuedConfig = stubs.enqueueLifecycle.mock.calls[0][2] as Record<string, unknown>;
+    expect(enqueuedConfig.venueAccountId).toBe('va-1');
+    expect(enqueuedConfig.ownerId).toBe(OWNER_ID);
   });
 
   it('reclaim (already running) skips the limit seam and re-marks running before enqueue', async () => {
@@ -432,6 +450,13 @@ describe('drive target — MANAGE_BOT adjust_config', () => {
     // Running bot → restart enqueued.
     expect(stubs.enqueueLifecycle).toHaveBeenCalledTimes(1);
     expect(stubs.enqueueLifecycle.mock.calls[0][0]).toBe('restart');
+
+    // REGRESSION GUARD (drive-target.ts stamping fix): the ENQUEUED restart config
+    // MUST carry the persisted row's venueAccountId + ownerId (same wiring as
+    // start/restart). A refactor that drops the stamping must fail this assertion.
+    const enqueuedConfig = stubs.enqueueLifecycle.mock.calls[0][2] as Record<string, unknown>;
+    expect(enqueuedConfig.venueAccountId).toBe('va-1');
+    expect(enqueuedConfig.ownerId).toBe(OWNER_ID);
   });
 
   it('persists without a restart when the bot is not running', async () => {
