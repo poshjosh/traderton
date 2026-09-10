@@ -1,0 +1,257 @@
+# Traderton operator configuration — self-documenting reference.
+# Resolution: default.yaml → config/{NODE_ENV}.yaml → environment variables.
+#
+# COPY-ADAPT from ../herobids/config/default.yaml (READ-ONLY source), trimmed to
+# the trading-only keys Traderton's AppConfigSchema accepts (Phase-1 fused-file
+# line-trim technique). The platform blocks present in the source default —
+# sharedServices, agentApprovals, agentCostEstimates, evaluation, llm, worker,
+# runtimeBackend, nomad, agentRuntime — are DELETED (they are not in the
+# trading-only AppConfigSchema). This is operator config (VALUES), not authored
+# trading behaviour. See docs/003 for the trim record (F2c).
+#
+# Trading VALUES are kept 1:1 with source. The ONLY value divergences from source
+# are four apiKey-gated flips that AppConfigSchema.superRefine would otherwise
+# reject without a secret, so the boundary can boot locally without secrets:
+# jupiter/1inch `walletGeneration.enabled` true→false and marketData
+# birdeye/coinMarketCap `enabled` true→false (each documented inline + in docs/003).
+# hyperliquid `walletGeneration.enabled` and marketData.economicCalendar.enabled
+# are kept at the source `true` (NOT apiKey-gated — they parse cleanly).
+#
+# The proof it is correctly trimmed: loadConfig() parses it with no Zod error and
+# the boundary boots.
+
+app:
+  port: 3000
+  logLevel: info             # debug | info | warn | error
+
+database:
+  url: postgres://traderton:traderton@localhost:5432/traderton   # override: DATABASE_URL
+  poolMin: 2
+  poolMax: 10
+
+redis:
+  url: redis://localhost:6379   # override: REDIS_URL
+
+# Live rollout gating — fail-closed operator policy for live execution mode.
+# All checks must pass before an instance is allowed to trade live.
+liveRollout:
+  enabled: false                          # master switch — must be true for any live instance to start
+  allowedVenues:                          # venues permitted to execute live orders
+    - hyperliquid
+    - 1inch
+    - bybit
+    - jupiter
+  requireDbCredentials: true              # reject env-var credential fallback for live mode
+  maxInitialOrderNotionalUsd: "10000"     # hard cap on single-order notional (USD) during rollout
+  maxConsecutiveVenueErrors: 3            # circuit-breaker: halt after N consecutive venue errors
+  slippageAlertBps: 50                    # log warning when fill slippage exceeds this
+  limitOrderTimeoutMs: 120000             # cancel stale live limit orders after this timeout
+  marketOrderTimeoutMs: 30000             # mark unresolved live market orders as recovery-required after this timeout
+  timeoutCheckIntervalMs: 10000           # frequency of live timeout scans
+  crashPolicy: alert_manual_intervention  # auto_go_flat | alert_manual_intervention
+
+venues:
+  hyperliquid:
+    baseUrl: https://api.hyperliquid.xyz
+    wsUrl: wss://api.hyperliquid.xyz/ws
+    testnetBaseUrl: https://api.hyperliquid-testnet.xyz
+    testnetWsUrl: wss://api.hyperliquid-testnet.xyz/ws
+    rateLimitPerSec: 10
+    timeoutMs: 30000
+    # 1:1 with source (herobids default.yaml): hyperliquid walletGeneration is NOT
+    # apiKey-gated in AppConfigSchema.superRefine (only jupiter/1inch are), so the
+    # source `true` parses cleanly — kept verbatim to preserve fidelity. The
+    # boundary never invokes wallet generation (consumer-owned), so this is inert.
+    walletGeneration:
+      enabled: true
+  bybit:
+    baseUrl: https://api.bybit.com
+    wsUrl: wss://stream.bybit.com/v5/private     # global private-stream override (highest priority)
+    wsPublicUrl: wss://stream.bybit.com/v5/public/linear   # public stream (required for public pool)
+    wsTestnetPublicUrl: wss://stream-testnet.bybit.com/v5/public/linear
+    wsPrivateUrl: wss://stream.bybit.com/v5/private  # mainnet private stream (used when wsUrl is not set)
+    wsTestnetPrivateUrl: wss://stream-testnet.bybit.com/v5/private
+    rateLimitPerSec: 10
+    timeoutMs: 30000
+  jupiter:
+    baseUrl: https://api.jup.ag/swap/v1
+    rpcUrl: https://api.mainnet-beta.solana.com
+    timeoutMs: 15000
+    # F2c trim divergence: the source default sets walletGeneration.enabled: true,
+    # which AppConfigSchema.superRefine requires an apiKey for. To keep the boundary
+    # bootable locally without a secret (the loadConfig-parses proof), the safe
+    # local default is disabled. Set JUPITER_API_KEY + flip this to true to enable
+    # platform-managed wallet creation. See docs/003.
+    walletGeneration:
+      enabled: false
+  1inch:
+    baseUrl: https://api.1inch.dev/swap/v6.0/8453
+    rpcUrl: https://mainnet.base.org
+    chainId: 8453
+    tokenSafetyNetwork: base
+    timeoutMs: 60000
+    confirmationTimeoutMs: 60000
+    rateLimitPerSec: 1
+    # F2c trim divergence (see jupiter above): disabled as the safe local default.
+    # Set ONEINCH_API_KEY + flip this to true to enable. See docs/003.
+    walletGeneration:
+      enabled: false
+
+execution:
+  defaultSlippageBps: 50
+  orderTimeoutMs: 30000
+  maxRetries: 3
+  shadowPollIntervalMs: 2000   # swap-venue price polling interval when no live stream
+  shadowQuoteSlippageBps: 50   # slippage assumed for shadow swap price estimation
+
+simulation:
+  takerFeePct: 0.001           # 10bps taker fee for paper/shadow fills
+  makerFeePct: 0.0005          # 5bps maker fee (currently unused — all fills simulated as taker)
+  paperSlippageBps: 5          # 5bps half-spread slippage for paper fills
+
+risk:
+  globalMaxDrawdownPct: 20
+  maxOpenPositions: 10
+  maxPositionSizePct: 25
+
+# Default risk limits for agents when the user has NOT explicitly configured them.
+# These are the initial values AND the operator ceiling — agents can adjust downward at runtime.
+agentRiskDefaults:
+  dailyLossLimitDefaultRatio: 0.05       # ratio of agent capital → default dailyLossLimit (USD)
+  maxOpenPositions: 10                   # max concurrent non-flat positions
+  maxPositionSizePct: 100                # max position notional as % of capital (100 = full capital)
+  maxPositionSize: 1000000               # max absolute position size in base units (operator ceiling)
+  stopLossPct: 10                        # max unrealized loss per position as % of equity before forced exit
+  dailyMaxLossPct: 20                    # operator ceiling: max rolling 24h realized loss as % of equity
+  stopLossCooldownMs: 300000             # 5 min cooldown after a stop-loss exit before re-entry
+  maxOrderNotionalMultiplier: 1          # max single order notional as multiple of capital (1 = full capital)
+  botConfigInvalidHaltThreshold: 1       # consecutive strategy.config_invalid errors before auto-stop
+  botExecutionErrorHaltThreshold: 5      # consecutive strategy.execution_error errors before auto-stop
+  botLlmProviderErrorHaltThreshold: 1    # consecutive strategy.llm_provider_error errors before auto-stop
+  agentDecisionNoContextThreshold: 10       # consecutive no_context before hardening
+  agentDecisionSwapInstrumentFormatThreshold: 5  # consecutive swap.instrument_format before hardening
+  maxDrawdown: 1000000000                # operator absolute ceiling on equity drawdown (USD)
+  maxDrawdownPct: 20                     # operator ceiling: max peak-to-current drawdown as % of peak equity
+  perTradeLevelMonitorIntervalMs: 5000   # interval for periodic per-trade stop-loss / take-profit monitor loop
+  maxBots: 5                              # operator default for agent max concurrent bots
+
+reconciliation:
+  intervalMs: 30000          # reconciliation loop interval
+  driftAlertOnly: false       # true = log+alert only (safe default); false = block trading on drift
+  positionDriftThreshold: "0"  # position size diff threshold (absolute). "0" = exact match required
+  balanceDriftThreshold: "0"   # balance diff threshold (absolute). "0" = exact match required
+  autoCorrect: false           # auto-correct local state for diffs within threshold
+  swapDriftThresholdPct: 1.0   # swap venue: alert if balance differs by more than this % from expected
+
+streams:
+  private:
+    reconnectBaseMs: 1000          # initial backoff for reconnection
+    reconnectMaxMs: 30000          # max backoff cap
+    maxReconnectAttempts: 10       # give up after N failures
+  public:
+    reconnectBaseMs: 1000          # initial backoff for public stream reconnection
+    reconnectMaxMs: 30000          # max backoff cap
+    maxReconnectAttempts: 20       # more attempts — public streams are shared
+    depthLevels: 5                 # orderbook depth levels to track
+
+marking:
+  stalenessThresholdMs: 300000     # 5 min — use oracle if last fill older than this
+  oracleBaseUrl: https://api.coingecko.com/api/v3
+  oracleTimeoutMs: 10000           # CoinGecko request timeout in ms
+  oracleVsCurrency: usd            # quote currency for oracle price lookups
+
+backtesting:
+  warmupLookbackBars: 200
+  maxDataGapMs: 60000
+  persistJournal: true
+  concurrency: 2       # BullMQ consumer concurrency for backtest jobs
+
+marketDataRecording:
+  enabled: false
+  captureTrades: true
+  captureTopOfBook: true
+  captureCandles: true
+
+marketData:
+  dexscreener:
+    baseUrl: "https://api.dexscreener.com"
+    search:
+      requestsPerMinute: 30      # reserved for explicit token lookup / price-support paths
+      burstCapacity: 30
+      maxWaitMs: 5000
+      cacheTtlMs: 15000
+    discovery:
+      requestsPerMinute: 30      # discovery must not consume the search reserve
+      burstCapacity: 15
+      maxWaitMs: 5000
+      cacheTtlMs: 300000
+  geckoterminal:
+    baseUrl: "https://api.geckoterminal.com"
+    apiKey: ""                # override: COINGECKO_API_KEY — optional, enables Pro on-chain tier when set
+    candles:
+      requestsPerMinute: 15      # regime / active-watchlist OHLCV
+      burstCapacity: 15
+      maxWaitMs: 5000
+      cacheTtlMs: 60000
+    discovery:
+      requestsPerMinute: 60
+      burstCapacity: 5
+      maxWaitMs: 5000
+      cacheTtlMs: 300000
+  hyperliquid:
+    baseUrl: "https://api.hyperliquid.xyz"
+    intelligencePath: "/info"
+    intelligence:
+      requestsPerMinute: 120
+      burstCapacity: 20
+      maxWaitMs: 2000
+      cacheTtlMs: 60000
+  bybit:
+    baseUrl: "https://api.bybit.com"
+    longShortRatioPath: "/v5/market/account-ratio"
+    intelligence:
+      requestsPerMinute: 120
+      burstCapacity: 20
+      maxWaitMs: 2000
+      cacheTtlMs: 60000
+    tickers:
+      requestsPerMinute: 30
+      burstCapacity: 10
+      maxWaitMs: 2000
+      cacheTtlMs: 30000
+  binance:
+    baseUrl: "https://api.binance.com"
+    requestsPerMinute: 200
+    maxWaitMs: 30000
+    scanner:
+      maxRequestsPerMinute: 50     # per-worker ceiling for scanner candle requests
+      maxConcurrentScans: 4        # per-worker max concurrent scanner agents
+      maxCandidates: 20            # max entry candidates per scan (open-position exits always preserved)
+  birdeye:
+    enabled: false            # F2c: safe local default disabled (source is true + requires BIRDEYE_API_KEY)
+    baseUrl: "https://public-api.birdeye.so"
+    requestsPerMinute: 60
+    apiKey: ""                # override: BIRDEYE_API_KEY — required when birdeye.enabled is true
+    cacheTtlMs: 3600000
+  coinMarketCap:
+    enabled: false            # F2c: safe local default disabled (source is true + requires COINMARKETCAP_API_KEY)
+    baseUrl: "https://pro-api.coinmarketcap.com"
+    requestsPerMinute: 30
+    apiKey: ""                # override: COINMARKETCAP_API_KEY — required when coinMarketCap.enabled is true
+    cacheTtlMs: 3600000
+  discovery:
+    maxResults: 50                  # Default when agent does not specify a limit; agent may request 1–100 per call
+    geckoTerminalExtraPages: 1      # Set to 1 to fetch page 2 of GT trending + top pools
+    antistalenessCooldownHours: 4   # Hours before a token can re-appear at top of discovery. 0 = disabled.
+    antistalenessTokenTtlHours: 24  # How long to track a seen address before pruning it
+  # 1:1 with source (herobids default.yaml): a trading key in AppConfigSchema
+  # (marketData.economicCalendar). NOT apiKey-gated — the source `true` parses
+  # cleanly, so it is kept verbatim rather than silently dropped to the schema
+  # default (false). Forex Factory HTML source; Redis-cached across agents.
+  economicCalendar:
+    enabled: true
+    daysForward: 1
+    minImpact: medium
+    currencies: []
+    cacheTtlMs: 43200000            # 12 hours — shared across all agents via Redis
+  timeoutMs: 5000

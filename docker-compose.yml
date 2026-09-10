@@ -1,0 +1,89 @@
+# AUTHORED (Phase 9b item F2c, 013 §8.1.1 D5) — the fresh minimal M2 REST
+# boundary stack: the boundary process + Postgres + Redis. This is the durable F
+# artifact (ops scaffolding, NOT trading behaviour). It is intentionally NOT a
+# rebase of the l1-integration-harness compose (kept off main as YAGNI per D5).
+#
+# Flow: postgres + redis come up healthy → the one-shot `migrate` service applies
+# `pnpm --filter @traderton/db db:migrate` → the `boundary` starts and serves
+# `/health/ready`. `depends_on: condition: service_healthy` / `service_completed_
+# successfully` sequences it so the boundary never serves writes against an
+# unmigrated DB.
+#
+# Run:
+#   docker compose up --build          # bring the whole stack up
+#   curl localhost:8080/health/ready   # → {"status":"ready"} once serving
+# Signed calls: use the committed dev signing helper
+# (packages/boundary/src/dev/sign.ts) with the BOUNDARY_* values below.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: traderton
+      POSTGRES_PASSWORD: traderton
+      POSTGRES_DB: traderton
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U traderton -d traderton"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: apply migrations against the healthy Postgres, then exit 0. The
+  # boundary waits for this to complete successfully before starting.
+  migrate:
+    build:
+      context: .
+      target: build
+    command: ["pnpm", "--filter", "@traderton/db", "db:migrate"]
+    environment:
+      DATABASE_URL: postgres://traderton:traderton@postgres:5432/traderton
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  boundary:
+    build:
+      context: .
+      target: runtime
+    environment:
+      DATABASE_URL: postgres://traderton:traderton@postgres:5432/traderton
+      REDIS_URL: redis://redis:6379
+      BOUNDARY_PORT: "8080"
+      BOUNDARY_HOST: "0.0.0.0"
+      # Dev signing material — the committed dev helper signs against these.
+      # These are LOCAL dev VALUES, not secrets; override for any shared env.
+      BOUNDARY_CONSUMER_ID: dev-consumer
+      BOUNDARY_KEY_ID: dev-key
+      BOUNDARY_SIGNING_SECRET: dev-signing-secret
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # Node is present in the image; hit /health/ready without extra tooling.
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://localhost:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s

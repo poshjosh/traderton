@@ -54,3 +54,11 @@ export {
   BoundaryFailure,
   type ResultIdentity,
 } from './result.js';
+export {
+  signRequest,
+  signInvoke,
+  signStatus,
+  type SigningIdentity,
+  type SignRequestInput,
+  type SignedHeaders,
+} from './dev/sign.js';
