@@ -56,7 +56,7 @@ Legend: `Done` / `Active` / `Queued` / `Blocked (needs decision)`.
 
 | Level | Proves | Owner | Depends on | Status |
 |-------|--------|-------|-----------|--------|
-| **L1 — in-repo integration harness** | `@traderton/worker` runs end-to-end vs real Postgres+Redis with **zero `@traderton/*` internals stubbed**: `createTradingRuntime` → create/start a paper bot → `submit_decision` → real plan/fill/position + the decision reply + a maxBots rejection at k+1. Falsifies "consumable end-to-end." | traderton (us) | M1 (done) | Queued |
+| **L1 — in-repo integration harness** | `@traderton/worker` runs end-to-end vs real Postgres+Redis with **zero `@traderton/*` internals stubbed**: `createTradingRuntime` → create/start a paper bot → `submit_decision` → real plan/fill/position + the decision reply + a maxBots rejection at k+1. Falsifies "consumable end-to-end." | traderton (us) | M1 (done) | **Done (2026-09-07, branch `l1-integration-harness`)** — all 4 scenarios green vs real pg+redis. **Found + fixed a real consumability gap** (see below). |
 | **L2 — differential guarantee vs the pinned herobids ref** | Same trading inputs → identical trading outputs across the pinned herobids reference and `@traderton/*`. The "does not deviate" guarantee; side-by-side via a git worktree. | traderton (us) build the harness; the reference is a read-only pin | L1 green | Queued |
 | **F — M2 REST boundary** | The authored 005 boundary (Fastify/HMAC/idempotency/deadline + copy-adapted routes). Already scoped as **[013 item F](./features/013-9b-authoring-plan.md)**. | traderton (us) | M1 done; ideally L1 green first | Queued (last 9b item) |
 | **L3 — herobids `consume-traderton` branch** | herobids deletes its trading code, consumes `@traderton/*` (via F's REST and/or in-process), passes the L2 differential + herobids' own suite; merges to main = **cutover**. | herobids owner executes; traderton (us) supply the migration spec + the passing library + the harness | F done + L2 green | Blocked (needs decision) — herobids-owner-executed |
@@ -79,6 +79,20 @@ Legend: `Done` / `Active` / `Queued` / `Blocked (needs decision)`.
   (any deviation from parity goes through the normal review-fix loop, not silent). **This is the honest
   test of the "consumable end-to-end" claim** and should exist before F regardless.
 - **Prereq:** a local/docker Postgres + Redis. (Confirm infra at L1 start.)
+
+**OUTCOME (2026-09-07, branch `l1-integration-harness`).** Built per [025](./features/025-L1-integration-harness-proposal.md)
++ [026](./features/026-L1-implementer-prompt.md). Ran all four scenarios against real Postgres 16 + Redis 7
+(docker compose, non-default ports). **Scenarios 1, 3, 4 passed immediately; scenario 2 exposed a real
+HIGH consumability gap that 2315 unit tests missed** — vindicating the whole exercise: the
+`create_and_start`/`start` drive paths enqueued a bot config **missing `venueAccountId`** (`BotConfigSchema`
+strips it; the `bots` row carries it in a column, not the config JSON), so the BullMQ `start` job's
+`ActorFactory` threw `no injected venueAccountId — refusing to start`. Fixed as wiring (the drive path now
+stamps `venueAccountId` + `ownerId` onto the enqueued config — the values the factory reads), + a
+regression guard in the default unit suite. Re-ran: **all 4 scenarios green.** Commits: `95c7c0c` (fix),
+`68d67d0` (harness). Reviewed (CodeReviewer PASS; 2 MEDIUMs — a data-loss landmine in the harness infra +
+the regression guard — fixed before merge). Default `pnpm test` stays 2315/21 (harness gated to skips);
+`pnpm test:integration` runs the four green. **L1 converted "consumable end-to-end" from asserted to
+demonstrated, and found the one gap that would have broken a real consumer.**
 
 ### L2 — differential guarantee vs the pinned herobids ref
 - **Shape:** pin a herobids commit SHA (record it here); check it out to a git worktree; build a harness
