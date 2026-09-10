@@ -769,7 +769,8 @@ seam wiring + the `createAndStart` create→mark call. Reviewed (CodeReviewer PA
 
 ### 8.2 What it is (authored 005 machinery over the copied tools)
 `tools:invoke` → authenticate (HMAC over `METHOD\nPATH\nX-Traderton-Timestamp\nSHA256(body)`; configured
-consumers/keys; clock-skew; constant-time; header↔body `caller` match) → validate `TradertonToolInvocationV1`
+consumers/keys; clock-skew; constant-time; header↔body `caller` **and** `X-Request-Deadline-At`↔`body.deadlineAt`
+exact match) → validate `TradertonToolInvocationV1`
 (reject unknown outer keys; version compat) → `ToolRegistry.get(toolName)` → validate `payload` against
 `tool.parametersSchema` (Zod) → build a `TradingToolContext` (boundary supplies the signed `ownerId`/`actor`
 + the injected values) → `tool.execute(payload, ctx)` → map to `TradertonToolResultV1` with the closed
@@ -798,6 +799,41 @@ The API-surface rows (as the tool surface over 005, not per-resource routes); th
 contract validated" cutover gate; F is the **mandatory shipped boundary** (legal REST-isolation posture —
 [000](../000-vision.md)/[004](../004-decision-log.md)). The quarantined `api-routes/**` are dispositioned as
 Gap (not un-quarantined). **F completes 9b.**
+
+### 8.5 LANDED — F1 DONE (2026-09-08)
+
+**F1 (read-only boundary shell) is implemented, reviewed, and green on branch `f-m2-rest`** (not merged to
+`main` — the merge gate is not met and F2 remains). Implemented per [029](./029-F1-implementer-prompt.md):
+new `packages/boundary` (`@traderton/boundary`) — `contract.ts`, `config.ts`, `auth.ts`, `dispatcher.ts`,
+`app.ts`, `result.ts`, `registry.ts`, `bin.ts`, `app.test.ts` (19 tests). The `packages/worker` barrel was
+widened to re-export `ToolRegistry`/tools; root `tsconfig.json` + `vitest.config.ts` gained the alias;
+`fastify@5.12` added. Build + lint clean; full suite 2334 passed / 17 skipped.
+
+F1 scope landed: Fastify shell, HMAC-SHA-256 auth (configured consumers/keys, clock-skew, constant-time,
+header↔body `caller` **and** `X-Request-Deadline-At`↔`body.deadlineAt` match), envelope/version validation
+(reject unknown outer keys, path-major↔contractVersion-major), the `tools:invoke` dispatcher over the copied
+`ToolRegistry` (read-only tools only — `getReadOnlyToolNames`), result mapping onto the closed failure union,
+and `/health/{live,ready}`. Side-effecting tools are rejected `precondition.not_ready` (F2 gate).
+
+**CodeReviewer disposition (2026-09-08):** PASS, no CRITICAL/HIGH.
+- **M1 (deadline header↔body match) — FIXED in F1.** 005 §Authentication requires `X-Request-Deadline-At`
+  to equal `body.deadlineAt`; `authenticateRequest` now enforces it (`authentication.invalid_caller` on
+  mismatch) + a mismatch test.
+- **M2 (canonical PATH included query string) — FIXED in F1.** `toSignedRequest` now strips the query
+  (`request.url.split('?')[0]`) so signature verification stays correct for the F2 `:requestId` route.
+- **M3 (005 §Authz item 3 "actor provenance valid for the requested tool") — DEFERRED to F2** (logged in
+  [003](../003-anomalies-and-deviations.md)). It is a per-tool policy F1's read-only surface does not yet
+  author; the misleading dispatcher comment claiming the actor enum covers it was corrected. Read-only
+  blast radius is low; F2 authors the check with the side-effecting surface.
+
+**Outstanding (LOW, non-blocking) — [item F1]:**
+- `/health/ready` always returns ready (firms up with persistence readiness in F2).
+- `bin.ts` empty `allowedConsumers` warns rather than fail-closes — not exploitable (every request then fails
+  `unknown consumer`, so the boundary is closed by default); harden to fail-closed in F2/composition.
+- `identityFor` (`app.ts`) duplicates `identityFromRaw` (`dispatcher.ts`) — consolidate into `result.ts` to
+  remove drift risk.
+- Dead `?? request.url` fallback in `toSignedRequest` (`String.split` never yields an empty array) — harmless;
+  a byproduct of `noUncheckedIndexedAccess`.
 
 ---
 

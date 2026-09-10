@@ -8,6 +8,7 @@
     { "path": "packages/strategy" },
     { "path": "packages/venues" },
     { "path": "packages/backtesting" },
-    { "path": "packages/worker" }
+    { "path": "packages/worker" },
+    { "path": "packages/boundary" }
   ]
 }

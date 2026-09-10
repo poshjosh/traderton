@@ -19,6 +19,7 @@ export default defineConfig({
       '@traderton/venues': new URL('./packages/venues/src/index.ts', import.meta.url).pathname,
       '@traderton/backtesting': new URL('./packages/backtesting/src/index.ts', import.meta.url).pathname,
       '@traderton/worker': new URL('./packages/worker/src/index.ts', import.meta.url).pathname,
+      '@traderton/boundary': new URL('./packages/boundary/src/index.ts', import.meta.url).pathname,
       '@traderton/tests': new URL('./tests', import.meta.url).pathname,
     },
   },
