@@ -93,6 +93,15 @@ item-C/D drive path + `createTradingRuntime`. **F authors no trading logic — i
 persists idempotency, enforces deadline, dispatches to a copied tool, maps the result.**
 
 ## 3. Idempotency persistence — a small new store (flagged)
+
+> **CORRECTION (2026-09-08, F2 investigation — [030](./030-F2-m2-rest-proposal.md) §2, decision D1):** the
+> claim below that the idempotency store is "not a copy — 005 is a fresh contract" is **partly wrong**.
+> herobids DOES have an idempotency oracle — `apps/api/src/services/blueprint-idempotency.ts`
+> (`computeInstantiateRequestHash`) + the blueprints fork/instantiate routes + their `*_requests` tables.
+> F2 **copy-adapts** the fingerprint hasher + advisory-lock/dedupe control flow (re-keyed to the 005
+> 4-tuple) and authors only the `in_progress`/status/retention/expiry deltas. Deadline enforcement remains
+> genuinely authored (no oracle). See 013 §8.3.
+
 005 requires persisting invocations keyed `(consumer_id, owner_id, tool_name, idempotency_key)` before
 side effects. `@traderton/db` has **no such table** today (checked: the `decision_approvals` orphan was
 deleted; nothing else fits). So F needs a **new `boundary_invocations` table + repo** (requestId,
@@ -148,6 +157,11 @@ larger/different scope than 005 describes.
    These are the F acceptance bar — authored (005 is fresh, no copy oracle). Confirm they're the gate.
 
 ## 6. Copy-vs-author (under the recommended reading)
+
+> **CORRECTION (2026-09-08 — 030 §2, D1):** the idempotency store's fingerprint + lock/dedupe flow is
+> **COPY-ADAPT** from herobids `blueprint-idempotency.ts` + the blueprints route, not authored-new. Only the
+> `in_progress`/status/retention/expiry deltas + deadline enforcement are authored. See 013 §8.3.
+
 - **AUTHORED (new — 005 is a fresh contract, no herobids equivalent):** the Fastify shell, HMAC auth
   middleware, envelope/version validation, the idempotency store (table+repo+migration) + logic, deadline
   enforcement, the `tools:invoke` dispatcher, result mapping to the closed failure union, health endpoints,

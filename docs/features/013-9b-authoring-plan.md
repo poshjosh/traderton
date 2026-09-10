@@ -777,6 +777,36 @@ seam wiring + the `createAndStart` create→mark call. Reviewed (CodeReviewer PA
     staging for a while" step gets something real to run.
 - **(5) The 7 required-verification tests** (005 §"Required Verification") are the F acceptance gate.
 
+#### 8.1.1 F2 LOCKED decisions (2026-09-08, human — full context in [030](./030-F2-m2-rest-proposal.md))
+
+F2 lands slice-by-slice on branch `f-m2-rest`, each build+lint+test green, human review between slices:
+**F2a** = the `boundary_invocations` store (schema+migration+repo+DATABASE_URL-gated integration test);
+**F2b** = dispatcher integration (deadline + idempotency + open the read-only gate + status endpoint + the
+real context factory + the item-3 authz check); **F2c** = the compose stack + dev signing helper + the 7
+required-verification tests.
+
+- **D1 — idempotency = COPY-ADAPT.** Copy-adapt the fingerprint hasher + advisory-lock/dedupe flow from
+  herobids `blueprint-idempotency.ts` + the blueprints route (re-keyed to the 005 4-tuple); author the
+  `in_progress`/status/retention/expiry deltas. (See §8.3 — corrects the earlier "no equivalent" claim.)
+- **D2 — subject→injection = AUTHORED RESOLVER.** The boundary reads `venue`/`venueType`/`venueAccountId`/
+  `ownerMode` from the target bot/venue-account row (per-owner default where no bot is named). Authored seam,
+  no oracle — log it.
+- **D3 — deadline = PRAGMATIC.** Reject an already-expired `deadlineAt` pre-validation + one re-check
+  immediately before `tool.execute`. Do NOT thread `deadlineAt` into the copied drive path. A slight
+  divergence from 005's "before every side effect" wording → log in [003](../003-anomalies-and-deviations.md).
+- **D4 — actor provenance (005 §Authz item 3) = OPTION B.** Enforce "the asserted `actor.type` is one the
+  operator configured this consumer to assert" — an operator-config VALUE (per-consumer allowed actor types,
+  defaulting to all four), NOT an authored per-tool product-rule map. Ports-carry-values; no invented policy.
+  This resolves the F1-deferred item-3 (docs/003). Tightening into a per-tool map is a docs/010 later-option.
+- **D5 — compose = AUTHOR FRESH.** A minimal boundary + Postgres + Redis compose stack authored in F2c; do
+  NOT rebase the `l1-integration-harness` branch's compose (kept off main as YAGNI).
+- **Rate-limiting: OUT.** `rate_limit.exceeded` stays a reserved-but-unused code (005 does not require F to
+  implement a limiter).
+
+Recorded later-options (do NOT do now — [docs/010-improvement-backlog.md](../010-improvement-backlog.md)):
+author-fresh idempotency (vs D1 copy-adapt); literal per-side-effect deadline re-check (vs D3 pragmatic);
+per-tool provenance allow-map (vs D4 Option B).
+
 ### 8.2 What it is (authored 005 machinery over the copied tools)
 `tools:invoke` → authenticate (HMAC over `METHOD\nPATH\nX-Traderton-Timestamp\nSHA256(body)`; configured
 consumers/keys; clock-skew; constant-time; header↔body `caller` **and** `X-Request-Deadline-At`↔`body.deadlineAt`
@@ -791,9 +821,18 @@ detail). F2 adds: persist idempotency **before** any side effect; reject expired
 
 ### 8.3 Copied vs authored vs Gap
 - **AUTHORED (new — 005 is fresh, no herobids equivalent):** the Fastify shell, HMAC auth, envelope/version
-  validation, the `tools:invoke` dispatcher, result mapping, health (F1); the `boundary_invocations`
-  store+migration, idempotency logic, deadline enforcement, the status endpoint (F2); the 7 verification
-  tests. All boundary machinery — no trading behaviour.
+  validation, the `tools:invoke` dispatcher, result mapping, health (F1); the `boundary_invocations` table
+  schema+migration, the `in_progress`/status transitional state + status endpoint, deadline enforcement,
+  retention/expiry (F2); the 7 verification tests. All boundary machinery — no trading behaviour.
+- **COPY-ADAPT (corrects the earlier "no equivalent" claim — F2, decision D1/030 §2):** the idempotency
+  **request-fingerprint hashing** + the **advisory-lock→lookup→same-hash-replay/different-hash-conflict**
+  control flow are copied and re-keyed from herobids `apps/api/src/services/blueprint-idempotency.ts`
+  (`computeInstantiateRequestHash`) + the blueprints fork/instantiate routes + the
+  `blueprint_fork_requests`/`blueprint_instantiation_requests` tables. herobids DOES have a proven
+  idempotency oracle (keyed `(userId, idempotencyKey)`, synchronous replay-or-conflict, no in_flight/expiry);
+  F2 copies the hasher + lock/dedupe core and re-keys it to the 005 4-tuple `(consumer_id, owner_id,
+  tool_name, idempotency_key)`, authoring only the deltas 005 adds. This is the item-E precedent (copy
+  herobids' own advisory-lock form, re-key it). **Deadline enforcement has NO oracle — genuinely authored.**
 - **REUSED (copied M1 surface, unchanged):** the 25 tools + `ToolRegistry` (dispatch target), the
   `TradingToolContext`, `createTradingRuntime` + the item-C/D drive path (side-effecting tools call it).
 - **GAP (signed off, Intentional Divergence — 001/003):** herobids's JWT per-resource control-plane

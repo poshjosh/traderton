@@ -32,6 +32,10 @@ unchanged — every doc still binds; this only changes reading *order/cost*.
   rule seems arbitrary or a case isn't covered; the reasoning tells you which way to lean.
 - **[docs/003-anomalies-and-deviations.md](./docs/003-anomalies-and-deviations.md)** —
   forced deviations + source-fix request log. Read/append when you hit a deviation.
+- **[docs/010-improvement-backlog.md](./docs/010-improvement-backlog.md)** — deliberate,
+  non-blocking **later-options** (the "better path we didn't take now"), graded
+  Value/Effort + Risk-if-deferred. Append when you take a fork's safe/simple branch and the
+  better branch is worth remembering. NOT for cutover obligations (those → 001/003) or bugs.
 - **[docs/009-extraction-roadmap.md](./docs/009-extraction-roadmap.md)** — the extraction
   roadmap (phases 1–10, **mostly Done**). Read for extraction history / the per-phase
   pattern. The per-phase execution loop it defines is still the loop we run.
