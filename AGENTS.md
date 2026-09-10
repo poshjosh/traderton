@@ -4,56 +4,76 @@ Rules for AI agents working on **Traderton** — trading infrastructure for
 AI/LLM agents (crypto now; forex, commodities, equities, and more later),
 exposed over API now and MCP/skills later.
 
-## Read first — MANDATORY at session start
+## Read first — tiered (the docs ARE the project's memory)
 
-These files ARE the project's memory. A fresh session knows nothing of the
-reasoning that produced this plan unless it reads them. **Before doing anything
-— any investigation, any edit, any command — read all ten, in order:**
+A fresh session knows nothing of the reasoning behind this project unless it reads
+the docs. But the project is now far along (extraction M1 complete), so you do **not**
+need to read everything up front. Read the **always-read** tier at session start;
+consult the rest **when the topic is relevant** (pointers below). Authority is
+unchanged — every doc still binds; this only changes reading *order/cost*.
 
-1. **[docs/000-vision.md](./docs/000-vision.md)** — goal, method, and the
-   settled decisions. Source of truth.
-2. **[docs/001-parity-ledger.md](./docs/001-parity-ledger.md)** — the live
-   parity status and sign-off gate. This is the working acceptance tracker;
-   update it as you work against the static inventory in 006.
-3. **[docs/002-phase-0-subtraction-plan.md](./docs/002-phase-0-subtraction-plan.md)**
-   — what to copy / keep / cut-seam / defer, and the delete order.
-4. **[docs/003-anomalies-and-deviations.md](./docs/003-anomalies-and-deviations.md)**
-   — where to log forced deviations. Add to it when you hit one.
-5. **[docs/004-decision-log.md](./docs/004-decision-log.md)** — the *why* behind
-   the decisions. Read this when a rule seems arbitrary or a case isn't covered;
-   the reasoning tells you which way to lean.
-6. **[docs/005-consumer-boundary-contract.md](./docs/005-consumer-boundary-contract.md)**
-   — the boundary contract consumers must use to invoke Traderton safely.
-7. **[docs/006-source-capability-manifest.md](./docs/006-source-capability-manifest.md)**
-   — the exhaustive source capability inventory. This is the static parity
-   target; the ledger records live status against it.
-8. **[docs/007-operational-readiness.md](./docs/007-operational-readiness.md)**
-   — the cutover proof: latency, equivalence, restart resilience, and rollback
-   discipline.
-9. **[docs/008-phase-1-scaffold-and-domain-slice.md](./docs/008-phase-1-scaffold-and-domain-slice.md)**
-   — the Phase 1 task doc (domain slice). **Done** — see the parity ledger.
-10. **[docs/009-extraction-roadmap.md](./docs/009-extraction-roadmap.md)** — the outer
-    roadmap for the remaining phases (2–10): the fixed sequence, scope boundaries,
-    stop-gates, and the per-phase pattern for autonomous coordinated execution. Each
-    phase drafts its own detailed plan at its start; this roadmap governs the chain.
+**Always-read at session start (small — the minimum to not do damage):**
 
-Do not rely on prior chat context — assume you have none. If a decision isn't in
-these docs, it does not exist yet: decide it deliberately and record it here.
+1. **This file (AGENTS.md)** — the hard rules (below): copy-never-author, source-fix
+   discipline, work-only-in-traderton / herobids-read-only.
+2. **[docs/000-vision.md](./docs/000-vision.md)** — goal, method, settled decisions,
+   "herobids becomes a consumer." The law. Source of truth.
+3. **[docs/001-parity-ledger.md](./docs/001-parity-ledger.md)** — the live parity
+   status + cutover gates. **The single source of truth for what is done vs. pending.**
+   Update it as you work.
+4. **[docs/024-verification-and-consumption-roadmap.md](./docs/024-verification-and-consumption-roadmap.md)**
+   — **where we are now / what's next.** M1 (extraction) is code-complete; 024 governs
+   proving the library is consumable (L1 harness → L2 differential → F REST → L3
+   herobids consumes it). Start here for "what do I do next."
+
+**Consult when relevant (authoritative; not required up front):**
+
+- **[docs/004-decision-log.md](./docs/004-decision-log.md)** — the *why*. Read when a
+  rule seems arbitrary or a case isn't covered; the reasoning tells you which way to lean.
+- **[docs/003-anomalies-and-deviations.md](./docs/003-anomalies-and-deviations.md)** —
+  forced deviations + source-fix request log. Read/append when you hit a deviation.
+- **[docs/009-extraction-roadmap.md](./docs/009-extraction-roadmap.md)** — the extraction
+  roadmap (phases 1–10, **mostly Done**). Read for extraction history / the per-phase
+  pattern. The per-phase execution loop it defines is still the loop we run.
+- **[docs/features/013-9b-authoring-plan.md](./docs/features/013-9b-authoring-plan.md)** —
+  the Phase-9b authoring detail (items A–F; A–E Done, **F = M2 REST is the remaining item**).
+  Read when working on F or reviewing what 9b authored vs copied vs dropped.
+- **[docs/005-consumer-boundary-contract.md](./docs/005-consumer-boundary-contract.md)** —
+  the consumer boundary (HMAC/envelope/idempotency). Read at F and cutover.
+- **[docs/006-source-capability-manifest.md](./docs/006-source-capability-manifest.md)** —
+  the static parity inventory the ledger scores against. Read when auditing coverage.
+- **[docs/007-operational-readiness.md](./docs/007-operational-readiness.md)** — the
+  cutover proof (latency/equivalence/restart/rollback). Read at L3/cutover.
+- **`docs/features/*`** — per-phase/per-item plans + implementer prompts (drafted at each
+  item's start; e.g. 011 M1 review, 015–023 the 9b item designs/prompts). Read the one
+  for the item you're on.
+- **Historical (do not re-execute):** [002](./docs/002-phase-0-subtraction-plan.md)
+  (Phase-0 plan), [008](./docs/008-phase-1-scaffold-and-domain-slice.md) (Phase-1 doc).
+
+Do not rely on prior chat context — assume you have none. If a decision isn't in these
+docs, it does not exist yet: decide it deliberately and record it.
 
 ## Where you are / where to start
 
-- **Phase 0 (planning): complete.** Phase 1 (`@traderton/domain` slice): **complete
-  and green** (see the "Phase 1 (domain slice) — DONE" block in
-  [docs/001-parity-ledger.md](./docs/001-parity-ledger.md)).
-- **The next work is Phase 2 (`db`)**, governed by
-  [docs/009-extraction-roadmap.md](./docs/009-extraction-roadmap.md). To proceed:
-  start at the first `Queued` phase in the 009 phase table and run that phase's
-  per-phase pattern (investigate → draft plan → implement → review → test → update
-  docs → mark complete → draft next), stopping only at the 009 stop-gates.
-- The single source of truth for "what is done vs. pending" is the parity ledger
-  ([001](./docs/001-parity-ledger.md)); 009 tracks per-phase status. Docs 002 and 008
-  are historical Phase 0/1 records — do not re-execute them.
-- Per-phase plans (drafted at each phase's start) live git-tracked in `docs/features/`.
+- **Extraction (009, phases 1–10): M1 is code-complete.** Items A–E of Phase 9b landed
+  green (config shape, composition root, decision intake, drive path + 25 tools, per-owner
+  maxBots). See the item-A–E blocks in [001](./docs/001-parity-ledger.md) +
+  [013 §7.5](./docs/features/013-9b-authoring-plan.md). Full build/lint/test green.
+- **The next work is verification + consumption**, governed by
+  [docs/024-verification-and-consumption-roadmap.md](./docs/024-verification-and-consumption-roadmap.md):
+  **L1** (in-repo end-to-end integration harness — prove the library is consumable against
+  real Postgres+Redis, nothing stubbed), then **L2** (differential guarantee vs a pinned
+  herobids ref), **F** (the M2 REST boundary — the last 9b item, [013 §8](./docs/features/013-9b-authoring-plan.md)),
+  and **L3** (herobids consumes `@traderton/*` on a branch → cutover). Start at the first
+  `Queued`/`Active` level in the 024 table and run the investigate → propose (pause for
+  human) → implement → review → test → update-docs loop.
+- **L3 ownership:** the herobids `consume-traderton` branch is **herobids-owner territory**
+  (it edits herobids — which we never do). We produce the consumable library + the
+  comparison harness + the migration spec; the owner executes the branch and the merge.
+  See 024 §Ownership boundary.
+- The single source of truth for done-vs-pending is the parity ledger
+  ([001](./docs/001-parity-ledger.md)); 024 tracks the verification levels; 009 tracks the
+  (now mostly Done) extraction phases. Per-item plans live git-tracked in `docs/features/`.
 
 ## The rule you must not break
 
