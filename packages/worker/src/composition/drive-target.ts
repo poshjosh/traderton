@@ -42,6 +42,13 @@ export interface DriveBotRecord {
   creatorType: string;
   creatorId: string | null;
   ownerId: string;
+  /**
+   * The bot's bound venue account (the `bots.venue_account_id` COLUMN — read-only
+   * here). The ActorFactory reads `venueAccountId` from the config it is handed,
+   * so `startBot` stamps this onto the enqueued config; the persisted row is the
+   * source of truth for a bot's actual account (decisions 11–13).
+   */
+  venueAccountId: string;
   startedAt: Date | null;
   stoppedAt: Date | null;
 }
@@ -318,10 +325,18 @@ async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload):
     throw new Error('Agent has reached its max concurrent bots limit. Stop a bot before creating a new one.');
   }
 
-  // Enqueue the start lifecycle job. venueAccountId flows via the persisted config
-  // + the injected instance loader (resolved at job-processing time), mirroring
-  // herobids' "no longer passed in the config payload" note (broker :822–824).
-  await deps.runtime.enqueueLifecycle('start', botId, validatedConfig as unknown as Record<string, unknown>);
+  // Enqueue the start lifecycle job. The ActorFactory reads `venueAccountId` +
+  // `ownerId` from the config object it is handed (create-trading-runtime.ts
+  // ~:435), and `processJob('start')` starts the actor from the job config
+  // DIRECTLY — so the ENQUEUED config must carry the INJECTED venueAccountId +
+  // ownerId. The persisted `bots` row holds them in its columns (via the item-E
+  // limit seam); this stamps them onto the config so the factory is self-sufficient
+  // — matching how the production `instanceLoader` re-attaches them per item B.
+  await deps.runtime.enqueueLifecycle('start', botId, {
+    ...(validatedConfig as unknown as Record<string, unknown>),
+    venueAccountId: deps.venueAccountId,
+    ownerId: deps.ownerId,
+  });
   logger.info({ ownerId: deps.ownerId, botId }, 'Bot enqueued for start');
 }
 
@@ -363,7 +378,17 @@ async function startBot(deps: DriveTargetDeps, payload: ManageBotPayload): Promi
   }
 
   try {
-    await deps.runtime.enqueueLifecycle('start', payload.botId, bot.config);
+    // Stamp venueAccountId + ownerId onto the ENQUEUED config: the ActorFactory
+    // reads them from the config it is handed and `processJob('start')` starts
+    // from the job config DIRECTLY (never re-loads for a `start`). Prefer the
+    // persisted row's `venueAccountId`/`ownerId` — the bot's ACTUAL account (a
+    // different drive target may inject a different value); fall back to the
+    // injected `deps.venueAccountId`.
+    await deps.runtime.enqueueLifecycle('start', payload.botId, {
+      ...bot.config,
+      venueAccountId: bot.venueAccountId ?? deps.venueAccountId,
+      ownerId: bot.ownerId,
+    });
   } catch (err) {
     logger.error({ botId: payload.botId, err }, 'Failed to enqueue start job during start action');
     try {
@@ -393,8 +418,15 @@ async function restartBot(deps: DriveTargetDeps, payload: ManageBotPayload): Pro
   const bot = await requireOwnedBot(deps, payload.botId);
   // The copied `WorkerRuntime` exposes a native `restart` lifecycle command
   // (stop-then-start with config rehydration) — drive it directly rather than
-  // re-implementing stop+start (013 §6.2, "restart(=stop+start)").
-  await deps.runtime.enqueueLifecycle('restart', payload.botId, bot.config);
+  // re-implementing stop+start (013 §6.2, "restart(=stop+start)"). Stamp
+  // venueAccountId + ownerId onto the enqueued config: `processJob('restart')`
+  // starts from the job config directly when it is non-empty, and the ActorFactory
+  // reads both from that config (same wiring as start).
+  await deps.runtime.enqueueLifecycle('restart', payload.botId, {
+    ...bot.config,
+    venueAccountId: bot.venueAccountId ?? deps.venueAccountId,
+    ownerId: bot.ownerId,
+  });
 }
 
 async function adjustConfig(deps: DriveTargetDeps, payload: ManageBotPayload): Promise<void> {
@@ -428,7 +460,13 @@ async function adjustConfig(deps: DriveTargetDeps, payload: ManageBotPayload): P
   await deps.botRepo.updateBotConfig(payload.botId, mergedConfig);
   if (bot.status === 'running') {
     try {
-      await deps.runtime.enqueueLifecycle('restart', payload.botId, mergedConfig);
+      // Stamp venueAccountId + ownerId onto the enqueued restart config (the
+      // ActorFactory reads both from the config; same wiring as start/restart).
+      await deps.runtime.enqueueLifecycle('restart', payload.botId, {
+        ...mergedConfig,
+        venueAccountId: bot.venueAccountId ?? deps.venueAccountId,
+        ownerId: bot.ownerId,
+      });
     } catch (err) {
       logger.error({ botId: payload.botId, err }, 'Failed to enqueue restart job during adjust_config');
       try {
