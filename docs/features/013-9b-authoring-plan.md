@@ -920,6 +920,52 @@ creates genuine concurrency, (b) the lock is what serializes them, and (c) the u
 backstop. The lock was restored (working tree unchanged) and the containers torn down. F2a is proven
 end-to-end, not merely by logic + review.
 
+### 8.7 LANDED — F2b DONE (2026-09-08)
+
+**F2b (the dispatcher integration) is implemented, reviewed, and green on branch `f-m2-rest`** (commit
+`5372afd`; not merged to `main`). Implemented per [032](./032-F2b-implementer-prompt.md); all six concerns
+authored as boundary machinery over the copied tools (no trading behaviour), all in `packages/boundary`:
+
+1. **Deadline (D3 pragmatic):** `dispatcher.dispatch` pre-check (after envelope parse, before validation) +
+   one re-check immediately before `tool.execute`, on the injected clock; `deadlineAt` is NOT threaded into
+   the copied drive path. Unparseable deadline fails closed. `deadline.expired` (already in the union).
+2. **Idempotency wrap** (side-effecting tools only): `computeRequestFingerprint` → `beginOrResolve` →
+   `conflict`→`validation.invalid_payload` / `in_progress`→in-progress status / `replay`→stored terminal
+   (tool NOT re-run) / `started`→execute→map→`complete`. A caught execute error still completes terminally;
+   a `complete()` persistence failure returns the mapped result (no raw 500 — reconciles via retention).
+   Read-only tools bypass the store. Retention is a VALUE (`idempotencyRetentionHours`).
+3. **Opened gate:** F1's read-only `precondition.not_ready` reject removed; the category now only decides
+   store-vs-direct.
+4. **Status endpoint:** `GET /internal/v1/invocations/:requestId` (HMAC-authed like `tools:invoke`; reads
+   `findByRequestId` only — NEVER executes) → in_progress / terminal / `not_found.resource`. Authored
+   `TradertonToolInvocationStatusV1` + the `TradertonInvokeResponseV1` union in `contract.ts`.
+5. **Real `TradingToolContext` factory** (`bin.ts`): `createTradingRuntime` + `createDriveTarget(injection)`
+   as `publishToInbound`, real `ioredis`, real `botRepo`. The **authored D2 subject→injection resolver**
+   (`subject-resolver.ts`, no herobids oracle): bot-scoped → bot row + ownership check
+   (`bot.ownerId===subject.ownerId` else `authorization.denied`); no-bot → per-owner default venue account
+   (ambiguous/none → `precondition.not_ready`). Injects VALUES only.
+6. **D4 Option B authz:** per-consumer `allowedActorTypes` (default all four) enforced at dispatcher step 6b
+   → `authorization.denied`; resolves the F1-deferred 005 §Authz item-3 (docs/003 flipped
+   DEFERRED→RESOLVED). Per-tool rules (Option A) stay out → docs/010 B3.
+
+The dispatcher depends only on the thin `BoundaryInvocationStore` + `ComputeRequestFingerprint` ports (no
+`@traderton/db` import); `bin.ts` is the only composition point. The `TradingToolContextFactory` seam widened
+from `(subject)` to `(subject + toolName + payload)` — still a VALUE-injection seam (the resolver needs the
+payload's `botId` + the tool category), no HTTP/idempotency/trading logic leaked into the dispatcher or core.
+
+**CodeReviewer disposition:** no CRITICAL/HIGH; all six concerns confirmed correct, layering + no-leak held.
+- **M1 (MEDIUM) — a `complete()` failure stranded the row + raw 500. FIXED** — the `complete()` call is
+  wrapped; on failure the mapped terminal result is still returned (row reconciles via retention). + a
+  fake-store-rejects-complete test.
+- **L1 (LOW) — dead `void getCategoryOperation` in the resolver. FIXED** (removed + unused import dropped).
+- **M2 (venueType hardcoded venue list) → backlog B7; M3 (empty correlationId on not_found — inherent),
+  L2 (bin.ts double-casts), L3 (third identity extractor), L4 (per-owner sessionId) → backlog B8 / notes.**
+
+**Verification:** build green, lint clean, full suite **2363 passed / 24 skipped**. F2b's tests all use
+**fakes** (no real Postgres/Redis) — correct for this slice. The real context factory + D2 resolver's live DB
+path and the **end-to-end signed side-effecting flow are NOT yet executed** here; they are proven by test
+logic + review, and are the subject of **F2c's** gated integration + the 7 required-verification tests.
+
 ---
 
 ## 9. Authored-vs-copied manifest (maintained through implementation)
