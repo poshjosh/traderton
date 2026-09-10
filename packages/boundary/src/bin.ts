@@ -1,69 +1,139 @@
-// AUTHORED (Phase 9b item F1) — the tiny boundary process entry. Assembles the
-// copied tool registry, reads the boundary config, and starts the Fastify app.
+// AUTHORED (Phase 9b item F1 shell; F2b real runtime) — the boundary process
+// entry. Assembles the copied tool registry, reads the boundary + trading
+// config, stands up a real `createTradingRuntime`, and starts the Fastify app.
 //
-// This is the F1 SHELL entry. The `TradingToolContext` injection seam
-// (`contextFactory`) is where a full deployment wires the read-only repos /
-// runtime a consumer owns (the same ports item C/D use); F1 supplies a base
-// context carrying the signed subject. Context-free read tools (e.g. get_schema)
-// serve immediately; repo-backed read tools return their own graceful
-// "unavailable" result until the composition root wires them (F2 / deployment).
+// F2b turns F1's NOOP context into a REAL `TradingToolContext`: a live `ioredis`
+// client, the runtime's `createDriveTarget(injection)` as `publishToInbound`, and
+// a real `botRepo` — so side-effecting tools (submit_decision / create_bot /
+// stop_bot / …) execute. The subject→injection VALUES come from the authored D2
+// resolver (`subject-resolver.ts`). All HTTP/HMAC/idempotency wiring stays in the
+// boundary package (the 000 invariant); the dispatcher stays wiring-free.
 
-import type { TradingToolContext } from '@traderton/domain';
+import { Redis } from 'ioredis';
+import { and, eq } from 'drizzle-orm';
+import type { TradingToolContext, ToolCategory } from '@traderton/domain';
+import {
+  createDatabase,
+  BotRepository,
+  BoundaryInvocationRepository,
+  computeRequestFingerprint,
+  venueAccounts,
+} from '@traderton/db';
+import { createTradingRuntime, loadConfig } from '@traderton/worker';
 import { createBoundaryApp } from './app.js';
 import { BoundaryConfigSchema, type BoundaryConfig } from './config.js';
-import type { DispatchSubject, TradingToolContextFactory } from './dispatcher.js';
+import type {
+  ContextFactoryRequest,
+  TradingToolContextFactory,
+  BoundaryInvocationStore,
+} from './dispatcher.js';
 import { buildToolRegistry } from './registry.js';
-
-/** A no-op async Redis stub — F1's shell has no live Redis; repo-backed tools
- *  degrade gracefully via their own guards. A real deployment injects a client. */
-const NOOP_REDIS: TradingToolContext['redis'] = {
-  hset: async () => 0,
-  hget: async () => null,
-  hgetall: async () => null,
-  hdel: async () => 0,
-  publish: async () => 0,
-  blpop: async () => null,
-  smembers: async () => [],
-  sadd: async () => 0,
-  srem: async () => 0,
-  expire: async () => 0,
-};
-
-/** Build the F1 base `TradingToolContext` for a signed subject. */
-function baseContextFactory(subject: DispatchSubject): TradingToolContext {
-  return {
-    agentId: subject.actor.id,
-    sessionId: `boundary:${subject.ownerId}`,
-    executionMode: 'paper',
-    authorizationMode: 'approval_required',
-    redis: NOOP_REDIS,
-    publishToInbound: async () => {
-      // Read-only tools do not publish; side-effecting drive is F2.
-    },
-  };
-}
+import {
+  resolveSubjectInjection,
+  type SubjectResolverPorts,
+  type ResolverBotRecord,
+  type ResolverVenueAccountRecord,
+} from './subject-resolver.js';
 
 function loadBoundaryConfig(): BoundaryConfig {
   const consumerId = process.env['BOUNDARY_CONSUMER_ID'];
   const keyId = process.env['BOUNDARY_KEY_ID'];
   const secret = process.env['BOUNDARY_SIGNING_SECRET'];
   const clockSkewMs = process.env['BOUNDARY_CLOCK_SKEW_MS'];
+  const retentionHours = process.env['BOUNDARY_IDEMPOTENCY_RETENTION_HOURS'];
 
   const allowedConsumers =
     consumerId && keyId && secret ? { [consumerId]: { keyId, secret } } : {};
 
   return BoundaryConfigSchema.parse({
     ...(clockSkewMs ? { clockSkewMs: Number(clockSkewMs) } : {}),
+    ...(retentionHours ? { idempotencyRetentionHours: Number(retentionHours) } : {}),
     allowedConsumers,
   });
 }
 
 async function main(): Promise<void> {
-  const config = loadBoundaryConfig();
+  const boundaryConfig = loadBoundaryConfig();
   const registry = buildToolRegistry();
-  const contextFactory: TradingToolContextFactory = baseContextFactory;
 
-  const app = createBoundaryApp({ config, registry, contextFactory });
+  // ── Real trading runtime (needs live Postgres + Redis + AppConfig) ──
+  const appConfig = loadConfig();
+  const redis = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379', {
+    maxRetriesPerRequest: null,
+  });
+  const db = createDatabase(appConfig.database.url);
+  const botRepo = new BotRepository(db);
+  const runtime = createTradingRuntime({
+    config: appConfig,
+    redis,
+    // No bots rehydrate at boundary start — bot lifecycle is driven by tool
+    // calls, not a boot-time reload. The runtime still starts its lifecycle-job
+    // consumer + reclaim loop.
+    instanceLoader: async () => [],
+  });
+  await runtime.start();
+
+  // ── The idempotency store (F2a repo) injected via the thin dispatcher port ──
+  const invocationStore: BoundaryInvocationStore = new BoundaryInvocationRepository(db);
+  const retentionMs = boundaryConfig.idempotencyRetentionHours * 60 * 60 * 1000;
+
+  // ── The D2 subject→injection resolver ports (db-row VALUE lookups) ──
+  const resolverPorts: SubjectResolverPorts = {
+    getBotById: async (botId): Promise<ResolverBotRecord | null> => {
+      const bot = await botRepo.getBotById(botId);
+      if (!bot) return null;
+      return { ownerId: bot.ownerId, venueAccountId: bot.venueAccountId, config: bot.config };
+    },
+    listVenueAccountsByOwner: async (ownerId): Promise<ResolverVenueAccountRecord[]> => {
+      const rows = await db
+        .select({ id: venueAccounts.id, venue: venueAccounts.venue })
+        .from(venueAccounts)
+        .where(and(eq(venueAccounts.ownerId, ownerId)));
+      return rows.map((r) => ({ id: r.id, venue: r.venue }));
+    },
+  };
+
+  // ── The real TradingToolContext factory (composition root, NOT the dispatcher) ──
+  const contextFactory: TradingToolContextFactory = async (
+    request: ContextFactoryRequest,
+  ): Promise<TradingToolContext> => {
+    const tool = registry.get(request.toolName);
+    const category = (tool?.category ?? 'read-config') as ToolCategory;
+
+    const resolution = await resolveSubjectInjection(
+      { ownerId: request.ownerId, actor: request.actor },
+      category,
+      request.payload,
+      resolverPorts,
+    );
+    if (!resolution.ok) {
+      // The dispatcher maps a thrown factory to precondition.not_ready; an
+      // authorization mismatch is surfaced by throwing so the boundary refuses.
+      throw new Error(`subject resolution failed: ${resolution.code}: ${resolution.message}`);
+    }
+
+    const injection = resolution.injection;
+    const publishToInbound = runtime.createDriveTarget(injection);
+
+    return {
+      agentId: request.actor.id,
+      sessionId: `boundary:${request.ownerId}`,
+      executionMode: injection.ownerMode,
+      authorizationMode: 'approval_required',
+      redis: redis as unknown as TradingToolContext['redis'],
+      publishToInbound,
+      botRepo: botRepo as unknown as TradingToolContext['botRepo'],
+    };
+  };
+
+  const app = createBoundaryApp({
+    config: boundaryConfig,
+    registry,
+    contextFactory,
+    invocationStore,
+    computeRequestFingerprint,
+    retentionMs,
+  });
 
   const port = Number(process.env['BOUNDARY_PORT'] ?? 8080);
   const host = process.env['BOUNDARY_HOST'] ?? '0.0.0.0';

@@ -29,6 +29,12 @@ export {
 
 export type { ExecutionActor, IntakeResult, IntakeRejection, IntakeRejectionCode } from './execution-actor.js';
 
+// The operator-config loader — re-exported so the M2 REST boundary
+// (@traderton/boundary, Phase 9b item F2b) can load the same `AppConfig` its
+// `createTradingRuntime(ports)` requires. No behaviour is authored by this
+// re-export; it only widens the package's public surface.
+export { loadConfig } from './config.js';
+
 // Tool surface — the copied trading tools + the ToolRegistry dispatch target.
 // Re-exported so the M2 REST boundary (@traderton/boundary, Phase 9b item F) can
 // assemble a registry and dispatch to the copied tools. No behaviour is authored

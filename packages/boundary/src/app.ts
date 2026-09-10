@@ -17,6 +17,8 @@ import {
 
 /** The one execution route (005 §Endpoints). */
 const INVOKE_PATH = '/internal/v1/tools:invoke';
+/** The invocation-status route (005 §Endpoints; F2b). */
+const STATUS_PATH = '/internal/v1/invocations/:requestId';
 /** The path major for the v1 boundary (005 §Version Compatibility). */
 const PATH_MAJOR = '1';
 
@@ -143,9 +145,38 @@ export function createBoundaryApp(deps: BoundaryAppDeps): FastifyInstance {
       );
     }
 
-    // 3. Dispatch (envelope/version/tool/read-only/payload/authz + execute).
+    // 3. Dispatch (envelope/version/tool/deadline/payload/authz + execute).
     const result = await dispatcher.dispatch(parsedBody, PATH_MAJOR);
     return reply.code(200).send(result);
+  });
+
+  // The invocation-status endpoint (005 §Endpoints; F2b). Authenticated the SAME
+  // way as tools:invoke — HMAC over the canonical string whose PATH includes the
+  // concrete `:requestId` (toSignedRequest strips any query). It reads the
+  // idempotency store only; it NEVER triggers a second execution (005). GET has
+  // no body, so the canonical string hashes empty bytes and there is no
+  // header/body caller match to assert.
+  app.get(STATUS_PATH, async (request: FastifyRequest, reply: FastifyReply) => {
+    const rawBody = Buffer.alloc(0);
+    try {
+      authenticateRequest(toSignedRequest(request, rawBody), deps.config, now());
+    } catch (err) {
+      if (err instanceof BoundaryFailure) {
+        const result = failureResult(
+          { requestId: '', correlationId: '' },
+          err.code,
+          err.message,
+          err.retryable,
+          err.details,
+        );
+        return reply.code(200).send(result);
+      }
+      throw err;
+    }
+
+    const { requestId } = request.params as { requestId: string };
+    const status = await dispatcher.status(requestId);
+    return reply.code(200).send(status);
   });
 
   return app;

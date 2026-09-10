@@ -92,3 +92,34 @@ export type TradertonToolResultV1 = {
         details?: Record<string, unknown>;
       };
 };
+
+/**
+ * `TradertonToolInvocationStatusV1` (005 §Invocation Contract). AUTHORED here
+ * from the 005 prose (F2b) — the status shape the boundary returns when a request
+ * is still running (`in_progress`) or when the status endpoint reports a stored
+ * terminal outcome. Boundary machinery only; no trading behaviour.
+ */
+export type TradertonToolInvocationStatusV1 =
+  | {
+      contractVersion: typeof CONTRACT_VERSION;
+      requestId: string;
+      correlationId: string;
+      state: 'in_progress';
+    }
+  | {
+      contractVersion: typeof CONTRACT_VERSION;
+      requestId: string;
+      correlationId: string;
+      state: 'terminal';
+      result: TradertonToolResultV1;
+    };
+
+/**
+ * The union `POST /internal/v1/tools:invoke` may return (005 §Invocation
+ * Contract): a terminal `TradertonToolResultV1` (fresh terminal / replay) OR the
+ * `in_progress` `TradertonToolInvocationStatusV1` when a key is reused while the
+ * original invocation is still running.
+ */
+export type TradertonInvokeResponseV1 =
+  | TradertonToolResultV1
+  | TradertonToolInvocationStatusV1;

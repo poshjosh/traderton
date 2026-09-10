@@ -5,6 +5,7 @@
 import type {
   TradertonBoundaryFailureCode,
   TradertonToolResultV1,
+  TradertonToolInvocationStatusV1,
 } from './contract.js';
 import { CONTRACT_VERSION } from './contract.js';
 
@@ -44,6 +45,39 @@ export function failureResult(
       retryable,
       ...(details ? { details } : {}),
     },
+  };
+}
+
+/**
+ * The `in_progress` status shape (005 §Invocation Contract): returned when a
+ * request reuses an idempotency key whose original invocation is still running,
+ * or by the status endpoint for an in-flight row. No second side effect.
+ */
+export function inProgressStatus(
+  identity: ResultIdentity,
+): TradertonToolInvocationStatusV1 {
+  return {
+    contractVersion: CONTRACT_VERSION,
+    requestId: identity.requestId,
+    correlationId: identity.correlationId,
+    state: 'in_progress',
+  };
+}
+
+/**
+ * The `terminal` status shape (005 §Invocation Contract): the status endpoint
+ * wraps a stored terminal `TradertonToolResultV1` in this envelope.
+ */
+export function terminalStatus(
+  identity: ResultIdentity,
+  result: TradertonToolResultV1,
+): TradertonToolInvocationStatusV1 {
+  return {
+    contractVersion: CONTRACT_VERSION,
+    requestId: identity.requestId,
+    correlationId: identity.correlationId,
+    state: 'terminal',
+    result,
   };
 }
 

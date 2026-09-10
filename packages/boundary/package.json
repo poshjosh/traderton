@@ -17,9 +17,12 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@traderton/db": "workspace:*",
     "@traderton/domain": "workspace:*",
     "@traderton/worker": "workspace:*",
+    "drizzle-orm": "^0.44.0",
     "fastify": "^5.12.0",
+    "ioredis": "^5.6.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

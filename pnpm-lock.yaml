@@ -30,15 +30,24 @@ importers:
 
   packages/boundary:
     dependencies:
+      '@traderton/db':
+        specifier: workspace:*
+        version: link:../db
       '@traderton/domain':
         specifier: workspace:*
         version: link:../domain
       '@traderton/worker':
         specifier: workspace:*
         version: link:../worker
+      drizzle-orm:
+        specifier: ^0.44.0
+        version: 0.44.7(postgres@3.4.9)
       fastify:
         specifier: ^5.12.0
         version: 5.12.3
+      ioredis:
+        specifier: ^5.6.0
+        version: 5.11.1
       zod:
         specifier: ^3.25.76
         version: 3.25.76
