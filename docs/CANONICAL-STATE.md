@@ -77,6 +77,34 @@ verification & consumption roadmap [024](./024-verification-and-consumption-road
 is L1 (done) → L2 (skipped) → **F (done)** → **L3 (herobids consumes over REST → cutover)**. L3 is the next
 milestone. See §5 for the ownership-rule change L3 forces.
 
+### 3.1 L3 plan (herobids consumes over REST) — decisions locked 2026-09-08
+
+The investigation + proposal are in **herobids** on branch `consume-traderton` (the working spec lives where
+the work is; it points back to this brief + [005](./005-consumer-boundary-contract.md)). The seam: herobids
+deletes its in-tree trading execution (packages `engine`/`venues`/`market-data`/`strategy`/`backtesting` +
+the worker actor/runtime loop + the trading DB) and rewires ~5–6 fusion points (the message-broker
+`handleManageBot`, the decision handler `handleDecisionSubmit`, the worker composition root, the API bot
+route, the `ToolContext` type, the read tools) to signed REST `tools:invoke` calls, keeping the platform
+grant layer / broker / LLM / approvals / `maxBots` and injecting their VALUES into the 005 envelope.
+
+**Locked decisions (D1–D5):**
+- **D1** — work on herobids `consume-traderton`; herobids `main` + all other branches untouchable; merge =
+  cutover, human-approved (invariant 5).
+- **D2 — `venue_accounts` ownership after cutover:** **Traderton owns `venue_accounts` + `user_credentials`**
+  (it makes the venue calls — vision decision 12). herobids injects the `venueAccountId` it resolves from
+  the **connection grant it already owns** (`connections.resolvedVenueAccountId`) — a platform VALUE it
+  holds without storing the account row.
+- **D3 — `submit_decision` async mapping:** the current synchronous 30s Redis-BLPOP reply maps onto 005 as
+  **invoke → poll `GET invocations/:requestId` to the deadline**, preserving all reply statuses;
+  `pending_approval` stays a **herobids** outcome produced by the platform approval gate *before* the
+  boundary call (the boundary only executes an already-approved decision). *Shortcoming of polling +
+  the push/webhook alternative are recorded as backlog B10 ([010](./010-improvement-backlog.md)).*
+- **D4 — sub-phasing:** **L3a** (Traderton REST client + config + signer; no rewire) → **L3b** (rewire the
+  read tools) → **L3c** (rewire the side-effecting path) → **L3d** (delete the trading packages + worker
+  loop + trading DB) → **L3e** (REST-boundary differential + staging soak + the merge gate). Read-path
+  before write-path; delete last (mirrors F1's read-only-first).
+- **D5 — doc placement + repo-of-record transition (see §5.1).**
+
 ## 4. Invariants — the law (do not break)
 
 1. **Copy, never author.** Every line of trading behaviour arrives by being **copied** from herobids,
@@ -125,6 +153,23 @@ invariant 6 now carries a scoped exception, **CONFIRMED IN FORCE (2026-09-08, hu
 **Working posture (per the human, 2026-09-08):** the work continues *in herobids*, on that branch. Do NOT
 edit herobids `main` or any other branch; do NOT treat "herobids is editable" as general — it is the named
 consumption branch only.
+
+### 5.1 Doc placement + the repo-of-record transition (D5, locked 2026-09-08)
+
+- **L3 working docs live in herobids** (the branch): the L3 spec + the per-slice implementer prompts are
+  authored in herobids `consume-traderton`, where the work is. They point back to this brief +
+  [005](./005-consumer-boundary-contract.md) for the invariants/contract.
+- **The canonical + invariant/decision docs STAY in traderton for now** — this `CANONICAL-STATE.md` + the
+  live docs (001/003/004/005/006/007/010/024) remain the source of truth here **until cutover**, to avoid a
+  split-brain mid-migration.
+- **Planned repo-of-record transition (record now; execute AT CUTOVER, not before):** herobids becomes the
+  **working root** — where day-to-day work / the agent root operates from. This is a *working-location*
+  change only: **traderton is NOT absorbed** — it remains a separately-deployed boundary/library service
+  (the legal isolation is preserved; its repo persists as that service's home). At cutover (when
+  `consume-traderton` merges to herobids `main` and trading genuinely lives behind the boundary), migrate
+  `CANONICAL-STATE.md` + the live docs to herobids so authority and working root coincide. Doing the flip
+  *before* cutover would leave authority in a repo that still runs trading in-tree — the least-settled
+  moment; hence it is deferred to cutover.
 
 ## 6. Open decisions (need a human steer before proceeding)
 
