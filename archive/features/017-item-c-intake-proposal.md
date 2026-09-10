@@ -5,7 +5,7 @@ accepted. Decisions locked into [013 §5](./013-9b-authoring-plan.md). This doc 
 **Phase:** 9b item C (decision-intake surface — execution only, NO human approvals).
 **Feeds:** [013-9b-authoring-plan.md](./013-9b-authoring-plan.md) §5 item C.
 **Grounding:** read-only investigation of the herobids intake cluster (2026-09-07). Governed by
-[000](../000-vision.md) (ports-carry-values; M1→M2), [004](../004-decision-log.md) (decisions 7–13;
+[000](../../docs/000-vision.md) (ports-carry-values; M1→M2), [004](../../docs/004-decision-log.md) (decisions 7–13;
 "Traderton does not own human approvals"), [013 §4.5](./013-9b-authoring-plan.md) (item B exclusions
 routed here).
 
@@ -21,7 +21,7 @@ routed here).
 Author the in-process decision-intake surface that lets a submitted trading decision reach the copied
 engine (`submitDecisionForExecution`), plus the `ExecutionActor` registry that item B deferred, plus
 constructing/registering the `AgentTradingActor` (agent-direct execution). **Execution only — NO human
-approvals** (approvals are consumer-owned; `decision_approvals` deleted; see [004](../004-decision-log.md)).
+approvals** (approvals are consumer-owned; `decision_approvals` deleted; see [004](../../docs/004-decision-log.md)).
 
 ## 2. Investigation findings (verified in herobids + Traderton)
 
@@ -167,7 +167,7 @@ toward (b) and a bigger authored surface — worth knowing before I spec it.
 |----------|---------|------|
 | The **drive** that CALLS `submitDecision` (publishToInbound / redis `agent:decision:reply:*`) | item D | C authors the handler; D calls it |
 | `InstanceEventPublisher` emits (decision accepted/rejected/plan/exec events) | item C2 | M1 no-op stub in C |
-| Human approvals (`approval_required` fork, pending-approval, Telegram) | consumer-owned | dropped ([004](../004-decision-log.md)) |
+| Human approvals (`approval_required` fork, pending-approval, Telegram) | consumer-owned | dropped ([004](../../docs/004-decision-log.md)) |
 | `AgentTradingActor` lifecycle driver (who starts/stops it) | item D / M1 consumer | C exposes the construct+register hook |
 | per-`ownerId` maxBots | item E | — |
 

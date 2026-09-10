@@ -422,7 +422,7 @@ preserves the deployment optionality (isolate-behind-REST today; plug-in-process
 2. **M1 (in-process) is BOTH the assembly/verification milestone AND a permanently-supported
    consumption path** — only "not the shape herobids *ships* in today," not forbidden.
 3. **L2 (differential) was SKIPPED** (2026-09-07) — see the L2 skip note in
-   [024](./024-verification-and-consumption-roadmap.md) + [027](./features/027-L2-differential-proposal.md):
+   [024](./024-verification-and-consumption-roadmap.md) + 027-L2-differential-proposal (on branch `l2-differential`, not on this branch):
    the herobids ref only recorded **agent/LLM** decisions (no mechanical-bot corpus), so there
    is no faithful mechanical reference to diff Traderton (mechanical-only) against; the
    decision-layer parity L2 would test is already covered by the byte-verbatim `@traderton/strategy`
@@ -508,7 +508,7 @@ deferred `maxBots` decision) from quietly becoming a backdoor around copy-never-
 
 ## Why Phase 10 (infra) is a shared versioned module, not copy-and-delete
 
-Settled 2026-09-07. Full decision + verified source facts: [docs/features/012-shared-infra-module-decision.md](./features/012-shared-infra-module-decision.md).
+Settled 2026-09-07. Full decision + verified source facts: [docs/features/012-shared-infra-module-decision.md](../archive/features/012-shared-infra-module-decision.md).
 
 Every other phase moves trading code by copy-and-delete because herobids *stops* owning that code — trading
 relocates to Traderton and herobids becomes a consumer. **Infra is the exception: herobids does not stop

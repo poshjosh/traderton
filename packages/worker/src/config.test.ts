@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 // `llm retry, scout, and thinking config`, `agentRuntime config defaults`. Trimmed
 // `BASE_YAML` (dropped the platform `agentRuntime.defaultBudgets` block) and the
 // `overlays NODE_ENV-specific config` overlay (dropped platform `billing.*`, kept the
-// `database.url` assertion it exercises). See docs/features/013-9b-authoring-plan.md.
+// `database.url` assertion it exercises). See archive/features/013-9b-authoring-plan.md.
 
 // Minimal required fields for AppConfigSchema
 const BASE_YAML = `

@@ -6,8 +6,8 @@
 **Feeds:** [013-9b-authoring-plan.md](./013-9b-authoring-plan.md) item B.
 **Grounding:** read-only investigation of the copied Traderton worker modules + herobids
 `apps/worker/src/index.ts` trading-half construction (2026-09-07). Governed by
-[000](../000-vision.md) (ports-carry-values; M1→M2), [004](../004-decision-log.md) (decisions 10–13),
-[005](../005-consumer-boundary-contract.md).
+[000](../../docs/000-vision.md) (ports-carry-values; M1→M2), [004](../../docs/004-decision-log.md) (decisions 10–13),
+[005](../../docs/005-consumer-boundary-contract.md).
 
 > **This is the first high-authoring-risk item.** The proposal is deliberately explicit about
 > what is authored (wiring only), what is constructed from already-copied modules, what is

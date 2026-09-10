@@ -193,7 +193,7 @@ lifecycle behaviour — do not duplicate BullMQ setup.
 
 - Build/lint/tests green; the 7 drive-path tools registered + exported; `WorkerRuntime.enqueueLifecycle`
   exposed on `TradingRuntime`.
-- Update [001](../001-parity-ledger.md): the 7 drive-path tool rows → Met (note maxBots enforcement is
+- Update [001](../../docs/001-parity-ledger.md): the 7 drive-path tool rows → Met (note maxBots enforcement is
   item E; status events are item C2); un-quarantine `_deferred-config/validate-trade-instrument.test.ts`
   (and note `schema.test.ts` pending S-2/S-3). Update [013 §6](./013-9b-authoring-plan.md) item D → DONE
   with the authored-vs-copied-vs-dropped manifest of what you actually wrote, and record any Outstanding

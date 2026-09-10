@@ -183,7 +183,7 @@ behaviour must be recorded/wired, never silent" (AGENTS.md):
 - Build/lint/tests green; `@traderton/worker` consumable through its barrel (its `index.ts` is no longer
   `export {};`); the "Trading loop — assembled runtime / composition `Deferred (required for cutover)`"
   ledger row can move to Met-for-the-bot-lifecycle (note agent-direct still pending item C).
-- Update: [001](../001-parity-ledger.md) (composition-root progress), [013](./013-9b-authoring-plan.md)
+- Update: [001](../../docs/001-parity-ledger.md) (composition-root progress), [013](./013-9b-authoring-plan.md)
   item B → DONE with the authored-vs-copied manifest of what you actually wrote, and note any seam you
   surfaced (e.g. live-gate). Commit as its own logical commit ("9b item B: trading composition root").
 - **Then PAUSE** — item C (intake) is the next item and is gated on human review of B.

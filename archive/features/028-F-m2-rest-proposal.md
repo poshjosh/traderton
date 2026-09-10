@@ -16,13 +16,13 @@ record; the F1 implementer prompt is [029](./029-F1-implementer-prompt.md).
 >   + side-effecting tools + the 7 required-verification tests. F1 lands + is reviewed before F2.
 > - **§5.5 = the 7 required-verification tests** (005 §"Required Verification") are the F acceptance gate.
 **Item:** Phase 9b **item F** (the last 9b item) — the M2 REST boundary per
-[005-consumer-boundary-contract.md](../005-consumer-boundary-contract.md). Also **level F** of the
-verification/consumption roadmap ([024](../024-verification-and-consumption-roadmap.md)) — the **mandatory
-shipped boundary** (trading is a REST-isolated deployable; [000](../000-vision.md)/[004](../004-decision-log.md)).
-**Feeds:** 013 §8; the "Consumer boundary contract validated" cutover gate in [001](../001-parity-ledger.md); L3.
+[005-consumer-boundary-contract.md](../../docs/005-consumer-boundary-contract.md). Also **level F** of the
+verification/consumption roadmap ([024](../../docs/024-verification-and-consumption-roadmap.md)) — the **mandatory
+shipped boundary** (trading is a REST-isolated deployable; [000](../../docs/000-vision.md)/[004](../../docs/004-decision-log.md)).
+**Feeds:** 013 §8; the "Consumer boundary contract validated" cutover gate in [001](../../docs/001-parity-ledger.md); L3.
 **Grounding:** read-only investigation of 005, the quarantined `_deferred-authoring/api-routes/**`, the
 `ToolRegistry` dispatch surface, and herobids' auth (2026-09-07). Governed by
-[AGENTS.md](../../AGENTS.md), [000](../000-vision.md), [005](../005-consumer-boundary-contract.md), [013 §8](./013-9b-authoring-plan.md).
+[AGENTS.md](../../AGENTS.md), [000](../../docs/000-vision.md), [005](../../docs/005-consumer-boundary-contract.md), [013 §8](./013-9b-authoring-plan.md).
 
 > **F wraps the M1 in-process ports in the 005 REST contract.** It is the shipped consumption boundary
 > (per the legal posture) and an **adapter over the same ports** — it must inject values, not trading
@@ -170,7 +170,7 @@ larger/different scope than 005 describes.
   `TradingToolContext`, `createTradingRuntime` + the item-C/D drive path (what side-effecting tools call).
 - **NOT reproduced (Gap, signed off):** herobids's JWT per-resource control-plane routes
   (`_deferred-authoring/api-routes/**`) — capability rides the tool surface; platform-table routes stay
-  herobids. Logged as Intentional Divergence in [001](../001-parity-ledger.md)/[003](../003-anomalies-and-deviations.md).
+  herobids. Logged as Intentional Divergence in [001](../../docs/001-parity-ledger.md)/[003](../../docs/003-anomalies-and-deviations.md).
 - **Ports/invariant check:** F injects values (signed `ownerId`/`actor`, deadline, idempotency key) and
   dispatches to copied tools; it authors no risk/planner/executor logic; HTTP/HMAC concerns stay in the
   adapter, never leak into the core. ✓

@@ -17,7 +17,7 @@ and finalized below. Supersedes the seed.
 - **All domain symbols the engine imports survive in Traderton's domain slice EXCEPT one:**
   `WakeGateConfig`. Verified every imported symbol against `@traderton/domain` — the only
   missing export is `WakeGateConfig` (dropped in Phase 1 as platform preset-review config,
-  see [003](../003-anomalies-and-deviations.md) config-monolith deletion list). The
+  see [003](../../docs/003-anomalies-and-deviations.md) config-monolith deletion list). The
   types the wake-gate also uses (`MarketAssessmentArtifact`, `MarketAssessmentPresetRanking`)
   DID survive.
 
@@ -64,7 +64,7 @@ renamed to `@traderton/domain`).
 
 ## Highest-stakes surface — RISK GATE
 `packages/engine/src/risk-gate.ts` `checkRisk()` is the highest-stakes parity surface
-([001](../001-parity-ledger.md) risk-gate table). Its exact rules + error codes must reproduce
+([001](../../docs/001-parity-ledger.md) risk-gate table). Its exact rules + error codes must reproduce
 verbatim; risk-reducing plans (`close`/`reduce`) bypass entry-side checks. **The copied risk-gate
 parity tests (`risk-gate.parity.test.ts` + `risk-gate.test.ts`) are the acceptance gate — they
 must pass unmodified.** Any divergence here is consequential (stop-gate). Do not touch risk logic
@@ -99,7 +99,7 @@ Build + copied tests green after every step. Small diffable commits.
 - All copied engine tests green — **risk-gate parity tests especially** — unmodified except the
   `@herobids/*` → `@traderton/*` rename.
 - Forbidden-import sweep: no `@herobids/*`, no llm, no platform, no db/venues/market-data imports.
-- Ledger ([001](../001-parity-ledger.md)) updated: risk-gate exact-rules table → Met with the
+- Ledger ([001](../../docs/001-parity-ledger.md)) updated: risk-gate exact-rules table → Met with the
   parity-test evidence; engine-subsystems rows → Met (except the platform "Wake gate" row →
   Intentional divergence); a new Intentional Divergence row for the platform preset-review wake.
 - Phase 3 marked Done in [009](../009-extraction-roadmap.md) with commit range + green evidence.

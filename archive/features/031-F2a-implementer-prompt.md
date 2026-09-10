@@ -5,7 +5,7 @@
 `boundary_invocations` table + migration + `BoundaryInvocationRepository` + a `DATABASE_URL`-gated
 integration test. **No boundary/dispatcher wiring in F2a** — that is F2b.
 **Authoritative brief:** [013 §8.1.1](./013-9b-authoring-plan.md) (F2 LOCKED decisions) + [030 §2, §5,
-§6](./030-F2-m2-rest-proposal.md) + [005 §Deadlines, Retries, And Idempotency](../005-consumer-boundary-contract.md).
+§6](./030-F2-m2-rest-proposal.md) + [005 §Deadlines, Retries, And Idempotency](../../docs/005-consumer-boundary-contract.md).
 
 ---
 
@@ -175,5 +175,5 @@ object keys → same hash; changed payload → different hash.
 - Traderton patterns to mirror: `packages/db/src/repositories.ts` (`BotRepository` advisory-lock methods),
   `packages/db/src/schema/bots.ts` (schema style), `packages/db/src/bot-limit.integration.test.ts` +
   `packages/db/src/test-helpers/integration-db.ts` (gated integration test).
-- Contract: [005 §Deadlines, Retries, And Idempotency](../005-consumer-boundary-contract.md) — the exact
+- Contract: [005 §Deadlines, Retries, And Idempotency](../../docs/005-consumer-boundary-contract.md) — the exact
   semantics. Decisions: [013 §8.1.1](./013-9b-authoring-plan.md), [030](./030-F2-m2-rest-proposal.md).

@@ -5,7 +5,7 @@
 dev HMAC signing helper, a trading-only `config/default.yaml`, and the **7 required-verification tests**
 (005 §"Required Verification") wired against the real stack. This is the F acceptance gate (013 §8.1.1 D5,
 030 §6). **F is complete after F2c.**
-**Authoritative brief:** [005 §Required Verification + §Deployment And Health](../005-consumer-boundary-contract.md)
+**Authoritative brief:** [005 §Required Verification + §Deployment And Health](../../docs/005-consumer-boundary-contract.md)
 + [013 §8.1.1](./013-9b-authoring-plan.md) (D5) + [030 §6](./030-F2-m2-rest-proposal.md).
 **Depends on:** F1 (shell), F2a (`@traderton/db` store, live-PG proven), F2b (dispatcher integration) — all
 DONE on this branch.
@@ -49,7 +49,7 @@ trading-only** schema (Phase 1 deleted the platform keys — billing/auth/llm/al
 
 - **Copy** `herobids/config/default.yaml` and **trim it to the keys Traderton's `AppConfigSchema` accepts**
   (the same fused-file line-trim Phase 1 applied to the schema + the config loader — see the config rows in
-  [003](../003-anomalies-and-deviations.md)). Delete the platform blocks; keep the trading blocks
+  [003](../../docs/003-anomalies-and-deviations.md)). Delete the platform blocks; keep the trading blocks
   (`database`, `redis`, `reconciliation`, `streams`, `venues`, `marking`, `backtesting`, `liveRollout`,
   `marketData`, `agentRiskDefaults`, `execution`, `simulation`, `marketDataRecording`, etc. — whatever
   `AppConfigSchema.parse` requires). The proof it is correctly trimmed: `loadConfig()` parses it without a
@@ -62,7 +62,7 @@ trading-only** schema (Phase 1 deleted the platform keys — billing/auth/llm/al
   them), so `default.yaml` can carry safe local defaults the compose overrides.
 
 If trimming surfaces a key `AppConfigSchema` requires but that is hard to source, log it in
-[003](../003-anomalies-and-deviations.md) and flag it — do not guess a trading value.
+[003](../../docs/003-anomalies-and-deviations.md) and flag it — do not guess a trading value.
 
 ## 4. The compose stack (D5 — author fresh, minimal)
 
@@ -178,5 +178,5 @@ comment in the compose file).
   `packages/boundary/src/{auth,app,dispatcher,bin}.ts` (the canonical string + the endpoints + how bin wires
   the real runtime), `packages/db/src/bot-limit.integration.test.ts` + `boundary-invocations.integration.test.ts`
   (the gated-integration pattern), `../herobids/config/default.yaml` (COPY source),
-  [005](../005-consumer-boundary-contract.md) (the 7 items + health semantics), [013 §8.1.1](./013-9b-authoring-plan.md),
+  [005](../../docs/005-consumer-boundary-contract.md) (the 7 items + health semantics), [013 §8.1.1](./013-9b-authoring-plan.md),
   [030](./030-F2-m2-rest-proposal.md).

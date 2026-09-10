@@ -11,7 +11,7 @@ import { BotConfigSchema, MechanicalStrategySchema } from './schema.js';
 // `BotConfigSchema.strategy` validates against. These assertions make the guarantee
 // explicit and regression-proof rather than an emergent property of downstream
 // registry rejection. See docs/004-decision-log.md ("Where mechanical-only is …
-// enforced") + docs/features/013-9b-authoring-plan.md item A′.
+// enforced") + archive/features/013-9b-authoring-plan.md item A′.
 
 describe('mechanical-only bot boundary (S-1)', () => {
   const validBase = {

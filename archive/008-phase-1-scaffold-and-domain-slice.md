@@ -1,5 +1,8 @@
 # Phase 1 — Scaffold And Domain Slice
 
+> **ARCHIVED / HISTORICAL — do NOT re-execute.** For what is true now, see
+> [docs/CANONICAL-STATE.md](../docs/CANONICAL-STATE.md). See also [archive/README.md](./README.md).
+
 **Status:** DONE (2026-09-06) — historical record.
 **Created:** 2026-09-05
 
@@ -7,17 +10,17 @@
 > under strict TS, lint clean, 230 copied tests green. Do **not** re-execute this doc.
 > Current/remaining work is governed by
 > [009-extraction-roadmap.md](./009-extraction-roadmap.md); the live status is in
-> [001-parity-ledger.md](./001-parity-ledger.md). The "Execution Gate" and task list
+> [001-parity-ledger.md](../docs/001-parity-ledger.md). The "Execution Gate" and task list
 > below are the original Phase 1 instructions, kept for the historical record.
 
-**Depends on:** [000-vision.md](./000-vision.md),
-[001-parity-ledger.md](./001-parity-ledger.md),
+**Depends on:** [000-vision.md](../docs/000-vision.md),
+[001-parity-ledger.md](../docs/001-parity-ledger.md),
 [002-phase-0-subtraction-plan.md](./002-phase-0-subtraction-plan.md),
-[003-anomalies-and-deviations.md](./003-anomalies-and-deviations.md),
-[004-decision-log.md](./004-decision-log.md),
-[005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md),
-[006-source-capability-manifest.md](./006-source-capability-manifest.md), and
-[007-operational-readiness.md](./007-operational-readiness.md)
+[003-anomalies-and-deviations.md](../docs/003-anomalies-and-deviations.md),
+[004-decision-log.md](../docs/004-decision-log.md),
+[005-consumer-boundary-contract.md](../docs/005-consumer-boundary-contract.md),
+[006-source-capability-manifest.md](../docs/006-source-capability-manifest.md), and
+[007-operational-readiness.md](../docs/007-operational-readiness.md)
 
 ## Purpose
 
@@ -46,7 +49,7 @@ This phase includes:
 3. copied tests for the domain slice as the parity harness for this phase
 4. namespace renames from `@herobids/*` to `@traderton/*` for touched files
 5. live parity-status updates in
-   [001-parity-ledger.md](./001-parity-ledger.md) for the copied slice
+   [001-parity-ledger.md](../docs/001-parity-ledger.md) for the copied slice
 
 This phase does not include:
 
@@ -60,8 +63,8 @@ This phase does not include:
 
 ## Start Here
 
-Read [000-vision.md](./000-vision.md) through
-[007-operational-readiness.md](./007-operational-readiness.md), then execute
+Read [000-vision.md](../docs/000-vision.md) through
+[007-operational-readiness.md](../docs/007-operational-readiness.md), then execute
 the tasks below in order. Do not jump to engine, venues, or DB extraction until
 this phase is green.
 
@@ -73,11 +76,11 @@ this phase is green.
 3. Bring copied tests across before trusting the slice.
 4. If a domain file pulls in `llm`, agent runtime, documents, billing, or
    another platform-owned dependency, either cut the narrowest seam or log an
-   entry in [003-anomalies-and-deviations.md](./003-anomalies-and-deviations.md).
+   entry in [003-anomalies-and-deviations.md](../docs/003-anomalies-and-deviations.md).
 5. After each task, run the narrowest validation before widening scope.
-6. Update [001-parity-ledger.md](./001-parity-ledger.md) as the live acceptance
+6. Update [001-parity-ledger.md](../docs/001-parity-ledger.md) as the live acceptance
    tracker. Do not mutate
-   [006-source-capability-manifest.md](./006-source-capability-manifest.md)
+   [006-source-capability-manifest.md](../docs/006-source-capability-manifest.md)
    unless the source inventory itself was wrong.
 
 ## Task List
@@ -98,7 +101,7 @@ Work:
    without version drift
 2. create the minimal package manifest and config surface for `@traderton/domain`
 3. keep Node, pnpm, ESM, and strict TypeScript settings aligned with
-   [000-vision.md](./000-vision.md)
+   [000-vision.md](../docs/000-vision.md)
 
 Validation:
 
@@ -146,7 +149,7 @@ Work:
    not the full platform policy file
 3. exclude LLM-owned and platform-owned slices
 4. preserve copied names and types unless
-   [000-vision.md](./000-vision.md) explicitly authorizes the rename
+   [000-vision.md](../docs/000-vision.md) explicitly authorizes the rename
 
 Validation:
 
@@ -208,14 +211,14 @@ Validation:
 
 Touchpoints:
 
-1. [001-parity-ledger.md](./001-parity-ledger.md)
-2. [003-anomalies-and-deviations.md](./003-anomalies-and-deviations.md) when
+1. [001-parity-ledger.md](../docs/001-parity-ledger.md)
+2. [003-anomalies-and-deviations.md](../docs/003-anomalies-and-deviations.md) when
    needed
 
 Work:
 
 1. update the domain-slice statuses in
-   [001-parity-ledger.md](./001-parity-ledger.md)
+   [001-parity-ledger.md](../docs/001-parity-ledger.md)
 2. record any remaining blockers or forced deviations in 003
 3. note what the next phase may assume is green
 
@@ -235,7 +238,7 @@ Stop and escalate instead of widening scope when:
 3. the slice forces `@herobids/llm` or another platform-owned dependency into
    Traderton with no clear deletion or seam path
 4. the source inventory in
-   [006-source-capability-manifest.md](./006-source-capability-manifest.md)
+   [006-source-capability-manifest.md](../docs/006-source-capability-manifest.md)
    appears wrong or incomplete
 
 ## Completion Check
@@ -246,10 +249,10 @@ This phase is complete only when:
 2. `@traderton/domain` compiles under strict TypeScript
 3. all in-scope copied `packages/domain` parity tests pass; any skipped or
    deleted tests are explicitly tied to an accepted `Deferred` or `Gap` entry
-   in [001-parity-ledger.md](./001-parity-ledger.md)
+   in [001-parity-ledger.md](../docs/001-parity-ledger.md)
 4. no platform-only imports remain in the copied domain slice unless explicitly
    logged as a deviation
 5. the relevant statuses in
-   [001-parity-ledger.md](./001-parity-ledger.md) are updated to match reality
+   [001-parity-ledger.md](../docs/001-parity-ledger.md) are updated to match reality
 6. the next extraction phase can start from a green domain base rather than
    from planning docs alone

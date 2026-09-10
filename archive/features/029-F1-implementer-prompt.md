@@ -6,7 +6,7 @@ envelope/version validation + the `tools:invoke` dispatcher over `ToolRegistry` 
 scoped to **read-only tools**. Idempotency, deadline enforcement, and side-effecting tools are **F2** (a
 later prompt) — do not build them here.
 **Authoritative brief:** [013 §8](./013-9b-authoring-plan.md) (LOCKED decisions + manifest),
-[028](./028-F-m2-rest-proposal.md) (design record), and [005](../005-consumer-boundary-contract.md) (the
+[028](./028-F-m2-rest-proposal.md) (design record), and [005](../../docs/005-consumer-boundary-contract.md) (the
 contract). Read all three. This prompt is the actionable checklist; **013 §8 wins on any conflict.**
 
 ---
@@ -14,7 +14,7 @@ contract). Read all three. This prompt is the actionable checklist; **013 §8 wi
 ## 0. Orient first
 
 You are in **Traderton** (`/Users/chinomso.ikwuagwu/dev_ai/traderton`), on branch `f-m2-rest`. Read
-[AGENTS.md](../../AGENTS.md), [000](../000-vision.md) (esp. the "in-process vs REST" hard-constraint block —
+[AGENTS.md](../../AGENTS.md), [000](../../docs/000-vision.md) (esp. the "in-process vs REST" hard-constraint block —
 F is the shipped REST boundary, an **adapter over the same M1 ports**, and must NOT leak HTTP/HMAC concerns
 into the core), [013 §8](./013-9b-authoring-plan.md), [028](./028-F-m2-rest-proposal.md), and **005 in
 full** (it is the exact contract). Assume no chat context.
@@ -137,7 +137,7 @@ stub the boundary's own auth/validation/dispatch — those are what's under test
   prompt, gated on human review of F1.
 
 ## 8. Key file map
-- [005](../005-consumer-boundary-contract.md) — the exact contract (endpoints, envelope, canonical string,
+- [005](../../docs/005-consumer-boundary-contract.md) — the exact contract (endpoints, envelope, canonical string,
   headers, failure-code union, health). **Trace it precisely.**
 - `packages/worker/src/tools/registry.ts` — `ToolRegistry` (`get`/`has`/`list`/`getReadOnlyToolNames`/
   `getDefinitions`) — the dispatch target.

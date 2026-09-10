@@ -2,7 +2,7 @@
 
 **Status:** living (the current where-are-we tracker for post-M1 work).
 **Created:** 2026-09-07.
-**Peer of:** [009-extraction-roadmap.md](./009-extraction-roadmap.md). 009 governs **extraction** (getting
+**Peer of:** [009-extraction-roadmap.md](../archive/009-extraction-roadmap.md). 009 governs **extraction** (getting
 trading code out of herobids into `@traderton/*`, phases 1–10 — now essentially done through M1). **This
 doc governs proving the extracted library is actually consumable, culminating in herobids consuming it.**
 **Governed by:** [AGENTS.md](../AGENTS.md), [000-vision.md](./000-vision.md) (copy-never-author;
@@ -11,7 +11,7 @@ doc governs proving the extracted library is actually consumable, culminating in
 
 ## Why this document exists
 
-M1 is code-complete (items A–E; see [013 §7.5](./features/013-9b-authoring-plan.md) + the 001 ledger).
+M1 is code-complete (items A–E; see [013 §7.5](../archive/features/013-9b-authoring-plan.md) + the 001 ledger).
 But "code-complete + unit tests green" is **not** "consumable." Every test to date stubs the boundary it
 exercises; **nothing has ever imported `@traderton/worker` and driven a real trade cycle against real
 infrastructure.** The project's own law warns about exactly this — "the bar is feature parity with the
@@ -57,8 +57,8 @@ Legend: `Done` / `Active` / `Queued` / `Blocked (needs decision)`.
 | Level | Proves | Owner | Depends on | Status |
 |-------|--------|-------|-----------|--------|
 | **L1 — in-repo integration harness** | `@traderton/worker` runs end-to-end vs real Postgres+Redis with **zero `@traderton/*` internals stubbed**: `createTradingRuntime` → create/start a paper bot → `submit_decision` → real plan/fill/position + the decision reply + a maxBots rejection at k+1. Falsifies "consumable end-to-end." | traderton (us) | M1 (done) | **Done** on branch `l1-integration-harness` (all 4 scenarios green; found + fixed a real consumability gap — the `venueAccountId` fix, cherry-picked to `main` as `f7a0dd1`). The harness itself is **scaffolding held on its branch — NOT on `main`** (per the merge gate); it merges only at the milestone. |
-| **L2 — differential guarantee vs the pinned herobids ref** | Same trading inputs → identical trading outputs across the pinned herobids reference and `@traderton/*` (the **bare library**, pre-REST). The "does not deviate" guarantee; side-by-side via a git worktree. | traderton (us) build the harness; the reference is a read-only pin | L1 green | **SKIPPED (2026-09-07)** — no faithful mechanical reference exists to diff against (see the L2 skip note below + [027](./features/027-L2-differential-proposal.md)). Proposal preserved on branch `l2-differential`. |
-| **F — M2 REST boundary** | The authored 005 boundary (Fastify/HMAC/idempotency/deadline + copy-adapted routes). Already scoped as **[013 item F](./features/013-9b-authoring-plan.md)**. **MANDATORY** — the only shape a consumer legally uses (trading is a REST-only separate deployable; see [000](./000-vision.md)/[004](./004-decision-log.md)). | traderton (us) | M1 done; **after L2** (or after skipping L2) | Queued (last 9b item; the cutover boundary) |
+| **L2 — differential guarantee vs the pinned herobids ref** | Same trading inputs → identical trading outputs across the pinned herobids reference and `@traderton/*` (the **bare library**, pre-REST). The "does not deviate" guarantee; side-by-side via a git worktree. | traderton (us) build the harness; the reference is a read-only pin | L1 green | **SKIPPED (2026-09-07)** — no faithful mechanical reference exists to diff against (see the L2 skip note below + `027-L2-differential-proposal` on branch `l2-differential`). Proposal preserved on branch `l2-differential`. |
+| **F — M2 REST boundary** | The authored 005 boundary (Fastify/HMAC/idempotency/deadline + copy-adapted routes). Already scoped as **[013 item F](../archive/features/013-9b-authoring-plan.md)**. **MANDATORY** — the only shape a consumer legally uses (trading is a REST-only separate deployable; see [000](./000-vision.md)/[004](./004-decision-log.md)). | traderton (us) | M1 done; **after L2** (or after skipping L2) | Queued (last 9b item; the cutover boundary) |
 | **L3 — herobids `consume-traderton` branch** | herobids deletes its trading code, consumes `@traderton/*` **over F's REST boundary** (NOT in-process — legal constraint), passes the L2 differential + herobids' own suite; merges to main = **cutover**. | herobids owner executes; traderton (us) supply the migration spec + the passing library + the harness | **F done + L2 green** | Blocked (needs decision) — herobids-owner-executed |
 
 ## Per-level scope (detail is drafted at each level's start)
@@ -104,7 +104,7 @@ from asserted to demonstrated, and found the one gap that would have broken a re
   not deviate from herobids-today.
 
 ### F — M2 REST boundary
-- Owned by **[013 item F](./features/013-9b-authoring-plan.md)** (the authored Fastify/HMAC adapter over the
+- Owned by **[013 item F](../archive/features/013-9b-authoring-plan.md)** (the authored Fastify/HMAC adapter over the
   M1 ports, per [005](./005-consumer-boundary-contract.md); copy-adapt the quarantined `_deferred-authoring/
   api-routes/**`). Runs its own investigate→propose→coordinator-loop. This roadmap only tracks its place in
   the sequence; 013 §8 is the authority.
@@ -144,10 +144,10 @@ Why the order is fixed this way:
   (it edits herobids, which we never do — see §Ownership boundary).
 
 L1 is done ([above](#the-four-levels)). **L2 was SKIPPED (2026-09-07)** — see the skip note below.
-**Next is F** (the M2 REST boundary, [013 §8](./features/013-9b-authoring-plan.md)).
+**Next is F** (the M2 REST boundary, [013 §8](../archive/features/013-9b-authoring-plan.md)).
 
 ### L2 skip note (2026-09-07)
-L2 was investigated ([027](./features/027-L2-differential-proposal.md), branch `l2-differential`) and
+L2 was investigated (`027-L2-differential-proposal`, on branch `l2-differential`) and
 **skipped**, deliberately (not dropped silently). Why: a differential needs a *faithful reference* —
 herobids' recorded outputs for the same inputs. A read-only check of the pinned herobids ref found recorded
 decision corpora exist **only for `agent`/LLM decisions** (`.ignore/eval/**/db/decisions.json`,

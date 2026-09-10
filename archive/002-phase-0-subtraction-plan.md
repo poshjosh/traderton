@@ -1,8 +1,12 @@
 # Phase 0 — Subtraction Plan
 
+> **ARCHIVED / HISTORICAL — do NOT re-execute.** This is a record of how we got here, not current
+> truth. For what is true now, see [docs/CANONICAL-STATE.md](../docs/CANONICAL-STATE.md). See also
+> [archive/README.md](./README.md).
+
 **Status:** draft for review
 **Created:** 2026-09-01
-**Method:** copy-and-delete (see [000-vision.md](./000-vision.md))
+**Method:** copy-and-delete (see [000-vision.md](../docs/000-vision.md))
 
 This plan classifies the `herobids` monorepo into **copy / stay / cut-seam /
 defer**, fixes the leaf-first delete order, and names the seams to stub. It is
@@ -109,7 +113,7 @@ move to Traderton (credential custody follows the venue caller).
 
 **After every step: build compiles + copied tests green.**
 
-## Open questions — RESOLVED (see [000-vision.md](./000-vision.md) decisions 7–15)
+## Open questions — RESOLVED (see [000-vision.md](../docs/000-vision.md) decisions 7–15)
 
 1. `connections` — **stays platform.** Not copied. `bots.connectionId` →
    `venueAccountId`; `bots.userId` → soft `ownerId`. Seam sits between
@@ -145,13 +149,13 @@ freeze the extraction story before any copying starts.
 
 | Gate | Status | Evidence / notes |
 |------|--------|------------------|
-| Vision and decisions accepted | Met | [000-vision.md](./000-vision.md) and [004-decision-log.md](./004-decision-log.md) are accepted as the governing direction for extraction. |
+| Vision and decisions accepted | Met | [000-vision.md](../docs/000-vision.md) and [004-decision-log.md](../docs/004-decision-log.md) are accepted as the governing direction for extraction. |
 | Copy / stay / cut-seam / defer classification accepted | Met | The classifications in this doc are approved without unresolved ownership ambiguity. |
 | Data seam accepted | Met | The `ownerId`, `venue_accounts`, `user_credentials`, and `bots` seam is accepted, including `connections` staying platform-side. |
 | LLM and bot-model split accepted | Met | The mechanical-only bot decision and the `llm` stay-platform decision are accepted. |
-| Static parity inventory accepted | Met | [006-source-capability-manifest.md](./006-source-capability-manifest.md) is accepted as the inventory authority for extracted scope. |
-| Live parity tracker initialized | Met | [001-parity-ledger.md](./001-parity-ledger.md) exists, matches the inventory model from [006-source-capability-manifest.md](./006-source-capability-manifest.md), and is ready to receive live status updates as copied slices land in Phase 1. |
-| Downstream reference docs frozen | Met | [005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md) and [007-operational-readiness.md](./007-operational-readiness.md) are accepted as stable planning inputs for later phases, even though they are not implemented in Phase 1. |
+| Static parity inventory accepted | Met | [006-source-capability-manifest.md](../docs/006-source-capability-manifest.md) is accepted as the inventory authority for extracted scope. |
+| Live parity tracker initialized | Met | [001-parity-ledger.md](../docs/001-parity-ledger.md) exists, matches the inventory model from [006-source-capability-manifest.md](../docs/006-source-capability-manifest.md), and is ready to receive live status updates as copied slices land in Phase 1. |
+| Downstream reference docs frozen | Met | [005-consumer-boundary-contract.md](../docs/005-consumer-boundary-contract.md) and [007-operational-readiness.md](../docs/007-operational-readiness.md) are accepted as stable planning inputs for later phases, even though they are not implemented in Phase 1. |
 | Phase 1 scope accepted | Met | [008-phase-1-scaffold-and-domain-slice.md](./008-phase-1-scaffold-and-domain-slice.md) is accepted as the next executable slice and no broader phase is being entered. |
 | Open planning contradictions resolved | Met | No unresolved contradiction remains across 000-008 that would change execution order, ownership, or acceptance criteria. |
 
@@ -185,10 +189,10 @@ record is filled in by the named phase approver.
 After Phase 0 sign-off, Phase 1 began by executing
 [008-phase-1-scaffold-and-domain-slice.md](./008-phase-1-scaffold-and-domain-slice.md).
 That phase owned the live updates to
-[001-parity-ledger.md](./001-parity-ledger.md) as copied slices landed against the
+[001-parity-ledger.md](../docs/001-parity-ledger.md) as copied slices landed against the
 static inventory in
-[006-source-capability-manifest.md](./006-source-capability-manifest.md).
+[006-source-capability-manifest.md](../docs/006-source-capability-manifest.md).
 Companion docs are
-[005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md),
-[006-source-capability-manifest.md](./006-source-capability-manifest.md), and
-[007-operational-readiness.md](./007-operational-readiness.md).
+[005-consumer-boundary-contract.md](../docs/005-consumer-boundary-contract.md),
+[006-source-capability-manifest.md](../docs/006-source-capability-manifest.md), and
+[007-operational-readiness.md](../docs/007-operational-readiness.md).

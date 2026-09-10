@@ -1,5 +1,11 @@
 # 013 — Phase 9b Authoring Plan (DRAFT — review checkpoint)
 
+> **ARCHIVED / HISTORICAL — 9b (items A–E + F1–F2c) is DONE; do NOT re-execute.** This is the
+> authoring plan + the F1–F2c **landing logs** (§7.5, §8.5–§8.8) — a record of how we got here. For
+> what is true now, see [docs/CANONICAL-STATE.md](../../docs/CANONICAL-STATE.md); for live status,
+> [docs/001-parity-ledger.md](../../docs/001-parity-ledger.md). See also
+> [archive/README.md](../README.md).
+
 **Phase:** 9b of the roadmap ([009](../009-extraction-roadmap.md)) — the "authoring" pass, **re-scoped to
 minimum-authoring** (2026-09-07).
 **Shape:** MOSTLY copy-and-delete (including fused-file line-trims, the Phase-1 technique) + a small,
@@ -14,15 +20,15 @@ most of 9b is copy-and-delete; the genuinely-authored surface is far smaller tha
 phases require a reviewed written plan before code moves), **no code moves until this plan is reviewed.**
 **Depends on:** 9a done + the M1 holistic review ([011](./011-m1-holistic-review-report.md), verdict: proceed).
 **Grounding:** the investigation in the M1 review + a dedicated read-only source pass (2026-09-07);
-findings summarized inline. Governed by [AGENTS.md](../../AGENTS.md), [000](../000-vision.md),
-[004](../004-decision-log.md), [005](../005-consumer-boundary-contract.md).
+findings summarized inline. Governed by [AGENTS.md](../../AGENTS.md), [000](../../docs/000-vision.md),
+[004](../../docs/004-decision-log.md), [005](../../docs/005-consumer-boundary-contract.md).
 
 ---
 
 ## 0. Decisions already made (inputs to this plan)
 
 - **Go-ahead for 9b** given 2026-09-07.
-- **S-1 mechanical-only boundary → option (a) narrow-and-diverge** (see [004](../004-decision-log.md),
+- **S-1 mechanical-only boundary → option (a) narrow-and-diverge** (see [004](../../docs/004-decision-log.md),
   [011 §6 item 9](./011-m1-holistic-review-report.md)). 9b tightens the Traderton-owned config boundary
   to `decisionMode: ['mechanical']` and adds a live mechanical-only assertion.
 - **M1 in-process before M2 REST** (000/005). The authoring order below reflects this: A–E land M1;
@@ -30,8 +36,8 @@ findings summarized inline. Governed by [AGENTS.md](../../AGENTS.md), [000](../0
 - **Traderton does not own human approvals** (2026-09-07, human-confirmed). The consumer owns the
   approval lifecycle (ask/hold/TTL/expiry/per-user); Traderton owns only `submit_decision` execution.
   The orphan `decision_approvals` table + repo were deleted (pre-9b cleanup). This shrinks item C
-  (no approval branch) and removes any approval config from item A. See [004](../004-decision-log.md)
-  + the `decision_approvals` Intentional Divergence row in [001](../001-parity-ledger.md).
+  (no approval branch) and removes any approval config from item A. See [004](../../docs/004-decision-log.md)
+  + the `decision_approvals` Intentional Divergence row in [001](../../docs/001-parity-ledger.md).
 - **Minimum-authoring re-scope** (2026-09-07, human-directed). Prefer copy-and-delete (incl. fused-file
   line-trims) wherever a faithful source exists; author only the irreducible residue; defer every
   *improvement* beyond herobids-parity out of 9b. Full classification in §1a.
@@ -84,7 +90,7 @@ findings summarized inline. Governed by [AGENTS.md](../../AGENTS.md), [000](../0
    copied/adapted, so the copy-never-author boundary stays auditable.
 4. **Every authored divergence is logged.** Consequential divergences (per-owner maxBots reshape, the
    config-enum narrowing, `userId`→`ownerId` edits to copied route handlers) → Intentional Divergence
-   rows in [001](../001-parity-ledger.md) + reasoning in [004](../004-decision-log.md). Stop-gate if a
+   rows in [001](../../docs/001-parity-ledger.md) + reasoning in [004](../../docs/004-decision-log.md). Stop-gate if a
    seam would need authored non-trivial *trading* logic beyond wiring (per 009 stop-gates).
 5. **Green after every step.** Build + lint + copied/authored tests green after each un-quarantine.
 6. **Minimum authoring.** Do not author anything a copy-and-delete (incl. fused-file line-trim) can
@@ -181,7 +187,7 @@ un-quarantines `_deferred-config/{config,config.test,agent-risk-limits,agent-ris
 agent-risk-limits.parity.test,public-stream-routing,public-stream-routing.test}`.
 
 **RESOLVED (2026-09-07):** the `agentApprovals` config block (`ttlMs`, `resolveRateLimitPerMinute`) is
-**NOT carried** — the human-approval lifecycle is consumer-owned (see item C + [004](../004-decision-log.md)
+**NOT carried** — the human-approval lifecycle is consumer-owned (see item C + [004](../../docs/004-decision-log.md)
 "Why Traderton does not own human approvals"). Item A authors no approval config.
 
 ### 3a. Item A′ — S-1 mechanical-only narrowing (rides on A)
@@ -195,7 +201,7 @@ copied `StrategySchema` in a way that breaks 1:1 diffability**:
   Simpler surface, but edits a verbatim copy (Intentional Divergence on that file).
 Recommend **(a-i)** (wrapper) to keep the copied schema verbatim. Add a **live mechanical-only assertion**
 (a unit test + a runtime guard at bot config validation) so the guarantee is explicit, not inherited.
-Log the divergence in [001](../001-parity-ledger.md) (mechanical-only row) — already pre-recorded.
+Log the divergence in [001](../../docs/001-parity-ledger.md) (mechanical-only row) — already pre-recorded.
 
 ---
 
@@ -208,7 +214,7 @@ status callbacks are M1 no-op stubs. Reviewed (no critical/high). Build green, l
 pass (+4 smoke). **Outstanding (recorded, not silent):** swap-venue token-safety gating is
 `Deferred (required for cutover — swap bots only)` — `swapTokenSafety: undefined` + the paired 1inch
 `swapNetwork` fail-closed guard dropped, both blocked on the uncopied `enrichTokenWithDiscovery`; see
-[001](../001-parity-ledger.md) + [003](../003-anomalies-and-deviations.md). Exclusions (§4.5) all
+[001](../../docs/001-parity-ledger.md) + [003](../../docs/003-anomalies-and-deviations.md). Exclusions (§4.5) all
 routed to their owning items (C/D/C2/E/F) — none authored here.
 
 **Full design + evidence: [015-composition-root-proposal.md](./015-composition-root-proposal.md)
@@ -404,8 +410,8 @@ the WIRED-COPIED manifest entry + the resolved HIGH in Outstanding Issues); +1 a
 > **Scope narrowed (2026-09-07, human-confirmed): Traderton does not own human approvals.** The
 > consumer decides whether a decision needs a human, asks the human, holds the pending approval
 > (TTL/short-code/expiry/per-user), and on approval calls `submit_decision`. Traderton owns only
-> decision **execution**. See [004](../004-decision-log.md) "Why Traderton does not own human
-> approvals" + the `decision_approvals` Intentional Divergence row in [001](../001-parity-ledger.md).
+> decision **execution**. See [004](../../docs/004-decision-log.md) "Why Traderton does not own human
+> approvals" + the `decision_approvals` Intentional Divergence row in [001](../../docs/001-parity-ledger.md).
 > The `decision_approvals` table + repo were an orphan in Traderton and were **deleted** (pre-9b
 > cleanup, 2026-09-07). Item C therefore has **no** `ApprovalService`, no `authorizationMode` fork,
 > no approval config.
@@ -709,7 +715,7 @@ Wire-through: item D's `create_and_start`/`start` no longer return `bot_limit_un
 
 **Resolves.** The `create_bot`/`start_bot` `Deferred (required for cutover)` sub-capability + the cutover
 gate "All Deferred (required for cutover) entries resolved." **Divergence to log:** per-agent → per-`ownerId`
-reshape (Intentional Divergence, [001](../001-parity-ledger.md) + [004](../004-decision-log.md)).
+reshape (Intentional Divergence, [001](../../docs/001-parity-ledger.md) + [004](../../docs/004-decision-log.md)).
 
 ### 7.5 LANDED — item E DONE (2026-09-07)
 **Files.** `packages/db/src/repositories.ts` — the two re-keyed `BotRepository` methods
@@ -793,7 +799,7 @@ required-verification tests.
   no oracle — log it.
 - **D3 — deadline = PRAGMATIC.** Reject an already-expired `deadlineAt` pre-validation + one re-check
   immediately before `tool.execute`. Do NOT thread `deadlineAt` into the copied drive path. A slight
-  divergence from 005's "before every side effect" wording → log in [003](../003-anomalies-and-deviations.md).
+  divergence from 005's "before every side effect" wording → log in [003](../../docs/003-anomalies-and-deviations.md).
 - **D4 — actor provenance (005 §Authz item 3) = OPTION B.** Enforce "the asserted `actor.type` is one the
   operator configured this consumer to assert" — an operator-config VALUE (per-consumer allowed actor types,
   defaulting to all four), NOT an authored per-tool product-rule map. Ports-carry-values; no invented policy.
@@ -803,7 +809,7 @@ required-verification tests.
 - **Rate-limiting: OUT.** `rate_limit.exceeded` stays a reserved-but-unused code (005 does not require F to
   implement a limiter).
 
-Recorded later-options (do NOT do now — [docs/010-improvement-backlog.md](../010-improvement-backlog.md)):
+Recorded later-options (do NOT do now — [docs/010-improvement-backlog.md](../../docs/010-improvement-backlog.md)):
 author-fresh idempotency (vs D1 copy-adapt); literal per-side-effect deadline re-check (vs D3 pragmatic);
 per-tool provenance allow-map (vs D4 Option B).
 
@@ -846,7 +852,7 @@ adapter, never leaking into the core. ✓
 ### 8.4 Resolves
 The API-surface rows (as the tool surface over 005, not per-resource routes); the "Consumer boundary
 contract validated" cutover gate; F is the **mandatory shipped boundary** (legal REST-isolation posture —
-[000](../000-vision.md)/[004](../004-decision-log.md)). The quarantined `api-routes/**` are dispositioned as
+[000](../../docs/000-vision.md)/[004](../../docs/004-decision-log.md)). The quarantined `api-routes/**` are dispositioned as
 Gap (not un-quarantined). **F completes 9b.**
 
 ### 8.5 LANDED — F1 DONE (2026-09-08)
@@ -871,7 +877,7 @@ and `/health/{live,ready}`. Side-effecting tools are rejected `precondition.not_
 - **M2 (canonical PATH included query string) — FIXED in F1.** `toSignedRequest` now strips the query
   (`request.url.split('?')[0]`) so signature verification stays correct for the F2 `:requestId` route.
 - **M3 (005 §Authz item 3 "actor provenance valid for the requested tool") — DEFERRED to F2** (logged in
-  [003](../003-anomalies-and-deviations.md)). It is a per-tool policy F1's read-only surface does not yet
+  [003](../../docs/003-anomalies-and-deviations.md)). It is a per-tool policy F1's read-only surface does not yet
   author; the misleading dispatcher comment claiming the actor enum covers it was corrected. Read-only
   blast radius is low; F2 authors the check with the side-effecting surface.
 
@@ -978,7 +984,7 @@ behaviour authored.
   `default.yaml`, so the boundary's `bin.ts` `loadConfig()` could not boot. Trading VALUES kept 1:1 with
   source; the only value divergences are the **four apiKey-gated `enabled` flips** (jupiter/1inch
   `walletGeneration`, birdeye, coinMarketCap → `false` so it boots without secrets; env overrides re-enable).
-  Logged in [003](../003-anomalies-and-deviations.md).
+  Logged in [003](../../docs/003-anomalies-and-deviations.md).
 - **`docker-compose.yml` + `Dockerfile` + `.dockerignore`** — the fresh minimal stack (D5): `postgres:16` +
   `redis:7` + a one-shot `migrate` + the `boundary`, health-gated sequencing (`service_healthy` /
   `service_completed_successfully`). NOT a rebase of the `l1-integration-harness` compose.
@@ -1045,7 +1051,7 @@ Buckets (§1a): **COPY** = verbatim / fused-file line-trim; **SEAM** = copied fi
 ## 11. Acceptance / deliverables
 
 - All 25 tools execute through the M1 in-process surface; the 7 drive-path tools copied + wired; the
-  006 inventory fully Met/accounted in [001](../001-parity-ledger.md).
+  006 inventory fully Met/accounted in [001](../../docs/001-parity-ledger.md).
 - Traderton-owned config + composition root authored; `@traderton/worker` consumable via its barrel.
 - Intake **execution** surface authored (venue-account-direct; no approvals — consumer-owned); per-`ownerId` maxBots authored.
 - Mechanical-only enforced + asserted at the Traderton config boundary (S-1 (a)).

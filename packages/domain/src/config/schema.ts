@@ -638,7 +638,7 @@ export const StrategySchema = z.object({
 // / `momentum:hybrid` at the runtime layer. This narrowing makes the guarantee
 // EXPLICIT at Traderton's owned bot-config boundary (a signed-off Intentional
 // Divergence — S-1 option (a), narrow-and-diverge; see docs/004-decision-log.md
-// + docs/features/013-9b-authoring-plan.md item A′), rather than leaving it as an
+// + archive/features/013-9b-authoring-plan.md item A′), rather than leaving it as an
 // emergent property of downstream registry rejection.
 //
 // This is the ONLY authored trading-shape divergence in item A. `StrategySchema`
@@ -879,7 +879,7 @@ export type TechnicalConfig = z.infer<typeof TechnicalConfigSchema>;
 // trading risk/halt defaults consumed by the mechanical loop (agent-risk-limits.ts,
 // the risk contract resolver). Copy-and-delete: this schema is entirely trading —
 // no platform fields to trim. Re-opens the Phase-1 over-deletion that removed it
-// with the platform config block. See docs/features/013-9b-authoring-plan.md item A.
+// with the platform config block. See archive/features/013-9b-authoring-plan.md item A.
 // ---------------------------------------------------------------------------
 export const AgentRiskDefaultsSchema = z.object({
   /** @deprecated Use dailyMaxLossPct (percent of equity) instead. Ratio-based loss limit. */
@@ -927,7 +927,7 @@ export type AgentRiskDefaultsConfig = z.infer<typeof AgentRiskDefaultsSchema>;
 //     validation blocks deleted.
 // This re-opens the Phase-1 over-deletion (AppConfigSchema was removed wholesale
 // as platform). Traderton owns its config (decision 2). The copied config loader
-// test is the parity oracle. See docs/features/013-9b-authoring-plan.md item A.
+// test is the parity oracle. See archive/features/013-9b-authoring-plan.md item A.
 // ---------------------------------------------------------------------------
 export const AppConfigSchema = z.object({
   app: z.object({

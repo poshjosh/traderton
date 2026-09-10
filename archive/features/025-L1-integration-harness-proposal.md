@@ -3,14 +3,15 @@
 **Status:** APPROVED (2026-09-07, human) — the 4 decisions in §6 are locked: compose / gated-test /
 all-four-scenarios / script-runs-migrate. **Executed on a branch** (`l1-integration-harness`), merged to
 main on green (per the branch-per-verification-level model). This doc is now the design record; the
-implementer prompt is [026](./026-L1-implementer-prompt.md).
-**Level:** L1 of [024-verification-and-consumption-roadmap.md](../024-verification-and-consumption-roadmap.md)
+implementer prompt was 026-L1-implementer-prompt (never created as a separate file — L1 was built
+directly on the `l1-integration-harness` branch; this design record + the branch are the trail).
+**Level:** L1 of [024-verification-and-consumption-roadmap.md](../../docs/024-verification-and-consumption-roadmap.md)
 (the in-repo end-to-end integration harness). Follows M1 code-complete.
 **Feeds:** 024 (L1 row → Done on landing); the "Side-effecting parity validated" cutover gate in
-[001](../001-parity-ledger.md).
+[001](../../docs/001-parity-ledger.md).
 **Grounding:** read-only investigation of the actual `createTradingRuntime` ports/return, the existing
 smoke test + integration-db helper, the migration path, and the redis/BullMQ wiring (2026-09-07). Governed
-by [AGENTS.md](../../AGENTS.md), [000](../000-vision.md), [024](../024-verification-and-consumption-roadmap.md).
+by [AGENTS.md](../../AGENTS.md), [000](../../docs/000-vision.md), [024](../../docs/024-verification-and-consumption-roadmap.md).
 
 > **The claim under test:** "the in-process library is consumable end-to-end — 25 tools reachable, drive
 > path live, decision intake + bot lifecycle + per-owner limit enforced atomically." Today that rests on
@@ -123,7 +124,7 @@ there — surface it as a finding, don't stub around it.
   gap, which is fixed as a bug through the normal review-fix loop before L1 is called done (nothing papered
   over). **Either outcome is a successful L1** — it converts the "consumable" claim from asserted to
   demonstrated (or finds the gap).
-- Update [024](../024-verification-and-consumption-roadmap.md) L1 → Done with the evidence (what ran, what
+- Update [024](../../docs/024-verification-and-consumption-roadmap.md) L1 → Done with the evidence (what ran, what
   it proved, any gap found+fixed); note the harness command in the repo. Advance the 001 "Side-effecting
   parity validated" gate accordingly (partial — full parity is L2).
 

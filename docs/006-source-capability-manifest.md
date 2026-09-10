@@ -87,7 +87,7 @@ covered as copied behavior or explicitly accounted for in the ledger.
 | Watch lifecycle | Create, evaluate, list, resolve, and remove watch behavior preserved. |
 | Market data and discovery | Price, funding, discovery, and non-LLM analysis inputs preserved. |
 | Backtesting and replay | Historical execution and replay surfaces preserved when present in source. |
-| Trading data model | Trading tables and repositories listed in [002-phase-0-subtraction-plan.md](./002-phase-0-subtraction-plan.md) preserved or intentionally cut. |
+| Trading data model | Trading tables and repositories listed in [002-phase-0-subtraction-plan.md](../archive/002-phase-0-subtraction-plan.md) preserved or intentionally cut. |
 | Mechanical strategies | `Dca`, `Mechanical`, `scan-engine`, and `regime` preserved; LLM-driven strategies stay outside Traderton by design. |
 
 ## Extraction-Complete Rule

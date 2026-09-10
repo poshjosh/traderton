@@ -17,14 +17,14 @@ re-opening the Phase-1 over-deletion). The following files were **un-quarantined
   platformAssessor/nomad) + billing prod/staging guards were deleted (fused-file
   line-trim); the copied test was trimmed to trading-only (platform describe/it blocks
   removed whole; `BASE_YAML` platform block dropped) — line-traceable to source, logged
-  in [013 §A](../../../../docs/features/013-9b-authoring-plan.md).
+  in [013 §A](../../../../archive/features/013-9b-authoring-plan.md).
 - `agent-risk-limits.ts` / `.test.ts` / `.parity.test.ts` — un-quarantined (needed only
   `AgentRiskDefaultsConfig`, now present); moved verbatim.
 - `public-stream-routing.ts` / `.test.ts` — un-quarantined (needed only
   `AppConfig['venues']`); moved verbatim.
 
 See [docs/001-parity-ledger.md](../../../../docs/001-parity-ledger.md) (config-shape row)
-+ [docs/features/013-9b-authoring-plan.md](../../../../docs/features/013-9b-authoring-plan.md) item A.
++ [docs/features/013-9b-authoring-plan.md](../../../../archive/features/013-9b-authoring-plan.md) item A.
 
 ## Quarantined test files (source stays in the build)
 

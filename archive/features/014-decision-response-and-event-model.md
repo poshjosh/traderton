@@ -7,8 +7,8 @@ asynchronously — before finalizing 9b items **C** (intake surface), **D** (dri
 **B** (composition-root shape). These three are the same seam seen from three angles, so they are worked
 together here.
 **Feeds:** [013-9b-authoring-plan.md](./013-9b-authoring-plan.md) items B/C/D.
-**Governed by:** [000](../000-vision.md) (ports-carry-values; M1→M2), [005](../005-consumer-boundary-contract.md)
-(the M2 REST contract), [004](../004-decision-log.md).
+**Governed by:** [000](../../docs/000-vision.md) (ports-carry-values; M1→M2), [005](../../docs/005-consumer-boundary-contract.md)
+(the M2 REST contract), [004](../../docs/004-decision-log.md).
 
 ---
 
@@ -38,7 +38,7 @@ The source already has **both** timescales — this is not greenfield:
 
 This is **request-response already.** It maps 1:1 onto 005's M2 contract: `POST /tools:invoke` returns the
 terminal `TradertonToolResultV1` synchronously, and `GET /internal/v1/invocations/:requestId` resolves an
-ambiguous timeout. (Note: `pending_approval` is now consumer-side per [004](../004-decision-log.md) — the
+ambiguous timeout. (Note: `pending_approval` is now consumer-side per [004](../../docs/004-decision-log.md) — the
 Traderton reply reduces to `accepted | rejected | error`.)
 
 ### 2b. Asynchronous event stream (later lifecycle)

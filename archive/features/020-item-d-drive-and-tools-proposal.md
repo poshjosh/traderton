@@ -26,8 +26,8 @@ implementer brief lives in 013 §6; the implementer prompt is [021](./021-item-d
 **Grounding:** read-only investigation of the herobids drive path (2026-09-07):
 `tools/bots.ts`, `tools/trading.ts`, `agent.ts` `publishToInbound` (:1229), and the
 `agent-message-broker.ts` `processInbound`/`handleManageBot` routing. Governed by
-[000](../000-vision.md) (ports-carry-values; minimum-authoring; author-the-seam-wire-the-copy;
-herobids-as-oracle), [004](../004-decision-log.md) (decisions 7–13; mechanical-only; no approvals),
+[000](../../docs/000-vision.md) (ports-carry-values; minimum-authoring; author-the-seam-wire-the-copy;
+herobids-as-oracle), [004](../../docs/004-decision-log.md) (decisions 7–13; mechanical-only; no approvals),
 [013 §6](./013-9b-authoring-plan.md).
 
 > **The investigation reshaped item D from what 013 §6 assumed** — the same way the item-C investigation

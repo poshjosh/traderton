@@ -184,12 +184,12 @@ arms (start already claims the slot for non-reclaim; that stays).
 
 - Build/lint/tests green; the seam is wired; item D's create/start are limit-enforced (no more
   `bot_limit_unavailable`).
-- Update [001](../001-parity-ledger.md): `create_bot`/`start_bot` limit sub-capability →
+- Update [001](../../docs/001-parity-ledger.md): `create_bot`/`start_bot` limit sub-capability →
   **Met** (per-`ownerId`, atomic); note the per-agent → per-`ownerId` Intentional Divergence; the
   "All Deferred (required for cutover) entries resolved" cutover gate advances (enumerate). Update
   [013 §7](./013-9b-authoring-plan.md) item E → DONE with the authored-vs-copied manifest + any Outstanding
   Issues from CodeReviewer. Log the per-agent→per-owner Intentional Divergence row in
-  [001](../001-parity-ledger.md) + a note in [004](../004-decision-log.md) if not already present.
+  [001](../../docs/001-parity-ledger.md) + a note in [004](../../docs/004-decision-log.md) if not already present.
 - Commit as its own logical commit ("9b item E: per-`ownerId` maxBots enforcement").
 - **E completes M1** — then PAUSE for the M1-complete check (013 §12) before item F (M2 REST).
 

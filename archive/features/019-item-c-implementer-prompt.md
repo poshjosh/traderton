@@ -43,7 +43,7 @@ injected `venueAccountId` **value**. Nothing here may inject risk/planner/execut
   `agents` table + the `agentConnections ⋈ connections` grant join **when no actor is running**.
 - **LOCKED DECISION (a):** require a running actor; **DROP** the grant-fallback + `ActorStateOwner`. No
   actor → `instance_not_running` (an existing copied rejection code). This is an **Intentional Divergence**
-  (already logged in [001](../001-parity-ledger.md) + [003](../003-anomalies-and-deviations.md)) — the
+  (already logged in [001](../../docs/001-parity-ledger.md) + [003](../../docs/003-anomalies-and-deviations.md)) — the
   grant-fallback is the legacy pre-actor path and IS the connection-grant front-end already placed
   consumer-side (decisions 11–13; the Phase-8 `resolveBotStartupContext` cut). Do **not** copy
   `agent-intake-resolver.ts`, `actor-state-owner.ts`, `agent-intake-fallback.ts`, or reference the `agents`
@@ -93,7 +93,7 @@ platform/consumer-owned, verified in the source read):
 |---------------------------|-----|
 | step 1 `agentRepo.getAgent` paused/stopped gate | needs `agents` table (platform); consumer owns agent lifecycle |
 | step 2 `isActiveSession`/`stale_session` gate | agent session lifecycle (platform) — `ActorStateOwner` territory |
-| step 3/3a `authorizationMode` + the entire `approval_required` block (short codes, `approvalRepo`, Telegram, `emitDecisionPendingApproval`, user notifications) | **approvals are consumer-owned**; `decision_approvals` deleted ([004](../004-decision-log.md)) |
+| step 3/3a `authorizationMode` + the entire `approval_required` block (short codes, `approvalRepo`, Telegram, `emitDecisionPendingApproval`, user notifications) | **approvals are consumer-owned**; `decision_approvals` deleted ([004](../../docs/004-decision-log.md)) |
 | the `agentState.canUseGrantFallback(...) → agentIntakeResolver.*` fallback arms in the composite resolver (index.ts:834, 843, 852) | **the dropped grant-fallback** (decision a) — keep only the `actor?.isRunning` arm |
 | the `updateRiskLimits` refresh that reads `agentRepo.getAgent(instanceId)` (index.ts:820–831) | its source is the `agents` table (platform). Either drop the runtime-refresh, or refresh from injected values — do NOT read `agents`. Prefer dropping it for M1 unless a copied injected source exists; if you drop it, note it as a small divergence in 013 §5 / the ledger |
 | all `eventPublisher.emit*` / `publish*` / `recordFailure`(decisionFailureRepo) side-channels | event emits → **item C2** (M1 no-op stub); do not wire `InstanceEventPublisher` here |
@@ -170,7 +170,7 @@ call them from a session manager — item D / the consumer drives lifecycle.
 |----------|---------|------|
 | the **drive** that CALLS `submitDecision` (`publishToInbound` / redis `agent:decision:reply:*`) | item D | C authors the handler; D calls it |
 | `InstanceEventPublisher` emits (accepted/rejected/plan/exec/pending events) | item C2 | M1 = no-op stubs |
-| human approvals (`approval_required`, short codes, Telegram, `approvalRepo`) | consumer-owned | dropped ([004](../004-decision-log.md)) |
+| human approvals (`approval_required`, short codes, Telegram, `approvalRepo`) | consumer-owned | dropped ([004](../../docs/004-decision-log.md)) |
 | `AgentTradingActor` **lifecycle driver** (who start/stops it) | item D / M1 consumer | C exposes construct+register + stop hooks only |
 | agent paused/stale-session gates, `AgentRepository` | consumer-owned | needs the `agents` table (absent by design) |
 | per-`ownerId` maxBots | item E | — |
@@ -210,7 +210,7 @@ call them from a session manager — item D / the consumer drives lifecycle.
 
 - Build/lint/tests green; `@traderton/worker` still consumable through its barrel; the handler + registry
   + agent-actor construct/register are exported where item D can reach them.
-- Update: [001](../001-parity-ledger.md) — move the `submit_decision` **intake/execution** surface toward
+- Update: [001](../../docs/001-parity-ledger.md) — move the `submit_decision` **intake/execution** surface toward
   Met (note the drive path is item D, events are item C2); the grant-fallback Intentional Divergence row is
   already present (no new row needed — just cross-reference item C as implemented). Update
   [013 §5](./013-9b-authoring-plan.md) item C → DONE with the authored-vs-copied manifest of what you

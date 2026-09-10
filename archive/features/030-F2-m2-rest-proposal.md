@@ -4,9 +4,9 @@
 rate-limiting stays out (§7). Decisions mirrored into [013 §8](./013-9b-authoring-plan.md); implementation
 proceeds slice-by-slice (F2a → F2b → F2c), pausing between each for human review.
 **Branch:** `f-m2-rest` (continues from F1 `583fb8d`; HEAD `f3c1093`).
-**Reads:** [005](../005-consumer-boundary-contract.md) (the contract), [013 §8](./013-9b-authoring-plan.md)
+**Reads:** [005](../../docs/005-consumer-boundary-contract.md) (the contract), [013 §8](./013-9b-authoring-plan.md)
 (F decisions + F1/F2 split), [028](./028-F-m2-rest-proposal.md) (the F proposal F1 came from),
-[003](../003-anomalies-and-deviations.md) (deferrals). F1 is the read-only shell already landed
+[003](../../docs/003-anomalies-and-deviations.md) (deferrals). F1 is the read-only shell already landed
 (`packages/boundary`, `@traderton/boundary`).
 
 ---

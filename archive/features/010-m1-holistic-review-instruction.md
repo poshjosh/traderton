@@ -88,7 +88,7 @@ pass/skip counts and note which skips are credential-gated integration suites.
 - **Phase 10 (infra) is out of scope for the "did we copy everything?" test — do NOT flag it as a completeness
   gap.** Infra does not follow copy-and-delete: it is a shared, versioned Terraform module library extracted
   herobids-side and consumed by Traderton at a pinned version (`enable_nomad = false`). See
-  [../004-decision-log.md](../004-decision-log.md) ("Why Phase 10 (infra) is a shared versioned module…") and
+  [../004-decision-log.md](../../docs/004-decision-log.md) ("Why Phase 10 (infra) is a shared versioned module…") and
   [012-shared-infra-module-decision.md](./012-shared-infra-module-decision.md). It is authored/consumed, not
   copied, by design — the review covers the trading library (Phases 1–9a), not infra.
 

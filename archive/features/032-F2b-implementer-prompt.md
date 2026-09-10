@@ -6,7 +6,7 @@ deadline enforcement, idempotency (persist-before-side-effect + replay/conflict/
 read-only gate to side-effecting tools, the status endpoint, a real `TradingToolContext` factory (with the
 subject→injection resolver), and the 005 §Authz item-3 actor-provenance check.
 **Authoritative brief:** [013 §8.1.1](./013-9b-authoring-plan.md) (F2 LOCKED decisions D1–D5) +
-[030 §3, §4, §8.1](./030-F2-m2-rest-proposal.md) + [005](../005-consumer-boundary-contract.md) (the contract).
+[030 §3, §4, §8.1](./030-F2-m2-rest-proposal.md) + [005](../../docs/005-consumer-boundary-contract.md) (the contract).
 **Depends on:** F2a (DONE, commit `276f752`) — `@traderton/db` `BoundaryInvocationRepository`
 (`beginOrResolve`/`complete`/`findByRequestId`/`computeRequestFingerprint`).
 
@@ -240,5 +240,5 @@ resolver in isolation with a fake `botRepo`/venue-account lookup if cheap).
 - Reference (READ): `@traderton/db` `BoundaryInvocationRepository` (F2a), `create-trading-runtime.ts`
   (`createDriveTarget` injection shape + `TradingRuntimePorts`), `packages/domain/.../tool-contract.ts`
   (`TradingToolContext`), `packages/db/src/schema/{bots,venue-accounts}.ts` (resolver sources),
-  [005](../005-consumer-boundary-contract.md), [013 §8.1.1](./013-9b-authoring-plan.md),
+  [005](../../docs/005-consumer-boundary-contract.md), [013 §8.1.1](./013-9b-authoring-plan.md),
   [030](./030-F2-m2-rest-proposal.md).

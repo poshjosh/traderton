@@ -1,6 +1,11 @@
 # Extraction Roadmap — Phases 2–10
 
-**Status:** living
+> **ARCHIVED / HISTORICAL — extraction is done; do NOT re-execute.** For what is true now (and the
+> post-M1 roadmap), see [docs/CANONICAL-STATE.md](../docs/CANONICAL-STATE.md) +
+> [docs/024-verification-and-consumption-roadmap.md](../docs/024-verification-and-consumption-roadmap.md).
+> See also [archive/README.md](./README.md).
+
+**Status:** living (historical — extraction complete through M1)
 **Created:** 2026-09-06
 **Governs:** the remaining extraction after Phase 1 (the `@traderton/domain` slice,
 [008](./008-phase-1-scaffold-and-domain-slice.md)) landed green.
@@ -23,10 +28,10 @@ phase discover its own interior.
 This roadmap is intended to be executable by a coordinator in one pass, stopping only
 at the defined **stop-gates** (decisions that need explicit human approval).
 
-All work obeys the governing rules: [AGENTS.md](../AGENTS.md), [000-vision.md](./000-vision.md)
+All work obeys the governing rules: [AGENTS.md](../AGENTS.md), [000-vision.md](../docs/000-vision.md)
 (copy-never-author, source-fix requests, deviation discipline), and the parity
-standard tracked in [001-parity-ledger.md](./001-parity-ledger.md) against the
-inventory in [006-source-capability-manifest.md](./006-source-capability-manifest.md).
+standard tracked in [001-parity-ledger.md](../docs/001-parity-ledger.md) against the
+inventory in [006-source-capability-manifest.md](../docs/006-source-capability-manifest.md).
 
 ## Verified dependency graph (actual imports, 2026-09-06)
 
@@ -102,9 +107,9 @@ subtraction phases; lightweight for clean-package phases).
    review-code / semantic-reviewer skill. Fix findings until only LOW remain.
 5. **Test** — full build + lint + copied tests for the package (and any integration
    check the phase defines). Green is required to proceed.
-6. **Update docs** — only the applicable ones: update [001-parity-ledger.md](./001-parity-ledger.md)
-   statuses for the landed slice; log any deviation in [003-anomalies-and-deviations.md](./003-anomalies-and-deviations.md);
-   record reasoning in [004-decision-log.md](./004-decision-log.md) if a decision was
+6. **Update docs** — only the applicable ones: update [001-parity-ledger.md](../docs/001-parity-ledger.md)
+   statuses for the landed slice; log any deviation in [003-anomalies-and-deviations.md](../docs/003-anomalies-and-deviations.md);
+   record reasoning in [004-decision-log.md](../docs/004-decision-log.md) if a decision was
    made; capture reusable lessons/best-practices (see "Lessons & best-practices" below).
 7. **Mark phase complete** — flip the phase's status in this doc to `Done`, note the
    commit range and the green evidence (build/lint/test counts).
@@ -120,7 +125,7 @@ the decision up in the relevant doc, and wait for explicit approval.
 1. **Source-fix request.** A seam cannot be cut by deletion without authoring
    non-trivial trading logic. Per the source-fix rule, request a behaviour-preserving
    herobids change; the human makes/tests/gates/releases it. (Precedent: strategy
-   registry, [003](./003-anomalies-and-deviations.md) request #1.)
+   registry, [003](../docs/003-anomalies-and-deviations.md) request #1.)
 2. **Ownership ambiguity.** It is genuinely unclear whether a subsystem is trading or
    platform. (Precedent: the blueprint question.) Do not guess on anything that shapes
    the boundary; surface it.
@@ -184,7 +189,7 @@ recommended default (foundational data model first, then the core engine).
   decision intake, instrument executor, reconciliation, wake gate, mark source/selector).
 - **Deliver:** `@traderton/engine` compiles strict against `@traderton/domain`; all
   copied engine tests green — **including the risk-gate exact-rules parity tests**
-  ([001](./001-parity-ledger.md) risk-gate table). Highest-stakes parity surface.
+  ([001](../docs/001-parity-ledger.md) risk-gate table). Highest-stakes parity surface.
 - **Internal seams:** delete/stub any platform-only helper; the wake-gate config type
   was already dropped from domain — confirm engine's wake-gate compiles or is cut.
 - **Likely stop-gates:** any engine file importing a platform concern the domain slice
@@ -242,15 +247,15 @@ recommended default (foundational data model first, then the core engine).
   and cross-venue-lifecycle where trading-owned).
 - **Likely stop-gates:** this is the biggest mixed surface — expect ownership questions,
   fused seams, and possibly source-fix requests. Formal classification + review before
-  implementing. The consumer-boundary seam (decisions 2–3, [005](./005-consumer-boundary-contract.md))
+  implementing. The consumer-boundary seam (decisions 2–3, [005](../docs/005-consumer-boundary-contract.md))
   starts to matter here.
 
 ### Phase 9 — `apps/api` (trading control-plane + tools) — LARGE SUBTRACTION
 - **Copy:** trading control-plane routes + the 25 trading tool endpoints
-  ([006](./006-source-capability-manifest.md) inventory) + boundary handlers.
+  ([006](../docs/006-source-capability-manifest.md) inventory) + boundary handlers.
 - **Delete:** agent/billing/chat/blueprint/auth-heavy/skill routes — platform.
 - **Deliver:** the Traderton API exposing the trading tools over the boundary
-  ([005](./005-consumer-boundary-contract.md)); copied route/tool tests green;
+  ([005](../docs/005-consumer-boundary-contract.md)); copied route/tool tests green;
   the 25-tool inventory fully accounted for in the ledger.
 - **Likely stop-gates:** the boundary contract implementation (auth/idempotency/deadline)
   is partly authored infrastructure, not copied trading logic — clarify what is copied
@@ -270,7 +275,7 @@ recommended default (foundational data model first, then the core engine).
     support) and the clean API trading routes (`bots`, `accounts`, `analytics`, `backtests`, `credentials`,
     `reconciliation`, `actor-health`, `exports`, `datasets`, `capabilities/trading`) — verbatim
     copy-and-delete, same bar as Phases 3–8; plus the full **25-tool inventory reconciliation** against
-    [006](./006-source-capability-manifest.md). **Rule:** any module that cannot go green WITHOUT an
+    [006](../docs/006-source-capability-manifest.md). **Rule:** any module that cannot go green WITHOUT an
     authored dependency (config shape, intake resolver, composition root) is **quarantined verbatim**
     (`_deferred-config/` or a sibling `_deferred-authoring/`), NOT authored early — exactly the Phase-8
     quarantine pattern. 9a's deliverable = every tool/route that copies green without authoring.
@@ -285,7 +290,7 @@ recommended default (foundational data model first, then the core engine).
   copy-and-delete does not apply — herobids does not *stop* owning infra (both systems keep running), so a
   naive copy would fork two divergent infra copies to maintain forever. Per the settled decision
   ([docs/features/012-shared-infra-module-decision.md](./features/012-shared-infra-module-decision.md) +
-  [004](./004-decision-log.md) "Why Phase 10 (infra) is a shared versioned module, not copy-and-delete"),
+  [004](../docs/004-decision-log.md) "Why Phase 10 (infra) is a shared versioned module, not copy-and-delete"),
   herobids infra is extracted into a **standalone, versioned Terraform module library** (two composable
   modules — `app-host/hcloud` + `nomad-autoscaler/hcloud`) that both platforms consume via pinned git-ref
   `source`. **That module extraction is herobids-owned, authored/refactoring cross-repo work** (parameterize
@@ -293,22 +298,22 @@ recommended default (foundational data model first, then the core engine).
   it, the same authority model as source-fixes; Traderton does not refactor herobids infra. It is scheduled in
   the **M1 testing window** (herobids is module B's live test harness; Traderton validates module A). This is
   a shape-level change the roadmap predates.
-- **Traderton's Phase 10 becomes a thin CONSUMER:** `module "host" { source = "…//modules/app-host/hcloud?ref=vX.Y.Z"; app_name = "traderton"; enable_nomad = false; … }` — autoscaling-ready but not enabled. Traderton authors only its own operator config (tfvars / compose / env — always exempt from copy-never-author, decision 1), plus its own Postgres/Redis/host/pipeline (own-database / own-TLD). It wraps a working service ([004](./004-decision-log.md)).
+- **Traderton's Phase 10 becomes a thin CONSUMER:** `module "host" { source = "…//modules/app-host/hcloud?ref=vX.Y.Z"; app_name = "traderton"; enable_nomad = false; … }` — autoscaling-ready but not enabled. Traderton authors only its own operator config (tfvars / compose / env — always exempt from copy-never-author, decision 1), plus its own Postgres/Redis/host/pipeline (own-database / own-TLD). It wraps a working service ([004](../docs/004-decision-log.md)).
 - **Deliver:** the service builds, boots, and passes the operational-readiness checks
-  ([007-operational-readiness.md](./007-operational-readiness.md)): health, latency,
+  ([007-operational-readiness.md](../docs/007-operational-readiness.md)): health, latency,
   equivalence/shadow validation, restart resilience, rollback.
 - **Likely stop-gates:** production cutover is an explicit operator decision
-  ([007](./007-operational-readiness.md)); equivalence validation against herobids is
+  ([007](../docs/007-operational-readiness.md)); equivalence validation against herobids is
   mandatory before removing the legacy path. The module-library extraction ownership (herobids-side) and any
   parameterization scope question are decided per doc 012 (not re-litigated here).
 
 ## Milestone framing (M1 vs M2)
 
-Per [000-vision.md](./000-vision.md) ("Two consumption milestones — same ports, two adapters"),
+Per [000-vision.md](../docs/000-vision.md) ("Two consumption milestones — same ports, two adapters"),
 **Phases 8–10 target M1 — the in-process library / ports-and-adapters state** where herobids
 consumes Traderton by injecting the platform-owned values it still holds (grant/`connections`,
 agent message-broker drive, `maxBots` key) into Traderton's ports at the call site. **No REST/API
-boundary is authored in M1.** The M2 API adapter ([005](./005-consumer-boundary-contract.md)) over
+boundary is authored in M1.** The M2 API adapter ([005](../docs/005-consumer-boundary-contract.md)) over
 the same ports — and the per-`ownerId` `maxBots` enforcement — are **authored after M1 lands and a
 holistic review**, not during Phases 8–10. Each phase below still runs the per-phase pattern; the
 authored M2 work is deliberately out of the copy-and-delete scope.
@@ -320,11 +325,11 @@ Do not audit Phase 10 as if trading infra "should have been copied."
 
 ## Completion of the whole extraction
 
-The extraction is complete when the [006](./006-source-capability-manifest.md)
-inventory is fully accounted for in [001](./001-parity-ledger.md) (Met / Improved /
+The extraction is complete when the [006](../docs/006-source-capability-manifest.md)
+inventory is fully accounted for in [001](../docs/001-parity-ledger.md) (Met / Improved /
 Deferred / Gap / Intentional divergence — nothing silently dropped), the cutover
-sign-off gates in [001](./001-parity-ledger.md) are met, and the operational-readiness
-gates in [007](./007-operational-readiness.md) pass. The 25-tool inventory and every
+sign-off gates in [001](../docs/001-parity-ledger.md) are met, and the operational-readiness
+gates in [007](../docs/007-operational-readiness.md) pass. The 25-tool inventory and every
 mandatory subsystem group must each have a ledger disposition.
 
 ## Lessons & best-practices (living — appended as phases complete)
@@ -356,7 +361,7 @@ From Phase 2 (`db`):
   FKs"; the real FK graph had seven `users` FKs among copied tables + a platform-coupled
   `market-assessment-requests` mislabelled by the "market-assessment-*" glob. Always
   verify the plan's named seams against the actual dependency/FK graph.
-- **Soft-reference rule** (now in [004](./004-decision-log.md)): no Traderton-copied table
+- **Soft-reference rule** (now in [004](../docs/004-decision-log.md)): no Traderton-copied table
   hard-FKs a platform table; every `users` FK → soft `ownerId`; platform FKs dropped or
   softened per decisions 10–13; intra-trading FKs preserved. This is a sanctioned authored
   seam, not a stop-gate — apply uniformly without re-litigating per table.
@@ -367,7 +372,7 @@ From Phase 2 (`db`):
 - **"Is it trading or platform?" is too coarse for a capability.** Ask (1) is the
   capability trading, (2) is the implementation platform-coupled, (3) will herobids rely
   on Traderton for it in the end state. See the "herobids becomes a consumer" section in
-  [000](./000-vision.md). The implementation may be Intentional Divergence while the
+  [000](../docs/000-vision.md). The implementation may be Intentional Divergence while the
   capability is a **required** Traderton obligation.
 - **Two kinds of Deferred (tag them distinctly in the ledger):** *Deferred-optional* (no
   parity obligation, e.g. bot cloning) vs *Deferred-required-for-cutover* (herobids will
@@ -501,7 +506,7 @@ From Phase 8 (`apps/worker` — large subtraction; the hardest phase, hit 3 stop
 ## Coordinator handoff
 
 To run this roadmap: start at the first `Queued` phase, execute the per-phase pattern,
-honor the stop-gates, and keep [001](./001-parity-ledger.md) current throughout. Each
+honor the stop-gates, and keep [001](../docs/001-parity-ledger.md) current throughout. Each
 phase's own plan lives in `docs/features/<NN>-<phase>-plan.md` (git-tracked, reviewable),
 drafted at the start of that phase (step 2) — this roadmap intentionally does not
 pre-author them. Precedent: [docs/features/001-strategy-registry-source-fix-plan.md](./features/001-strategy-registry-source-fix-plan.md)

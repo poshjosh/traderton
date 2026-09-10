@@ -406,7 +406,7 @@ before M2 REST**; per-`ownerId` is the limit key.
 
 7. **The M2 REST/boundary adapter** — the Fastify app shell, auth/HMAC, idempotency, deadline,
    health, and the `POST /internal/v1/tools:invoke` surface per
-   [005-consumer-boundary-contract.md](../005-consumer-boundary-contract.md).
+   [005-consumer-boundary-contract.md](../../docs/005-consumer-boundary-contract.md).
    - *Why authored:* boundary infrastructure is legitimately new seam code (the HTTP expression
      of the M1 ports), never copied trading logic.
    - *Resolves:* "Consumer boundary contract validated" cutover gate.
@@ -432,7 +432,7 @@ before M2 REST**; per-`ownerId` is the limit key.
      - **(a) Narrow-and-diverge (CHOSEN):** tighten the Traderton-owned config schema (or a
        Traderton wrapper over the copied `StrategySchema`) to `decisionMode: ['mechanical']`, and
        update the copied acceptance test accordingly — a sanctioned authored divergence at the
-       boundary Traderton owns. Crispest product guarantee. See [004](../004-decision-log.md).
+       boundary Traderton owns. Crispest product guarantee. See [004](../../docs/004-decision-log.md).
      - **(b) Accept-and-reject-downstream (not chosen):** keep the copied enum; rely on the registry
        rejecting `momentum:llm` / `momentum:hybrid` at `validateStrategyParams` / bot start.
    - *Invariant / process check:* add an explicit assertion that the **live** mechanical-only

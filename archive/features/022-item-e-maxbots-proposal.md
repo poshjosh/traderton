@@ -7,8 +7,8 @@ corrected the framing: E is mostly-COPY, not "highest authored-content"). Decisi
 **Feeds:** [013-9b-authoring-plan.md](./013-9b-authoring-plan.md) §7 (item E). The self-contained
 implementer brief lives in 013 §7; the implementer prompt is [023](./023-item-e-implementer-prompt.md).
 **Grounding:** read-only investigation of the herobids limit primitives + the Traderton `BotRepository`
-+ the item-D `BotLimitSeam` (2026-09-07). Governed by [000](../000-vision.md) (ports-carry-values;
-minimum-authoring; herobids-as-oracle; "not weaker than herobids-today"), [004](../004-decision-log.md)
++ the item-D `BotLimitSeam` (2026-09-07). Governed by [000](../../docs/000-vision.md) (ports-carry-values;
+minimum-authoring; herobids-as-oracle; "not weaker than herobids-today"), [004](../../docs/004-decision-log.md)
 (decisions 10–13; per-`ownerId` limit key decided 2026-09-06), [013 §7](./013-9b-authoring-plan.md).
 
 > **This is a mostly-COPY item, smaller than "highest authored-content" first framed** (corrected

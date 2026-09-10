@@ -9,7 +9,7 @@
 
 Extract the trading-owned slice of `packages/db` into `@traderton/db`: the trading
 schema tables + their repositories, with every platform FK converted to a soft
-`ownerId`/soft reference per the **soft-reference rule** ([004](../004-decision-log.md)).
+`ownerId`/soft reference per the **soft-reference rule** ([004](../../docs/004-decision-log.md)).
 Compiles under strict TS; copied trading tests green; no platform imports; no
 `@herobids/*`.
 
@@ -146,6 +146,6 @@ beyond a clean initial snapshot, note and defer per the ledger.
 ## Deliverables / acceptance
 - `@traderton/db` compiles strict; lint clean; copied trading tests green.
 - No `.references()` to a platform table anywhere; no `@herobids/*`; no llm/platform imports.
-- Ledger ([001](../001-parity-ledger.md)) "Trading data model" row updated with evidence;
+- Ledger ([001](../../docs/001-parity-ledger.md)) "Trading data model" row updated with evidence;
   soft-reference rule applied and noted; any deferred integration tests recorded.
 - Draft Phase 3 (`engine`) plan seeded at `docs/features/003-engine-plan.md`.

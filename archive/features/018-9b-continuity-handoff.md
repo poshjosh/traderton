@@ -25,7 +25,7 @@ committed** (build green, lint clean, 2244 tests pass / 15 skipped / 0 failed). 
 (decision-intake surface)**. The proposal is written ([017-item-c-intake-proposal.md](./017-item-c-intake-proposal.md))
 and the **§4 crux is RESOLVED (2026-09-07, human): option (a)** — require a running `ExecutionActor`,
 DROP the grant-fallback. Decisions are locked into [013 §5](./013-9b-authoring-plan.md) and logged as an
-Intentional Divergence in [001](../001-parity-ledger.md) + [003](../003-anomalies-and-deviations.md). **No
+Intentional Divergence in [001](../../docs/001-parity-ledger.md) + [003](../../docs/003-anomalies-and-deviations.md). **No
 item-C code has been written yet** — the immediate next action is to write the item-C implementer prompt
 (§10).
 
@@ -42,7 +42,7 @@ item-C code has been written yet** — the immediate next action is to write the
 | F | M2 REST boundary adapter | not started |
 
 Also DONE in 9b groundwork: `decision_approvals` table + repo deleted (approvals are consumer-owned —
-[004](../004-decision-log.md) "Why Traderton does not own human approvals"); the M1 holistic review
+[004](../../docs/004-decision-log.md) "Why Traderton does not own human approvals"); the M1 holistic review
 ([011](./011-m1-holistic-review-report.md)); the decision-response/event-model note
 ([014](./014-decision-response-and-event-model.md), the durable Postgres+Redis event outbox is an
 **improvement deferred out of 9b** — do not build it during the authoring pass).
@@ -52,7 +52,7 @@ Also DONE in 9b groundwork: `decision_approvals` table + repo deleted (approvals
 > **DECISION (locked): (a) — require a running `ExecutionActor`; DROP the grant-fallback.** No actor →
 > `instance_not_running` (existing copied rejection). The `AgentIntakeResolver` grant-fallback +
 > `ActorStateOwner` session wrapper are NOT copied (Intentional Divergence — logged in
-> [001](../001-parity-ledger.md) + [003](../003-anomalies-and-deviations.md); rationale in
+> [001](../../docs/001-parity-ledger.md) + [003](../../docs/003-anomalies-and-deviations.md); rationale in
 > [013 §5.1](./013-9b-authoring-plan.md) + [017 §4](./017-item-c-intake-proposal.md)). The two riders are
 > accepted: (2) item B's factory owns the `actorRegistry`; (3) item C constructs+registers the
 > `AgentTradingActor` (lifecycle driver = item D). **Nothing below blocks progress — proceed to §10.** The
@@ -101,7 +101,7 @@ See the copy-vs-author manifest in [017 §5](./017-item-c-intake-proposal.md). F
 ## 5. Item-C exclusions (route to owning item — do NOT author in C)
 - The **drive** that CALLS `submitDecision` (publishToInbound / redis `agent:decision:reply:*`) → **item D**.
 - **`InstanceEventPublisher`** event emits → **item C2** (M1 no-op stub in C).
-- Human approvals → **consumer-owned** (dropped, [004](../004-decision-log.md)).
+- Human approvals → **consumer-owned** (dropped, [004](../../docs/004-decision-log.md)).
 - `AgentTradingActor` **lifecycle driver** (who starts/stops it) → **item D / M1 consumer**.
 - per-`ownerId` maxBots → **item E**.
 
@@ -140,8 +140,8 @@ See the copy-vs-author manifest in [017 §5](./017-item-c-intake-proposal.md). F
   composition root leaves `TradingActorDeps.swapTokenSafety: undefined` + drops the paired 1inch
   `swapNetwork` fail-closed guard, both blocked on the uncopied herobids inline `enrichTokenWithDiscovery`
   (`index.ts:93`). Orderbook/paper bots unaffected. Resolve (follow-up copy of `enrichTokenWithDiscovery`,
-  or a source-fix) **before any swap-venue bot runs live.** Recorded in [001](../001-parity-ledger.md) 9b
-  block + [003](../003-anomalies-and-deviations.md).
+  or a source-fix) **before any swap-venue bot runs live.** Recorded in [001](../../docs/001-parity-ledger.md) 9b
+  block + [003](../../docs/003-anomalies-and-deviations.md).
 - **Advertised `create_bot.config.strategy` tool-schema** still reflects the broad `StrategySchema` (item
   A′ narrowed the *validated* boundary, not the *advertised* JSON) → narrow it in **item D** when the tool
   catalog is authored. Noted in 001 mechanical-only row + 013 A′.
@@ -158,9 +158,9 @@ See the copy-vs-author manifest in [017 §5](./017-item-c-intake-proposal.md). F
 - [019-item-c-implementer-prompt.md](./019-item-c-implementer-prompt.md) — **the item-C implementer prompt (ready to hand off).**
 - [011-m1-holistic-review-report.md](./011-m1-holistic-review-report.md) — the pre-9b review (verdict: sound; bounded 9b scope).
 - [014-decision-response-and-event-model.md](./014-decision-response-and-event-model.md) — sync/async response + the deferred durable event outbox (improvement, NOT 9b).
-- [001-parity-ledger.md](../001-parity-ledger.md) — live status of every capability (source of truth for done-vs-pending).
-- [004-decision-log.md](../004-decision-log.md) — the *why* (esp. decisions 7–13, mechanical-only, "Traderton does not own human approvals", M1/M2).
-- [003-anomalies-and-deviations.md](../003-anomalies-and-deviations.md) — forced deviations + source-fix requests + the swap-token-safety deferral.
+- [001-parity-ledger.md](../../docs/001-parity-ledger.md) — live status of every capability (source of truth for done-vs-pending).
+- [004-decision-log.md](../../docs/004-decision-log.md) — the *why* (esp. decisions 7–13, mechanical-only, "Traderton does not own human approvals", M1/M2).
+- [003-anomalies-and-deviations.md](../../docs/003-anomalies-and-deviations.md) — forced deviations + source-fix requests + the swap-token-safety deferral.
 
 ## 10. Immediate next action (do this)
 

@@ -23,7 +23,7 @@ deletion; build + copied tests green; reviewed; committed). Scope:
 - **The clean API trading routes** (import only extracted packages): `bots`, `accounts`, `analytics`,
   `backtests`, `credentials`, `reconciliation`, `actor-health`, `exports`, `datasets`,
   `capabilities/trading`.
-- **Full 25-tool inventory reconciliation** against [006](../006-source-capability-manifest.md): map each
+- **Full 25-tool inventory reconciliation** against [006](../../docs/006-source-capability-manifest.md): map each
   tool → module, mark Met vs Deferred, ensure every one of the 25 has a ledger disposition.
 - **QUARANTINE rule (the Phase-8 pattern):** any tool/route that cannot compile + go green WITHOUT an
   authored dependency (the config shape, the intake/approval resolver, the composition root) is **quarantined

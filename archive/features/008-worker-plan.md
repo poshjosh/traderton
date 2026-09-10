@@ -5,12 +5,12 @@
 **Depends on:** all extracted packages (domain, db, engine, market-data, venues, strategy, backtesting — all done).
 **Status:** **ACTIVE (stop-gate resolved 2026-09-06, human-approved).** The four boundary/ownership
 decisions are settled — see "RESOLVED DECISIONS" below (and the RESOLVED entry in
-[003](../003-anomalies-and-deviations.md)). Execution is now the mechanical loop laid out in "Method".
+[003](../../docs/003-anomalies-and-deviations.md)). Execution is now the mechanical loop laid out in "Method".
 
 ## RESOLVED DECISIONS (human-approved)
 
 1. **Drive-path / boundary — NO API layer in Phase 8 (this is M1).** This is the **M1 library
-   milestone** ([000-vision.md](../000-vision.md) "Two consumption milestones"). Traderton
+   milestone** ([000-vision.md](../../docs/000-vision.md) "Two consumption milestones"). Traderton
    (pre-authoring) is packaged as a **library**; herobids consumes its in-process intake core (`actorRegistry` + `agent-intake-resolver` +
    `submitDecisionForExecution` + the two actors + `WorkerRuntime`) to **replace its existing in-process
    trading**. herobids stays the consumer and drives the core **in-process** (as it does today) — the

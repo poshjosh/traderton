@@ -7,77 +7,72 @@ exposed over API now and MCP/skills later.
 ## Read first — tiered (the docs ARE the project's memory)
 
 A fresh session knows nothing of the reasoning behind this project unless it reads
-the docs. But the project is now far along (extraction M1 complete), so you do **not**
-need to read everything up front. Read the **always-read** tier at session start;
-consult the rest **when the topic is relevant** (pointers below). Authority is
-unchanged — every doc still binds; this only changes reading *order/cost*.
+the docs. Read the **always-read** tier at session start; consult the rest **when the
+topic is relevant** (pointers below). Every live doc still binds; the tiers only change
+reading *order/cost*.
 
 **Always-read at session start (small — the minimum to not do damage):**
 
-1. **This file (AGENTS.md)** — the hard rules (below): copy-never-author, source-fix
-   discipline, work-only-in-traderton / herobids-read-only.
-2. **[docs/000-vision.md](./docs/000-vision.md)** — goal, method, settled decisions,
-   "herobids becomes a consumer." The law. Source of truth.
-3. **[docs/001-parity-ledger.md](./docs/001-parity-ledger.md)** — the live parity
-   status + cutover gates. **The single source of truth for what is done vs. pending.**
-   Update it as you work.
-4. **[docs/024-verification-and-consumption-roadmap.md](./docs/024-verification-and-consumption-roadmap.md)**
-   — **where we are now / what's next.** M1 (extraction) is code-complete; 024 governs
-   proving the library is consumable (L1 harness → L2 differential → F REST → L3
-   herobids consumes it). Start here for "what do I do next."
+1. **This file (AGENTS.md)** — the hard rules (below).
+2. **[docs/CANONICAL-STATE.md](./docs/CANONICAL-STATE.md)** — **START HERE. The single source
+   of truth for what is TRUE NOW**: current state, target state, the invariants (law), the
+   open decisions, the settled-decisions index, and the pointer map to every live doc. When it
+   and another doc disagree about state/decisions/invariants, the canonical brief wins. It tells
+   you which docs to read for depth and which are historical.
+3. **[docs/001-parity-ledger.md](./docs/001-parity-ledger.md)** — the live parity status +
+   cutover gates. **The source of truth for capability done vs. pending.** Update it as you work.
 
-**Consult when relevant (authoritative; not required up front):**
+Those three orient you. The canonical brief points you to the rest below **when relevant**:
 
-- **[docs/004-decision-log.md](./docs/004-decision-log.md)** — the *why*. Read when a
-  rule seems arbitrary or a case isn't covered; the reasoning tells you which way to lean.
-- **[docs/003-anomalies-and-deviations.md](./docs/003-anomalies-and-deviations.md)** —
-  forced deviations + source-fix request log. Read/append when you hit a deviation.
+**Consult when relevant (live; authoritative for their own scope):**
+
+- **[docs/004-decision-log.md](./docs/004-decision-log.md)** — the *why* behind every decision.
+  Read when a rule seems arbitrary or a case isn't covered.
+- **[docs/000-vision.md](./docs/000-vision.md)** — the goal, the copy-never-author law, the 17
+  settled decisions. *(Its "REST is the only cutover shape" framing is superseded by
+  CANONICAL-STATE §3 — the first-consumption-path choice is OPEN.)*
+- **[docs/003-anomalies-and-deviations.md](./docs/003-anomalies-and-deviations.md)** — forced
+  deviations + source-fix request log. Read/append when you hit a deviation.
 - **[docs/010-improvement-backlog.md](./docs/010-improvement-backlog.md)** — deliberate,
-  non-blocking **later-options** (the "better path we didn't take now"), graded
-  Value/Effort + Risk-if-deferred. Append when you take a fork's safe/simple branch and the
-  better branch is worth remembering. NOT for cutover obligations (those → 001/003) or bugs.
-- **[docs/009-extraction-roadmap.md](./docs/009-extraction-roadmap.md)** — the extraction
-  roadmap (phases 1–10, **mostly Done**). Read for extraction history / the per-phase
-  pattern. The per-phase execution loop it defines is still the loop we run.
-- **[docs/features/013-9b-authoring-plan.md](./docs/features/013-9b-authoring-plan.md)** —
-  the Phase-9b authoring detail (items A–F; A–E Done, **F = M2 REST is the remaining item**).
-  Read when working on F or reviewing what 9b authored vs copied vs dropped.
-- **[docs/005-consumer-boundary-contract.md](./docs/005-consumer-boundary-contract.md)** —
-  the consumer boundary (HMAC/envelope/idempotency). Read at F and cutover.
-- **[docs/006-source-capability-manifest.md](./docs/006-source-capability-manifest.md)** —
-  the static parity inventory the ledger scores against. Read when auditing coverage.
-- **[docs/007-operational-readiness.md](./docs/007-operational-readiness.md)** — the
-  cutover proof (latency/equivalence/restart/rollback). Read at L3/cutover.
-- **`docs/features/*`** — per-phase/per-item plans + implementer prompts (drafted at each
-  item's start; e.g. 011 M1 review, 015–023 the 9b item designs/prompts). Read the one
-  for the item you're on.
-- **Historical (do not re-execute):** [002](./docs/002-phase-0-subtraction-plan.md)
-  (Phase-0 plan), [008](./docs/008-phase-1-scaffold-and-domain-slice.md) (Phase-1 doc).
+  non-blocking later-options (graded Value/Effort + Risk-if-deferred). NOT cutover obligations
+  (those → 001/003) or bugs.
+- **[docs/005-consumer-boundary-contract.md](./docs/005-consumer-boundary-contract.md)** — the
+  M2 REST/HMAC contract. Read at consumption/cutover.
+- **[docs/006-source-capability-manifest.md](./docs/006-source-capability-manifest.md)** — the
+  static parity inventory the ledger scores against.
+- **[docs/007-operational-readiness.md](./docs/007-operational-readiness.md)** — the cutover
+  proof (latency/equivalence/restart/rollback). Read at L3/cutover.
+- **[docs/024-verification-and-consumption-roadmap.md](./docs/024-verification-and-consumption-roadmap.md)**
+  — the post-M1 level roadmap (L1 done, L2 skipped, F done, L3 next). *(Its "REST is the only
+  cutover shape" is superseded by CANONICAL-STATE §3/§5.)*
+- **[archive/](./archive/)** — **historical (do NOT re-execute):** the extraction roadmap + phase
+  plans, the M1 review, the Phase-9b authoring plan + per-item proposals/prompts, and the F
+  proposals/prompts. This is the *how-we-got-here* reasoning trail (incl. the F1–F2c landing logs
+  in `archive/features/013-9b-authoring-plan.md` §8.5–§8.8). Consult for history; the canonical
+  brief + the live docs are authoritative for what's true now.
 
 Do not rely on prior chat context — assume you have none. If a decision isn't in these
-docs, it does not exist yet: decide it deliberately and record it.
+docs, it does not exist yet: decide it deliberately and record it (in the canonical brief +
+the relevant live doc).
 
 ## Where you are / where to start
 
-- **Extraction (009, phases 1–10): M1 is code-complete.** Items A–E of Phase 9b landed
-  green (config shape, composition root, decision intake, drive path + 25 tools, per-owner
-  maxBots). See the item-A–E blocks in [001](./docs/001-parity-ledger.md) +
-  [013 §7.5](./docs/features/013-9b-authoring-plan.md). Full build/lint/test green.
-- **The next work is verification + consumption**, governed by
-  [docs/024-verification-and-consumption-roadmap.md](./docs/024-verification-and-consumption-roadmap.md):
-  **L1** (in-repo end-to-end integration harness — prove the library is consumable against
-  real Postgres+Redis, nothing stubbed), then **L2** (differential guarantee vs a pinned
-  herobids ref), **F** (the M2 REST boundary — the last 9b item, [013 §8](./docs/features/013-9b-authoring-plan.md)),
-  and **L3** (herobids consumes `@traderton/*` on a branch → cutover). Start at the first
-  `Queued`/`Active` level in the 024 table and run the investigate → propose (pause for
-  human) → implement → review → test → update-docs loop.
-- **L3 ownership:** the herobids `consume-traderton` branch is **herobids-owner territory**
-  (it edits herobids — which we never do). We produce the consumable library + the
-  comparison harness + the migration spec; the owner executes the branch and the merge.
-  See 024 §Ownership boundary.
-- The single source of truth for done-vs-pending is the parity ledger
-  ([001](./docs/001-parity-ledger.md)); 024 tracks the verification levels; 009 tracks the
-  (now mostly Done) extraction phases. Per-item plans live git-tracked in `docs/features/`.
+**Read [docs/CANONICAL-STATE.md](./docs/CANONICAL-STATE.md) §2–§3 for the authoritative version.**
+In brief (2026-09-08):
+
+- **Extraction (M1 library) is complete**, and **Phase 9b authoring items A–E are complete on
+  `main`.**
+- **F — the M2 REST boundary — is COMPLETE on branch `f-m2-rest`** (F1+F2a+F2b+F2c), proven
+  end-to-end (compose up + all 7 of 005's required-verification tests). **NOT merged to `main`**
+  (merge gate unmet). L1 done (its fix cherry-picked to `main` as `f7a0dd1`); L2 skipped.
+- **The next work is L3 — herobids consumes `@traderton/*` → cutover** (the merge-gate work),
+  governed by [024](./docs/024-verification-and-consumption-roadmap.md).
+- **Two OPEN decisions gate L3 (CANONICAL-STATE §6):** O1 — which consumption path herobids uses
+  FIRST (REST vs in-process — NOT decided); O2 — who edits herobids and confirming the read-only
+  exception below. Do not start herobids edits until these are settled with the human.
+- Run the usual loop: investigate → propose → **pause for human** → self-contained implementer
+  prompt → coordinator loop → update docs. Each level/item on its own branch. Nothing merges to
+  `main` without the human (the merge gate).
 
 ## The rule you must not break
 
@@ -118,6 +113,15 @@ trading currently lives fused with an agent + messaging platform.
 checkout). Treat
 herobids as read-only source — read and copy from it, never modify it.** All
 builds, tests, and git operations run in this repo.
+
+**⚠️ A consumption-phase EXCEPTION is coming (NOT yet in force).** The next milestone (L3)
+is herobids consuming `@traderton/*`, which inherently requires *editing* herobids (deleting
+its trading code, wiring the library). The proposed exception (see
+[docs/CANONICAL-STATE.md](./docs/CANONICAL-STATE.md) §5): the READ-ONLY rule is lifted **for a
+designated herobids consumption branch only** — herobids `main` and all other branches stay
+untouchable, and extraction-era copying still obeys copy-never-author. **This exception is
+PENDING explicit human confirmation** (who edits herobids; which consumption path first —
+CANONICAL-STATE §6 O1/O2). **Until the human confirms it, herobids remains fully READ-ONLY.**
 
 ## `main` branch discipline — do not break
 
