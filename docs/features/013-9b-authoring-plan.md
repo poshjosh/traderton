@@ -884,6 +884,36 @@ and `/health/{live,ready}`. Side-effecting tools are rejected `precondition.not_
 - Dead `?? request.url` fallback in `toSignedRequest` (`String.split` never yields an empty array) — harmless;
   a byproduct of `noUncheckedIndexedAccess`.
 
+### 8.6 LANDED — F2a DONE (2026-09-08)
+
+**F2a (the `boundary_invocations` idempotency store) is implemented, reviewed, and green on branch
+`f-m2-rest`** (commit `276f752`; not merged to `main`). Implemented per [031](./031-F2a-implementer-prompt.md),
+COPY-ADAPT (D1) from the herobids oracle (`blueprint-idempotency.ts` `computeInstantiateRequestHash` + the
+blueprints fork-route transaction + `blueprint_instantiation_requests`), re-keyed to the 005 four-tuple.
+
+Landed in `@traderton/db`: `schema/boundary-invocations.ts` + the generated migration
+`0001_yellow_killmonger.sql`; `BoundaryInvocationRepository` (`computeRequestFingerprint`, `beginOrResolve`
+[advisory-lock class 18, item-E precedent → `started`/`in_progress`/`replay`/`conflict`], `complete`
+[guarded `WHERE state='in_progress'` — idempotent], `findByRequestId` [feeds the F2b status endpoint]);
+a fingerprint unit test (6, always run) + a `DATABASE_URL`-gated integration test (fresh/in_progress/replay/
+conflict/four-tuple/concurrency/findByRequestId). **AUTHORED deltas** over the oracle: the four-tuple key, the
+`in_progress`→`terminal` transition, terminal-response storage, `expiresAt` from a caller-supplied retention
+(never hard-coded). `@traderton/db` does NOT depend on `@traderton/boundary` (terminal response is a
+`Record<string, unknown>`). No boundary wiring (that is F2b).
+
+**CodeReviewer disposition:** faithful copy-adapt, no CRITICAL.
+- **H1 (HIGH) — concurrency test didn't prove serialization** under the shared `openTestDb` `{max:1}` pool
+  (transactions serialized at the single connection, so the test would pass even without the lock). **FIXED**
+  — the concurrency test now opens its OWN multi-connection pool (`postgres(url, {max:n})`) so N `beginOrResolve`
+  genuinely run on distinct connections; the shared helper is untouched (item E unaffected).
+- **M1 (MEDIUM) — `complete()` could overwrite a terminal row. FIXED** — `WHERE state='in_progress'` guard.
+- **LOW-1** (`replay.terminalResponse` typed `| null`, a can't-happen leak to F2b) → backlog **B6** (docs/010).
+
+**Verification note:** build green, lint clean, full suite **2340 passed / 24 skipped**. The integration test
+**skips locally** (no Postgres in this environment) — same gating as the item-E concurrency test; it runs in
+CI/Phase 10. The fingerprint unit test runs and passes. F2a's DB-runtime behaviour is therefore proven by the
+test *logic* + review, not yet executed against live Postgres here.
+
 ---
 
 ## 9. Authored-vs-copied manifest (maintained through implementation)
