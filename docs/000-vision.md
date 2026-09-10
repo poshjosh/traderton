@@ -24,39 +24,53 @@ tools) moves to Traderton; and herobids invokes Traderton
 
 ### Two consumption milestones — same ports, two adapters
 
-> **HARD CONSTRAINT — trading is a separate deployable, consumed ONLY over REST
-> (legal, not architectural).** Payment providers commonly restrict or deny
-> trading activity. To keep that risk off the agent/messaging platform's payment
-> rails, **trading must NOT ship inside the platform deployable at all — not even
-> as an imported in-process library.** Traderton is therefore its own standalone
-> deployable at its own top-level domain (TLD), and herobids consumes it
-> **out-of-process, over the REST boundary** ([005](./005-consumer-boundary-contract.md))
-> — never by importing `@traderton/*` into the platform process. This is a
-> business/legal requirement, not a technical preference: technically an
-> in-process library would work; legally it cannot ship. See
-> [004-decision-log.md](./004-decision-log.md) ("Why trading is an isolated
-> REST-only deployable"). **Consequence for the milestones below:** M1 (in-process)
-> is a Traderton-internal *assembly/verification* milestone — it proves the
-> library is whole and consumable in one process (see the L1 harness in
-> [024](./024-verification-and-consumption-roadmap.md)) — it is **not** a shape in
-> which herobids actually runs trading. herobids's real consumption is **M2/REST
-> only.**
+> **HARD CONSTRAINT — trading must be a separately-DEPLOYABLE, isolable unit; the
+> CURRENT deployment posture is REST-only (legal, not architectural).** Payment
+> providers commonly restrict or deny trading activity. To keep that risk off the
+> agent/messaging platform's payment rails, trading must be able to run as its own
+> deployable — separately controllable and, when legally required, fully isolated
+> from the platform (its own top-level domain / TLD, behind the REST boundary
+> [005](./005-consumer-boundary-contract.md)). **Given today's legal posture,
+> herobids consumes Traderton out-of-process over REST — it does NOT import
+> `@traderton/*` into the shipped platform process.**
+>
+> **BUT this is a DEPLOYMENT/ops constraint, not an architectural law — and the
+> two consumption paths must BOTH remain permanently supported:**
+> - **In-process library** — `createTradingRuntime(...)` + direct calls (what L1
+>   exercised). First-class; kept working forever. Used for dev/test/eval today,
+>   and available as the **shipped** path the moment the legal hurdle is cleared
+>   (see the latency analysis in [004](./004-decision-log.md) — in-process removes
+>   the boundary's ~1–150 ms overhead).
+> - **REST adapter (M2/005)** — a thin adapter *over the same in-process ports*.
+>   Never the only door; never allowed to leak REST-only concerns (HMAC/HTTP
+>   envelopes) into the core.
+>
+> So: **support both; let DEPLOYMENT decide.** REST-only is how trading *ships
+> today* for legal isolation; in-process stays a supported, tested path so we
+> preserve the future option to plug trading in-process (e.g. for latency) if the
+> legal constraint lifts. See [004](./004-decision-log.md) ("Why trading is an
+> isolable, REST-first-but-in-process-capable deployable"). **Consequence for the
+> milestones below:** M1 (in-process) is BOTH the Traderton-internal
+> assembly/verification milestone AND a permanently-supported consumption path — it
+> is only *not the shape herobids ships in today* (a legal, revisitable posture),
+> not a forbidden one.
 
 herobids consumes Traderton through **the same set of ports** (the extraction
 seams — hexagonal architecture). What changes between milestones is only the
 **adapter** driving those ports:
 
-- **M1 — In-process library assembly (Traderton-internal milestone, reached FIRST;
-  NOT a herobids consumption state).** The extracted `@traderton/*` packages are
-  wired into a whole, runnable trading library driven in one process via dependency
-  injection / ports & adapters. This is where the bulk of the extraction lands
-  (Phases 8–10 / 9b items A–E) and where consumability is *verified* in-process (L1,
-  [024](./024-verification-and-consumption-roadmap.md)). The in-process caller here
-  is a **test/verification harness**, standing in for a consumer — it lets us prove
-  the ports compose and inject the things Traderton does not own (a resolved
-  `venueAccountId`, `ownerId`/`actor`, the `maxBots` limit) as values. **herobids
-  does NOT run trading in this shape** (the legal constraint above forbids importing
-  trading into the platform process). No REST/API layer is built for M1.
+- **M1 — In-process library assembly (reached FIRST; a permanently-supported
+  consumption path).** The extracted `@traderton/*` packages are wired into a whole,
+  runnable trading library driven in one process via dependency injection / ports &
+  adapters. This is where the bulk of the extraction lands (Phases 8–10 / 9b items
+  A–E) and where consumability is *verified* in-process (L1,
+  [024](./024-verification-and-consumption-roadmap.md)). The in-process caller
+  injects the things Traderton does not own (a resolved `venueAccountId`,
+  `ownerId`/`actor`, the `maxBots` limit) as values. **This path stays first-class
+  and supported forever** — used for dev/test/eval today, and available as the
+  *shipped* path if the legal posture lifts (the hard-constraint block above). It is
+  only *not the shape herobids ships in today* (legal isolation), not a forbidden
+  one. No REST/API layer is built for M1.
 - **M2 — API consumer (the end state; the ONLY shape herobids consumes in).** The
   REST/API boundary ([005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md))
   is added as a **second adapter over the same ports** — its request/response, auth,
@@ -176,18 +190,19 @@ we must not **degrade**. Anything we cannot preserve now is recorded in the
    Traderton-owned usage metering, billing, or caps are cut for now and
    tracked as Deferred in the ledger.
 6. **In-process assembly (M1) first, REST/API (M2) second, MCP/skills later —
-   but M2 is the ONLY shape a real consumer uses.** M1 (the in-process
-   library / ports-and-adapters state) is reached first as a Traderton-internal
-   *assembly + verification* milestone: the extraction proves itself in one process,
-   driven by a test/verification harness that injects what a consumer would own. It is
-   **not** a mode herobids runs trading in. The REST/API boundary (M2) is a later
-   adapter over the same ports and is **mandatory** — per the hard legal constraint
-   above, trading ships only as a separate REST-only deployable, so **all real
-   consumption (herobids included) is over M2**; there is no legally-shippable
-   in-process consumer. MCP and skills wrap the same M2 boundary later still. None of
-   the outer adapters block the M1 assembly, and M1 is where the extraction proves
-   itself before the M2 boundary is authored. See the hard-constraint block in "The
-   end state" + [004](./004-decision-log.md) ("Why trading is an isolated REST-only
+   both consumption paths permanently supported; deployment decides which ships.**
+   M1 (the in-process library / ports-and-adapters state) is reached first: the
+   extraction proves itself in one process, and this in-process path **stays a
+   first-class, supported consumption mode forever** (dev/test/eval today; a shippable
+   option if the legal posture lifts). The REST/API boundary (M2) is a later **thin
+   adapter over the same ports** and is **the shipped shape today** — per the legal
+   posture (hard-constraint block above), trading ships as a separately-deployable,
+   REST-isolated unit, so **herobids's shipped consumption is over M2.** This is a
+   deployment choice, not an architectural one: the core stays importable in-process;
+   REST never becomes the only door and never leaks HTTP concerns into the core. MCP
+   and skills wrap the same M2 boundary later still. None of the outer adapters block
+   the M1 assembly. See the hard-constraint block in "The end state" +
+   [004](./004-decision-log.md) ("Why trading is an isolable, REST-first-but-in-process-capable
    deployable").
 
 ### Toolchain & naming

@@ -57,7 +57,7 @@ Legend: `Done` / `Active` / `Queued` / `Blocked (needs decision)`.
 | Level | Proves | Owner | Depends on | Status |
 |-------|--------|-------|-----------|--------|
 | **L1 — in-repo integration harness** | `@traderton/worker` runs end-to-end vs real Postgres+Redis with **zero `@traderton/*` internals stubbed**: `createTradingRuntime` → create/start a paper bot → `submit_decision` → real plan/fill/position + the decision reply + a maxBots rejection at k+1. Falsifies "consumable end-to-end." | traderton (us) | M1 (done) | **Done** on branch `l1-integration-harness` (all 4 scenarios green; found + fixed a real consumability gap — the `venueAccountId` fix, cherry-picked to `main` as `f7a0dd1`). The harness itself is **scaffolding held on its branch — NOT on `main`** (per the merge gate); it merges only at the milestone. |
-| **L2 — differential guarantee vs the pinned herobids ref** | Same trading inputs → identical trading outputs across the pinned herobids reference and `@traderton/*` (the **bare library**, pre-REST). The "does not deviate" guarantee; side-by-side via a git worktree. | traderton (us) build the harness; the reference is a read-only pin | L1 green | **NEXT (or skip).** Must run **before F** (tests the bare library — see §Sequencing); optional (skippable), but if wanted, only now. |
+| **L2 — differential guarantee vs the pinned herobids ref** | Same trading inputs → identical trading outputs across the pinned herobids reference and `@traderton/*` (the **bare library**, pre-REST). The "does not deviate" guarantee; side-by-side via a git worktree. | traderton (us) build the harness; the reference is a read-only pin | L1 green | **SKIPPED (2026-09-07)** — no faithful mechanical reference exists to diff against (see the L2 skip note below + [027](./features/027-L2-differential-proposal.md)). Proposal preserved on branch `l2-differential`. |
 | **F — M2 REST boundary** | The authored 005 boundary (Fastify/HMAC/idempotency/deadline + copy-adapted routes). Already scoped as **[013 item F](./features/013-9b-authoring-plan.md)**. **MANDATORY** — the only shape a consumer legally uses (trading is a REST-only separate deployable; see [000](./000-vision.md)/[004](./004-decision-log.md)). | traderton (us) | M1 done; **after L2** (or after skipping L2) | Queued (last 9b item; the cutover boundary) |
 | **L3 — herobids `consume-traderton` branch** | herobids deletes its trading code, consumes `@traderton/*` **over F's REST boundary** (NOT in-process — legal constraint), passes the L2 differential + herobids' own suite; merges to main = **cutover**. | herobids owner executes; traderton (us) supply the migration spec + the passing library + the harness | **F done + L2 green** | Blocked (needs decision) — herobids-owner-executed |
 
@@ -143,8 +143,26 @@ Why the order is fixed this way:
   acceptance guarantee (L2's differential, now at the boundary) → cutover. L3 is **herobids-owner-executed**
   (it edits herobids, which we never do — see §Ownership boundary).
 
-L1 is done ([above](#the-four-levels)). **Next is L2** (in-repo differential vs the pinned herobids ref),
-unless the human elects to skip it and go straight to F.
+L1 is done ([above](#the-four-levels)). **L2 was SKIPPED (2026-09-07)** — see the skip note below.
+**Next is F** (the M2 REST boundary, [013 §8](./features/013-9b-authoring-plan.md)).
+
+### L2 skip note (2026-09-07)
+L2 was investigated ([027](./features/027-L2-differential-proposal.md), branch `l2-differential`) and
+**skipped**, deliberately (not dropped silently). Why: a differential needs a *faithful reference* —
+herobids' recorded outputs for the same inputs. A read-only check of the pinned herobids ref found recorded
+decision corpora exist **only for `agent`/LLM decisions** (`.ignore/eval/**/db/decisions.json`,
+`actor_type: "agent"`, LLM rationales; empty `bots.json`), i.e. **no mechanical-bot recorded corpus**.
+Traderton is **mechanical-only** (decisions 7–9) and cannot faithfully reproduce LLM decisions, so replaying
+those contexts would "diverge" meaninglessly (agent≠mechanical), not measure copy fidelity. Manufacturing a
+mechanical corpus (running herobids paper+mechanical at the pinned ref) is real net-new work of low marginal
+value, because the parity L2 would test is **already covered**: `@traderton/strategy` was a byte-verbatim
+split (diff = namespace only) with 56 copied strategy parity tests; the risk gate has 83 copied parity
+tests; and **L1 exercised the full execution path live**. L3 will additionally run a differential at the
+REST boundary. So the disciplined call is skip L2 → F. (The `l2-differential` branch + 027 are preserved for
+reference; nothing is silently dropped — this note + the [004](./004-decision-log.md) entry are the record.)
+Also settled here: the **in-process library remains a permanently-supported consumption path** (not
+REST-only) — see [000](./000-vision.md) + [004](./004-decision-log.md); the deployment posture (REST-first)
+is legal, not architectural.
 
 ## What this roadmap does NOT change
 

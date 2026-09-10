@@ -365,49 +365,84 @@ consumer" model will mis-file such a capability as optional backlog and risk a s
 parity regression at cutover. The model is now explicit in 000; the ledger must tag
 required-for-cutover Deferrals distinctly from optional ones.
 
-## Why trading is an isolated REST-only deployable (legal, not architectural)
+## Why trading is an isolable, REST-first-but-in-process-capable deployable (legal, not architectural)
 
-Added 2026-09-07 (human-stated constraint). **This is a business/legal requirement that
-overrides the earlier "herobids consumes in-process" framing** — read it before the M1/M2
-section below.
+Added 2026-09-07 (human-stated constraint); **refined the same day** — the first draft
+overstated it as "in-process forbidden as a law." The accurate rule is below. Read it before
+the M1/M2 section that follows.
 
-**The constraint.** Payment providers commonly **restrict or deny trading activity**. If
-trading code runs inside the agent/messaging platform's deployable, it puts the platform's
-payment rails (subscriptions, billing — the platform's actual revenue) at risk of being
-restricted or cut off. To ring-fence that risk, **trading must not ship inside the platform
-at all — not even as an imported in-process library.** Traderton is therefore its **own
-standalone deployable at its own top-level domain (TLD)**, and every consumer (herobids
-included) reaches it **only over the REST boundary** ([005](./005-consumer-boundary-contract.md)).
+**The constraint (why REST-first).** Payment providers commonly **restrict or deny trading
+activity**. If trading code runs inside the agent/messaging platform's shipped deployable, it
+puts the platform's payment rails (subscriptions, billing — the platform's actual revenue) at
+risk of being restricted or cut off. To ring-fence that risk, **trading must be a
+separately-deployable, isolable unit** — able to run as its own service (its own TLD, behind
+the REST boundary [005](./005-consumer-boundary-contract.md)) so it can be fully separated
+from the platform's payment surface. **Given today's legal posture, trading ships REST-only:
+herobids consumes it out-of-process over REST and does NOT import `@traderton/*` into the
+shipped platform process.**
 
-**Why this is legal, not technical.** Technically, herobids *could* import `@traderton/*`
-and drive it in-process — the ports compose (L1 proved it, [024](./024-verification-and-consumption-roadmap.md)).
-That option is closed by the payment/legal risk, not by architecture. A future agent seeing a
-monorepo with `@traderton/*` packages will be tempted to conclude "in-process consumption is
-simpler for herobids" — **that conclusion is wrong here**, and this entry exists so it is not
-re-derived. In-process is a *verification* shape only; it is never a shipping shape.
+**Why it is a DEPLOYMENT constraint, not an architectural law (the refinement).** The
+requirement is *isolability/separate-deployability*, not "in-process is forbidden." Technically
+herobids *can* import `@traderton/*` and drive it in-process — the ports compose (L1 proved
+it). Both consumption paths are, and must remain, **first-class and supported**:
+- **In-process library** (`createTradingRuntime` + direct calls) — used for dev/test/eval now,
+  and the **shipped** path the moment the legal hurdle is cleared.
+- **REST adapter (M2/005)** — a thin adapter over the same ports; the shipped path today.
+**Support both; let DEPLOYMENT decide which ships.** The core stays importable; REST never
+becomes the only door and never leaks HTTP/HMAC concerns into the core. A future agent must
+NOT collapse this into "REST-only, delete the in-process path" — the in-process path is a
+deliberately-preserved option (see the invariant below).
+
+**Latency — why preserving the in-process option matters (analysis, 2026-09-07).** The
+transport overhead *added around* the trading work (risk gate + planner + DB + venue call),
+per `submit_decision`-class call, order-of-magnitude:
+| Topology | Added overhead / call | dominated by |
+|----------|----------------------|--------------|
+| In-process library | ~0.001–0.05 ms | a function call (no serialize, no network) |
+| REST, same machine (compose / loopback) | ~0.3–2 ms | JSON + HTTP framing + loopback + HMAC |
+| REST, separate machine, same region/VPC | ~1–5 ms | + one LAN/VPC round-trip + TLS |
+| REST, separate machine, own TLD, cross-region | ~20–150 ms+ | + WAN RTT (dominant) + DNS + TLS |
+Load-bearing reading: **the expensive part is the far/cross-region hop, not "REST" itself**;
+in-process→same-machine-REST is ~1–2 ms. For the agent/bot path this is **noise** — an LLM
+already spent 1–30 s reasoning before the call, and Traderton's own execution loop (actor,
+marks, reconciler) runs in-process *inside the traderton service* regardless of topology, so
+REST is crossed only for intake + events, not per internal tick. So REST-first costs little on
+today's paths; but if a future latency-sensitive need arises AND the legal hurdle is cleared,
+plugging trading in-process removes the boundary overhead entirely — which is exactly why we
+keep the in-process path alive.
+
+**INVARIANT (do not break):** *the in-process library must always remain a first-class,
+working consumption path; REST is an adapter over the same ports, never the only door.* This
+preserves the deployment optionality (isolate-behind-REST today; plug-in-process later).
 
 **Consequences (load-bearing for the roadmap):**
-1. **M2/REST is mandatory, not optional.** It is the cutover boundary — the only shape any
-   consumer legally uses. Item F (the 005 REST adapter) is required, not a nice-to-have.
-2. **M1 (in-process) is re-labelled** from "library consumer" to a **Traderton-internal
-   assembly + verification** milestone (driven by a test harness, not herobids). The M1/M2
-   section below is corrected accordingly.
-3. **The verification order in [024](./024-verification-and-consumption-roadmap.md) follows
-   from this:** L2 (the differential guarantee) tests the **bare library directly** and must
-   run **before** F wraps it in REST — testing the library after the REST layer would test it
-   *through* the adapter, conflating library vs. adapter discrepancies. So L2 is
-   **before-F-or-skipped, never after F**; then F (the required REST boundary); then L3
-   (herobids consumes over REST → cutover). See 024 for the sequence + its rationale.
+1. **M2/REST is the shipped boundary today** (F is required — it is how trading ships isolated
+   for the current legal posture). It is *mandatory-for-shipping*, but it is an adapter over
+   the in-process ports, not a replacement for them.
+2. **M1 (in-process) is BOTH the assembly/verification milestone AND a permanently-supported
+   consumption path** — only "not the shape herobids *ships* in today," not forbidden.
+3. **L2 (differential) was SKIPPED** (2026-09-07) — see the L2 skip note in
+   [024](./024-verification-and-consumption-roadmap.md) + [027](./features/027-L2-differential-proposal.md):
+   the herobids ref only recorded **agent/LLM** decisions (no mechanical-bot corpus), so there
+   is no faithful mechanical reference to diff Traderton (mechanical-only) against; the
+   decision-layer parity L2 would test is already covered by the byte-verbatim `@traderton/strategy`
+   split (+56 copied strategy parity tests) and the 83 copied risk-gate parity tests, and L1
+   exercised the full execution path live. Manufacturing a mechanical corpus was judged high-cost /
+   low-marginal-value over L3's eventual REST-boundary differential. Order (when L2 is done at
+   all): L1 → L2 → F → L3, L2 before-F-or-skipped.
 
 ## Why there is an interim "library consumer" milestone (M1) before the API (M2)
 
 Added 2026-09-06, while resolving the Phase 8 (`apps/worker`) stop-gate.
 
-> **CORRECTED 2026-09-07 — read the next section ("Why trading is an isolated REST-only
-> deployable") first.** This section originally called M1 a "library consumer" milestone in
-> which *herobids* consumes Traderton in-process. A later legal/business constraint overrides
-> that: trading cannot ship inside the platform deployable even as an imported library, so
-> **herobids never consumes Traderton in-process — its only consumption shape is M2/REST.**
+> **CORRECTED 2026-09-07 — read the section above ("Why trading is an isolable,
+> REST-first-but-in-process-capable deployable") first.** This section originally called M1 a
+> "library consumer" milestone. Refined: the in-process library **remains a first-class,
+> supported path**, but for the **current legal posture herobids SHIPS its consumption over
+> REST (M2)**, not in-process. So "same ports, two adapters" and "defer authoring to M2" below
+> still hold; only "herobids ships in-process at M1" is corrected to "herobids ships over REST;
+> in-process stays a supported, non-shipped-today path (dev/test/eval, and a future option if
+> the legal hurdle clears)."
 > M1 remains exactly as valuable, but re-labelled: it is a **Traderton-internal in-process
 > *assembly + verification* milestone** (the extraction proves itself in one process, driven
 > by a test/verification harness — see L1 in [024](./024-verification-and-consumption-roadmap.md)),
