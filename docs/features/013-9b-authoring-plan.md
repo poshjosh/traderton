@@ -966,6 +966,51 @@ payload's `botId` + the tool category), no HTTP/idempotency/trading logic leaked
 path and the **end-to-end signed side-effecting flow are NOT yet executed** here; they are proven by test
 logic + review, and are the subject of **F2c's** gated integration + the 7 required-verification tests.
 
+### 8.8 LANDED — F2c DONE → **F COMPLETE** (2026-09-08)
+
+**F2c (the runnable stack + dev signing helper + the 7 required-verification tests) is implemented,
+reviewed, and PROVEN end-to-end on branch `f-m2-rest`** (commit `7a4b0a4`; not merged to `main`). Implemented
+per [033](./033-F2c-implementer-prompt.md); all ops/test scaffolding + a copied-trimmed config — no trading
+behaviour authored.
+
+- **`config/default.yaml`** — COPY-ADAPT from `../herobids/config/default.yaml`, trimmed to the trading-only
+  `AppConfigSchema` keys (Phase-1 fused-file technique). Preflight gap resolved: Traderton had NO
+  `default.yaml`, so the boundary's `bin.ts` `loadConfig()` could not boot. Trading VALUES kept 1:1 with
+  source; the only value divergences are the **four apiKey-gated `enabled` flips** (jupiter/1inch
+  `walletGeneration`, birdeye, coinMarketCap → `false` so it boots without secrets; env overrides re-enable).
+  Logged in [003](../003-anomalies-and-deviations.md).
+- **`docker-compose.yml` + `Dockerfile` + `.dockerignore`** — the fresh minimal stack (D5): `postgres:16` +
+  `redis:7` + a one-shot `migrate` + the `boundary`, health-gated sequencing (`service_healthy` /
+  `service_completed_successfully`). NOT a rebase of the `l1-integration-harness` compose.
+- **`packages/boundary/src/dev/sign.ts`** — the committed dev HMAC signer (satisfies 030's deferred signing
+  helper); reuses `auth.ts` `buildCanonicalString` so signed bytes cannot drift from the verifier; signs
+  `tools:invoke` + the status GET.
+- **`boundary.verification.integration.test.ts`** — the 7 tests, 1:1 with 005 §Required Verification, gated
+  on `DATABASE_URL`+`REDIS_URL`. Test #4 (one invocation + one downstream effect) drives **paper-mode
+  `create_bot`** with `enqueueLifecycle` stubbed (no live venue) → asserts exactly one `bots` row + one
+  `boundary_invocations` row on a same-key retry. `scripts/run-integration.sh` + a `test:integration` script
+  migrate-then-test; the default `pnpm test` is UNCHANGED (gated tests skip).
+
+**CodeReviewer disposition:** no CRITICAL/HIGH; faithful copy-adapt, the 7 tests non-tautological, the signer
+drift-proof, scope clean.
+- **M1 (MEDIUM) — undocumented config drift:** the first pass ALSO flipped `hyperliquid.walletGeneration.enabled`
+  + `marketData.economicCalendar.enabled` `true→false`, but NEITHER is apiKey-gated, so the "boots without
+  secrets" rationale did not apply — an unjustified silent degradation from source. **FIXED** — both restored
+  to the source `true` (1:1 fidelity; the boundary never invokes them); docs/003 corrected. Only the four
+  apiKey-gated flips remain.
+- **L2 (Dockerfile ships dev deps in the runtime stage) → backlog B9;** L1/L3/L4 → notes.
+
+**PROVEN END-TO-END (2026-09-08, coordinator-run):** `pnpm test:integration` against a throwaway
+`postgres:16`+`redis:7` (migrations applied) → tests 1–6 green; `docker compose up --build` → postgres+redis
+healthy, `migrate` exited 0, boundary served `/health/ready` `{status:ready}`; the full suite with
+`BOUNDARY_BASE_URL` set → **all 14 assertions incl. test #7 green**. Re-verified green after the M1 config fix.
+Stacks torn down, containers cleaned.
+
+**⇒ F (the M2 REST boundary) is COMPLETE** (F1 shell + F2a store + F2b dispatcher integration + F2c stack &
+verification). **This completes Phase 9b authoring.** Not merged to `main` — the merge gate (herobids consumes
+the library; all tests pass; run local + staging a while; manual approval) is human-owned and unmet; F landing
+green on the branch does not change that.
+
 ---
 
 ## 9. Authored-vs-copied manifest (maintained through implementation)
