@@ -114,3 +114,25 @@ trading currently lives fused with an agent + messaging platform.
 checkout). Treat
 herobids as read-only source — read and copy from it, never modify it.** All
 builds, tests, and git operations run in this repo.
+
+## `main` branch discipline — do not break
+
+**`main` holds ONLY production code that is a target state or a major milestone of
+that state — something we keep for a while. NEVER indeterminate, temporary, or
+scaffolding state.** Verification harnesses, intermediate/exploratory work, and
+anything whose keep/discard disposition is still open do NOT belong on `main`;
+they live on branches until they are decided.
+
+**Never merge to `main` without the human's explicit approval.** "Reviewed +
+green" is NOT license to merge — merge is the human's decision, not a step in any
+loop. Keep work on a branch (branch-per-level / per-milestone) and ask.
+
+**The merge gate — merge to `main` only when ALL of these hold:**
+1. herobids consumes the traderton library;
+2. all tests pass;
+3. the setup has been run both locally and on staging for a while — manual,
+   visual, and black-box tests;
+4. manual approval is given to merge.
+
+Keep durable production fixes SEPARATE from scaffolding so a keep-forever change
+is never entangled with an undecided/temporary one in the same merge.
