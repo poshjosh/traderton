@@ -765,6 +765,16 @@ seam wiring + the `createAndStart` create→mark call. Reviewed (CodeReviewer PA
   `tools:invoke` dispatcher over `ToolRegistry` + `/health/{live,ready}`, scoped to **read-only tools**.
   **F2** = idempotency (the Postgres store) + deadline enforcement + side-effecting tools + the 7
   required-verification tests. F1 lands + is reviewed before F2.
+  - **F2 owns the runnable stack + the signing helper (deliberately deferred out of F1).** F1's boundary
+    boots standalone (no Postgres/Redis) and its read-only manual surface is thin, so no compose file, dev
+    signing CLI, or hand-written smoke-test recipe is committed at F1 — a faithful agent re-derives a smoke
+    call from 005 (canonical string, headers, endpoints) + the tool schemas the boundary already enforces
+    (YAGNI, same discipline as the L1 harness). F2 owns the **compose stack** (boundary + Postgres + Redis)
+    — forced by required-verification test #7 ("compose or staging startup reaches a healthy
+    `/health/ready`") — and a **committed dev signing helper**, forced by the 7 signed-call tests (idempotency
+    replay, deadline expiry, side-effecting dispatch). Both become durable target-state artifacts there, with
+    a concrete acceptance bar, rather than F1 scaffolding. This is also where the merge gate's "run locally +
+    staging for a while" step gets something real to run.
 - **(5) The 7 required-verification tests** (005 §"Required Verification") are the F acceptance gate.
 
 ### 8.2 What it is (authored 005 machinery over the copied tools)
