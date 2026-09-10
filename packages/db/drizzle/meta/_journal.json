@@ -8,6 +8,13 @@
       "when": 1788890702935,
       "tag": "0000_init_trading_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789033786621,
+      "tag": "0001_yellow_killmonger",
+      "breakpoints": true
     }
   ]
 }

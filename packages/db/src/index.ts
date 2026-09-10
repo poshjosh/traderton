@@ -33,6 +33,8 @@ export { TokenSafetyOverrideRepository } from './token-safety-override-repositor
 export type { IssueOverrideParams, TokenSafetyOverrideRow } from './token-safety-override-repository.js';
 export { DecisionFailureRepository } from './decision-failure-repository.js';
 export type { InsertDecisionFailure, DecisionFailureQuery } from './decision-failure-repository.js';
+export { BoundaryInvocationRepository, computeRequestFingerprint } from './boundary-invocation-repository.js';
+export type { BeginOrResolveParams, BeginResult, CompleteParams, BoundaryInvocationRow } from './boundary-invocation-repository.js';
 // decision-approval-repository / decision_approvals table removed 2026-09-07:
 // user-approval lifecycle is a platform/consumer-owned concern, not trading
 // (Intentional Divergence — see docs/001 + docs/004). Agents own asking for a

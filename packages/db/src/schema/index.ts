@@ -22,3 +22,4 @@ export { decisionFailures } from './decision-failures.js';
 // platform/consumer-owned (Intentional Divergence, docs/001 + docs/004).
 export { marketAssessmentRuns } from './market-assessment-runs.js';
 export { marketAssessmentArtifacts } from './market-assessment-artifacts.js';
+export { boundaryInvocations } from './boundary-invocations.js';
