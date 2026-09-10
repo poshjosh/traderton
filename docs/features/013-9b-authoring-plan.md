@@ -909,10 +909,16 @@ conflict/four-tuple/concurrency/findByRequestId). **AUTHORED deltas** over the o
 - **M1 (MEDIUM) — `complete()` could overwrite a terminal row. FIXED** — `WHERE state='in_progress'` guard.
 - **LOW-1** (`replay.terminalResponse` typed `| null`, a can't-happen leak to F2b) → backlog **B6** (docs/010).
 
-**Verification note:** build green, lint clean, full suite **2340 passed / 24 skipped**. The integration test
-**skips locally** (no Postgres in this environment) — same gating as the item-E concurrency test; it runs in
-CI/Phase 10. The fingerprint unit test runs and passes. F2a's DB-runtime behaviour is therefore proven by the
-test *logic* + review, not yet executed against live Postgres here.
+**Verification note:** build green, lint clean, full suite **2340 passed / 24 skipped** (the integration test
+is `DATABASE_URL`-gated — skips in the default suite, item-E gating). **Executed against live Postgres
+(2026-09-08):** a throwaway `postgres:16` container was stood up, `db:migrate` applied `0001` cleanly (the
+`boundary_invocations` table + the 4-tuple unique index + the requestId index verified via `\d`), and all **7
+integration tests passed** against real Postgres. **Test-of-the-test:** with the advisory lock temporarily
+removed, the concurrency test **failed** as expected — N concurrent begins raced to `duplicate key value
+violates unique constraint uq_boundary_invocations_key` (code 23505), confirming (a) the multi-connection pool
+creates genuine concurrency, (b) the lock is what serializes them, and (c) the unique index is a fail-closed
+backstop. The lock was restored (working tree unchanged) and the containers torn down. F2a is proven
+end-to-end, not merely by logic + review.
 
 ---
 
