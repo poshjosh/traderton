@@ -24,33 +24,56 @@ tools) moves to Traderton; and herobids invokes Traderton
 
 ### Two consumption milestones — same ports, two adapters
 
+> **HARD CONSTRAINT — trading is a separate deployable, consumed ONLY over REST
+> (legal, not architectural).** Payment providers commonly restrict or deny
+> trading activity. To keep that risk off the agent/messaging platform's payment
+> rails, **trading must NOT ship inside the platform deployable at all — not even
+> as an imported in-process library.** Traderton is therefore its own standalone
+> deployable at its own top-level domain (TLD), and herobids consumes it
+> **out-of-process, over the REST boundary** ([005](./005-consumer-boundary-contract.md))
+> — never by importing `@traderton/*` into the platform process. This is a
+> business/legal requirement, not a technical preference: technically an
+> in-process library would work; legally it cannot ship. See
+> [004-decision-log.md](./004-decision-log.md) ("Why trading is an isolated
+> REST-only deployable"). **Consequence for the milestones below:** M1 (in-process)
+> is a Traderton-internal *assembly/verification* milestone — it proves the
+> library is whole and consumable in one process (see the L1 harness in
+> [024](./024-verification-and-consumption-roadmap.md)) — it is **not** a shape in
+> which herobids actually runs trading. herobids's real consumption is **M2/REST
+> only.**
+
 herobids consumes Traderton through **the same set of ports** (the extraction
 seams — hexagonal architecture). What changes between milestones is only the
 **adapter** driving those ports:
 
-- **M1 — Library consumer (the interim state, reached FIRST).** herobids consumes
-  Traderton **in-process, as a library** via dependency injection / ports &
-  adapters. In this state trading *moves out of herobids* — the extracted
-  `@traderton/*` packages **replace herobids' in-process trading**, and herobids
-  drives Traderton's intake core in-process (as it drives its own trading today).
-  **herobids keeps supplying the things Traderton deliberately does not own** — the
-  platform `connections`/`agents` grant layer, the agent message-broker drive, the
-  per-agent `maxBots` key — by **injecting them into Traderton's ports as values /
-  callbacks at the call site.** No REST/API layer is built for M1. This is where the
-  bulk of the extraction lands (Phases 8–10 target M1).
-- **M2 — API consumer (the end state).** The REST/API boundary
-  ([005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md)) is added
-  as a **second adapter over the same ports** — its request/response, auth, deadline,
-  and idempotency semantics are the HTTP expression of the M1 ports. MCP/skills wrap
-  the same boundary later still (decision 6). The "consuming platform" that 005 speaks
-  of *is herobids*; 005 describes the M2 adapter.
+- **M1 — In-process library assembly (Traderton-internal milestone, reached FIRST;
+  NOT a herobids consumption state).** The extracted `@traderton/*` packages are
+  wired into a whole, runnable trading library driven in one process via dependency
+  injection / ports & adapters. This is where the bulk of the extraction lands
+  (Phases 8–10 / 9b items A–E) and where consumability is *verified* in-process (L1,
+  [024](./024-verification-and-consumption-roadmap.md)). The in-process caller here
+  is a **test/verification harness**, standing in for a consumer — it lets us prove
+  the ports compose and inject the things Traderton does not own (a resolved
+  `venueAccountId`, `ownerId`/`actor`, the `maxBots` limit) as values. **herobids
+  does NOT run trading in this shape** (the legal constraint above forbids importing
+  trading into the platform process). No REST/API layer is built for M1.
+- **M2 — API consumer (the end state; the ONLY shape herobids consumes in).** The
+  REST/API boundary ([005-consumer-boundary-contract.md](./005-consumer-boundary-contract.md))
+  is added as a **second adapter over the same ports** — its request/response, auth,
+  deadline, and idempotency semantics are the HTTP expression of the M1 ports. This
+  is the boundary herobids (and any consumer) calls across the network; MCP/skills
+  wrap the same boundary later still (decision 6). The "consuming platform" that 005
+  speaks of *is herobids*; 005 describes the M2 adapter — **and per the legal
+  constraint, M2 is mandatory, not optional: it is the cutover boundary.**
 
-Load-bearing consequence: because M1 is reached first and drives the ports
-**in-process**, the interim state requires **no authored boundary/API code** — herobids
-injects what it owns and calls the core directly. Authoring (the per-owner `maxBots`
-enforcement, the REST/005 layer) is **deferred to after M1 lands and a holistic review**,
-then built as the M2 adapter. This two-milestone framing is what lets us honor "defer
-authoring to the end" without leaving any trading capability behind.
+Load-bearing consequence: because M1 (in-process) is reached first, the extraction
+and its in-process verification require **no authored boundary/API code** — the
+harness injects what a consumer would own and calls the core directly. Authoring
+(the per-owner `maxBots` enforcement, the REST/005 layer) is **deferred to after M1
+lands and a holistic review**, then built as the M2 adapter. This two-milestone
+framing lets us honor "defer authoring to the end" without leaving any trading
+capability behind — while keeping in view that **the REST/M2 boundary is the
+required cutover shape, because trading cannot ship inside the platform.**
 
 > **Ports carry values, never trading behaviour (invariant).** A consumer (herobids
 > at M1, any caller at M2) may inject through a port only the platform-owned things
@@ -152,12 +175,20 @@ we must not **degrade**. Anything we cannot preserve now is recorded in the
    Platform billing authority stays outside Traderton by design; any
    Traderton-owned usage metering, billing, or caps are cut for now and
    tracked as Deferred in the ledger.
-6. **Library (M1) first, API (M2) second, MCP/skills later.** The first working
-   consumption mode is the **in-process library / ports-and-adapters** state (M1,
-   above): herobids consumes Traderton via DI, injecting what it owns. The REST/API
-   boundary (M2) is a later adapter over the same ports; MCP and skills wrap that same
-   boundary later still. None of the outer adapters block M1, and M1 is where the
-   extraction proves itself before any API is authored.
+6. **In-process assembly (M1) first, REST/API (M2) second, MCP/skills later —
+   but M2 is the ONLY shape a real consumer uses.** M1 (the in-process
+   library / ports-and-adapters state) is reached first as a Traderton-internal
+   *assembly + verification* milestone: the extraction proves itself in one process,
+   driven by a test/verification harness that injects what a consumer would own. It is
+   **not** a mode herobids runs trading in. The REST/API boundary (M2) is a later
+   adapter over the same ports and is **mandatory** — per the hard legal constraint
+   above, trading ships only as a separate REST-only deployable, so **all real
+   consumption (herobids included) is over M2**; there is no legally-shippable
+   in-process consumer. MCP and skills wrap the same M2 boundary later still. None of
+   the outer adapters block the M1 assembly, and M1 is where the extraction proves
+   itself before the M2 boundary is authored. See the hard-constraint block in "The
+   end state" + [004](./004-decision-log.md) ("Why trading is an isolated REST-only
+   deployable").
 
 ### Toolchain & naming
 

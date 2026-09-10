@@ -56,10 +56,10 @@ Legend: `Done` / `Active` / `Queued` / `Blocked (needs decision)`.
 
 | Level | Proves | Owner | Depends on | Status |
 |-------|--------|-------|-----------|--------|
-| **L1 — in-repo integration harness** | `@traderton/worker` runs end-to-end vs real Postgres+Redis with **zero `@traderton/*` internals stubbed**: `createTradingRuntime` → create/start a paper bot → `submit_decision` → real plan/fill/position + the decision reply + a maxBots rejection at k+1. Falsifies "consumable end-to-end." | traderton (us) | M1 (done) | Queued |
-| **L2 — differential guarantee vs the pinned herobids ref** | Same trading inputs → identical trading outputs across the pinned herobids reference and `@traderton/*`. The "does not deviate" guarantee; side-by-side via a git worktree. | traderton (us) build the harness; the reference is a read-only pin | L1 green | Queued |
-| **F — M2 REST boundary** | The authored 005 boundary (Fastify/HMAC/idempotency/deadline + copy-adapted routes). Already scoped as **[013 item F](./features/013-9b-authoring-plan.md)**. | traderton (us) | M1 done; ideally L1 green first | Queued (last 9b item) |
-| **L3 — herobids `consume-traderton` branch** | herobids deletes its trading code, consumes `@traderton/*` (via F's REST and/or in-process), passes the L2 differential + herobids' own suite; merges to main = **cutover**. | herobids owner executes; traderton (us) supply the migration spec + the passing library + the harness | F done + L2 green | Blocked (needs decision) — herobids-owner-executed |
+| **L1 — in-repo integration harness** | `@traderton/worker` runs end-to-end vs real Postgres+Redis with **zero `@traderton/*` internals stubbed**: `createTradingRuntime` → create/start a paper bot → `submit_decision` → real plan/fill/position + the decision reply + a maxBots rejection at k+1. Falsifies "consumable end-to-end." | traderton (us) | M1 (done) | **Done** on branch `l1-integration-harness` (all 4 scenarios green; found + fixed a real consumability gap — the `venueAccountId` fix, cherry-picked to `main` as `f7a0dd1`). The harness itself is **scaffolding held on its branch — NOT on `main`** (per the merge gate); it merges only at the milestone. |
+| **L2 — differential guarantee vs the pinned herobids ref** | Same trading inputs → identical trading outputs across the pinned herobids reference and `@traderton/*` (the **bare library**, pre-REST). The "does not deviate" guarantee; side-by-side via a git worktree. | traderton (us) build the harness; the reference is a read-only pin | L1 green | **NEXT (or skip).** Must run **before F** (tests the bare library — see §Sequencing); optional (skippable), but if wanted, only now. |
+| **F — M2 REST boundary** | The authored 005 boundary (Fastify/HMAC/idempotency/deadline + copy-adapted routes). Already scoped as **[013 item F](./features/013-9b-authoring-plan.md)**. **MANDATORY** — the only shape a consumer legally uses (trading is a REST-only separate deployable; see [000](./000-vision.md)/[004](./004-decision-log.md)). | traderton (us) | M1 done; **after L2** (or after skipping L2) | Queued (last 9b item; the cutover boundary) |
+| **L3 — herobids `consume-traderton` branch** | herobids deletes its trading code, consumes `@traderton/*` **over F's REST boundary** (NOT in-process — legal constraint), passes the L2 differential + herobids' own suite; merges to main = **cutover**. | herobids owner executes; traderton (us) supply the migration spec + the passing library + the harness | **F done + L2 green** | Blocked (needs decision) — herobids-owner-executed |
 
 ## Per-level scope (detail is drafted at each level's start)
 
@@ -79,6 +79,19 @@ Legend: `Done` / `Active` / `Queued` / `Blocked (needs decision)`.
   (any deviation from parity goes through the normal review-fix loop, not silent). **This is the honest
   test of the "consumable end-to-end" claim** and should exist before F regardless.
 - **Prereq:** a local/docker Postgres + Redis. (Confirm infra at L1 start.)
+
+**OUTCOME (2026-09-07, branch `l1-integration-harness`).** Built + ran all four scenarios vs real Postgres
+16 + Redis 7. Scenarios 1/3/4 passed; **scenario 2 exposed a real HIGH consumability gap that 2315 unit
+tests missed** — the `create_and_start`/`start` drive paths enqueued a bot config **missing
+`venueAccountId`** (`BotConfigSchema` strips it; the `bots` row carries it in a column, not the config
+JSON), so the BullMQ `start` job's `ActorFactory` threw `no injected venueAccountId — refusing to start`.
+Fixed as wiring (the drive path now stamps `venueAccountId`+`ownerId` onto the enqueued config) + a
+default-suite regression guard. Re-ran: **all 4 green.** **Disposition (per the merge gate + `main`
+discipline):** the **fix** is permanent product code → cherry-picked to `main` (`f7a0dd1`); the **harness**
+(compose, `scripts/it.sh`, `test:integration`, the gated integration test, relocated fixtures) is
+**scaffolding → held on the `l1-integration-harness` branch, NOT on `main`.** It merges only at the
+milestone (the four-part merge gate in [AGENTS.md](../AGENTS.md)). L1 converted "consumable end-to-end"
+from asserted to demonstrated, and found the one gap that would have broken a real consumer.
 
 ### L2 — differential guarantee vs the pinned herobids ref
 - **Shape:** pin a herobids commit SHA (record it here); check it out to a git worktree; build a harness
@@ -105,12 +118,33 @@ Legend: `Done` / `Active` / `Queued` / `Blocked (needs decision)`.
 - **Feeds the 001 cutover gates:** "Consumer boundary contract validated," "Side-effecting parity
   validated," "Operational readiness passed," "Rollback path rehearsed."
 
-## Sequencing
+## Sequencing — `L1 → L2 → F → L3` (the order is deliberate, not arbitrary)
 
-`L1 → (L2 ∥ F) → L3`. L1 is immediate and in-bounds. L2 and F are both unblocked by L1 and can proceed in
-parallel (L2 needs no REST; F needs no differential) — do whichever the human directs first; the roadmap
-does not force an order between them. L3 needs both F (its consumer surface) and L2 (its acceptance
-guarantee), and is herobids-owner-executed.
+**The order is `L1 → L2 → F → L3`. L2 is before F, or skipped entirely — NEVER after F.** (Corrected
+2026-09-07; an earlier draft wrongly treated L2 and F as parallel.)
+
+Why the order is fixed this way:
+
+- **L2 tests the BARE LIBRARY directly.** Its whole value is a differential guarantee on `@traderton/*`
+  itself — same inputs → identical trading outputs vs the pinned herobids reference. That clean,
+  library-level test only cleanly exists **before F wraps the library in the REST boundary.** Run L2 after
+  F and you are testing the library *through* the adapter — any discrepancy is now ambiguous (library or
+  adapter?), and you are re-proving the library through an unnecessary layer. So **L2 belongs before F**.
+- **L2 is optional; F is not.** L2 is a verification/guarantee level — you *may* skip it and rely on F's
+  own verification + L3's differential at the REST boundary. But **if you want the library-level guarantee
+  at all, it must come now (pre-F)** — the window closes once F exists. F, by contrast, is **mandatory**:
+  per the legal constraint (trading is a REST-only separate deployable — see
+  [000](./000-vision.md) "The end state" + [004](./004-decision-log.md) "Why trading is an isolated
+  REST-only deployable"), the REST boundary is the ONLY shape a consumer legally uses. There is no
+  in-process cutover.
+- **F is production surface; L1/L2 are verification.** F (the 005 REST adapter) is durable production code
+  and the cutover boundary. L1 (done) and L2 verify the library *about* which F is built.
+- **L3 needs both F and L2.** L3 = herobids consumes Traderton **over REST** (F's boundary) and passes the
+  acceptance guarantee (L2's differential, now at the boundary) → cutover. L3 is **herobids-owner-executed**
+  (it edits herobids, which we never do — see §Ownership boundary).
+
+L1 is done ([above](#the-four-levels)). **Next is L2** (in-repo differential vs the pinned herobids ref),
+unless the human elects to skip it and go straight to F.
 
 ## What this roadmap does NOT change
 

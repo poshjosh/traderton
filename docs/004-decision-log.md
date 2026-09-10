@@ -365,9 +365,55 @@ consumer" model will mis-file such a capability as optional backlog and risk a s
 parity regression at cutover. The model is now explicit in 000; the ledger must tag
 required-for-cutover Deferrals distinctly from optional ones.
 
+## Why trading is an isolated REST-only deployable (legal, not architectural)
+
+Added 2026-09-07 (human-stated constraint). **This is a business/legal requirement that
+overrides the earlier "herobids consumes in-process" framing** — read it before the M1/M2
+section below.
+
+**The constraint.** Payment providers commonly **restrict or deny trading activity**. If
+trading code runs inside the agent/messaging platform's deployable, it puts the platform's
+payment rails (subscriptions, billing — the platform's actual revenue) at risk of being
+restricted or cut off. To ring-fence that risk, **trading must not ship inside the platform
+at all — not even as an imported in-process library.** Traderton is therefore its **own
+standalone deployable at its own top-level domain (TLD)**, and every consumer (herobids
+included) reaches it **only over the REST boundary** ([005](./005-consumer-boundary-contract.md)).
+
+**Why this is legal, not technical.** Technically, herobids *could* import `@traderton/*`
+and drive it in-process — the ports compose (L1 proved it, [024](./024-verification-and-consumption-roadmap.md)).
+That option is closed by the payment/legal risk, not by architecture. A future agent seeing a
+monorepo with `@traderton/*` packages will be tempted to conclude "in-process consumption is
+simpler for herobids" — **that conclusion is wrong here**, and this entry exists so it is not
+re-derived. In-process is a *verification* shape only; it is never a shipping shape.
+
+**Consequences (load-bearing for the roadmap):**
+1. **M2/REST is mandatory, not optional.** It is the cutover boundary — the only shape any
+   consumer legally uses. Item F (the 005 REST adapter) is required, not a nice-to-have.
+2. **M1 (in-process) is re-labelled** from "library consumer" to a **Traderton-internal
+   assembly + verification** milestone (driven by a test harness, not herobids). The M1/M2
+   section below is corrected accordingly.
+3. **The verification order in [024](./024-verification-and-consumption-roadmap.md) follows
+   from this:** L2 (the differential guarantee) tests the **bare library directly** and must
+   run **before** F wraps it in REST — testing the library after the REST layer would test it
+   *through* the adapter, conflating library vs. adapter discrepancies. So L2 is
+   **before-F-or-skipped, never after F**; then F (the required REST boundary); then L3
+   (herobids consumes over REST → cutover). See 024 for the sequence + its rationale.
+
 ## Why there is an interim "library consumer" milestone (M1) before the API (M2)
 
 Added 2026-09-06, while resolving the Phase 8 (`apps/worker`) stop-gate.
+
+> **CORRECTED 2026-09-07 — read the next section ("Why trading is an isolated REST-only
+> deployable") first.** This section originally called M1 a "library consumer" milestone in
+> which *herobids* consumes Traderton in-process. A later legal/business constraint overrides
+> that: trading cannot ship inside the platform deployable even as an imported library, so
+> **herobids never consumes Traderton in-process — its only consumption shape is M2/REST.**
+> M1 remains exactly as valuable, but re-labelled: it is a **Traderton-internal in-process
+> *assembly + verification* milestone** (the extraction proves itself in one process, driven
+> by a test/verification harness — see L1 in [024](./024-verification-and-consumption-roadmap.md)),
+> **not** a state herobids runs trading in. Everything below about "same ports, two adapters"
+> and "defer authoring to M2" still holds; only "herobids consumes in-process at M1" is wrong —
+> substitute "a verification harness drives the assembled library in-process at M1."
 
 For a long time the docs described a single end state: "herobids becomes a consumer of
 Traderton **over the boundary**" — i.e. HTTP/REST (005). That framing was load-bearing in a
