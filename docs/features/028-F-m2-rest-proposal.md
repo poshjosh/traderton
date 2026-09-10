@@ -1,6 +1,20 @@
 # 028 — F: M2 REST Boundary Adapter — Proposal
 
-**Status:** PROPOSAL — for human review. No code written. On branch `f-m2-rest`.
+**Status:** APPROVED (2026-09-07, human) — the 5 decisions in §5 are locked. Executed on branch
+`f-m2-rest`, split F1/F2; merges to `main` only at the milestone (merge gate). This doc is the design
+record; the F1 implementer prompt is [029](./029-F1-implementer-prompt.md).
+
+> **Decisions locked (2026-09-07):**
+> - **§5.1 = tools:invoke-only.** F is the 005 single-entry-point boundary; the per-resource
+>   `_deferred-authoring/api-routes/**` are **NOT reproduced** — trading capability rides the 25 copied
+>   tools; platform-table routes (`agents`/`connections`/`blueprints`/`agentRuntimeSessions`) are
+>   **signed-off Gaps** (logged in 001/003).
+> - **§5.2 = Postgres.** A new `boundary_invocations` table + repo + migration is the idempotency store.
+> - **§5.3 = Fastify** (the HTTP server lib; the boundary itself is authored fresh).
+> - **§5.4 = F1/F2 split.** **F1** = shell + HMAC auth + envelope/version validation + `tools:invoke`
+>   dispatcher over `ToolRegistry` + health, scoped to **read-only tools**. **F2** = idempotency + deadline
+>   + side-effecting tools + the 7 required-verification tests. F1 lands + is reviewed before F2.
+> - **§5.5 = the 7 required-verification tests** (005 §"Required Verification") are the F acceptance gate.
 **Item:** Phase 9b **item F** (the last 9b item) — the M2 REST boundary per
 [005-consumer-boundary-contract.md](../005-consumer-boundary-contract.md). Also **level F** of the
 verification/consumption roadmap ([024](../024-verification-and-consumption-roadmap.md)) — the **mandatory

@@ -115,7 +115,7 @@ Every 9b item re-tested (2026-09-07, verified against herobids source) against f
 | **E. maxBots atomic** ✅ **DONE 2026-09-07** (decisions LOCKED — §7) | **COPY (bodies + advisory-lock pattern) + AUTHORED wiring** | **LANDED:** the two re-keyed `BotRepository` methods (bodies mirror herobids broker `repositories.ts:905–1027`; atomicity **copies** the API-path `pg_advisory_xact_lock(classId, hashtext(ownerId))` form, `MAXBOTS_LOCK_CLASS=17`, re-keyed `agents`-row→`ownerId`; count by `ownerId`; INSERT re-keyed no `userId`/`connectionId`) + the `createTradingRuntime` seam wiring (`maxBots` from `agentRiskDefaults` + injected `maxBotsOverride`) + the item-D `createAndStart` create→mark call. Two-call create→mark preserved (`running` = the `reclaimOrphans` contract). Build+lint green; 2315 tests (+7; +2 gated). See §7.5. |
 | **C2/G. Event producer — vocabulary + emitter** | **COPY** | The event envelope + per-event emitter methods (the trading subset, §ledger table) are clean and copyable (trading types). |
 | **C2/G. Event producer — durable persistence + Redis relay (outbox)** | **IMPROVEMENT (deferred)** | herobids is Redis-Streams-window-only for outbound events (verified: `xadd MAXLEN ~`, no Postgres). Postgres+Redis durable outbox is an improvement BEYOND parity → tracked in [014](./014-decision-response-and-event-model.md), decided separately, NOT built inside 9b. At 9b-parity: reproduce the Redis-window emitter (copy-shaped). |
-| **F. M2 REST adapter** | **AUTHORED** (+ COPY-adapt routes) | 005 is a fresh contract with no herobids equivalent (herobids uses JWT `request.userId`, not HMAC boundary) → the shell/auth/idempotency/deadline/dispatcher are authored. The trading route HANDLERS copy-adapt (`userId`→`ownerId`). Sequenced last (M2). |
+| **F. M2 REST adapter** (decisions LOCKED — §8.1; F1/F2 split) | **AUTHORED** (over copied tools) + GAP | Reframed 2026-09-07 (investigation): 005 is a **single `tools:invoke` boundary** over the 25 copied tools, NOT REST-per-resource; herobids has no 005-style boundary (JWT `request.userId`, verified) → the shell/HMAC-auth/envelope/idempotency/deadline/dispatcher/health are **authored-new** over `ToolRegistry`. The quarantined per-resource `api-routes/**` are **NOT reproduced** (signed-off Gap; capability rides the tools; platform-table routes stay herobids). Adds a `boundary_invocations` Postgres store (F2). Sequenced last (M2, mandatory shipped boundary). |
 | **F-routes. Agent-shaped routes** (`actor-health` = `/agents/:id/health`; `analytics` grouped by agent/session) | **HAND-BACK (Gap)** or boundary-inject | Some quarantined routes are inherently agent endpoints (verified: `agents`/`agentRuntimeSessions` refs). Decided route-by-route at F; agent-only ones stay herobids (signed-off Gap, not silent). |
 
 **Net irreducible AUTHORED surface (the risk):** (1) the composition-root factory [B], (2) the intake
@@ -739,35 +739,65 @@ seam wiring + the `createAndStart` create→mark call. Reviewed (CodeReviewer PA
 
 --- END OF M1 ---
 
-## 8. Item F — M2 REST boundary adapter (sequenced last)
+## 8. Item F — M2 REST boundary adapter (sequenced last; decisions LOCKED — §8.1)
 
-**What it is.** The authored Fastify adapter over the M1 ports, per [005](../005-consumer-boundary-contract.md):
-`POST /internal/v1/tools:invoke`, `GET /internal/v1/invocations/:requestId`, `GET /health/{live,ready}`;
-HMAC-SHA-256 auth over the canonical string; envelope validation (`TradertonToolInvocationV1` →
-toolName → Traderton-owned payload schema); idempotency keyed `(consumer_id, owner_id, tool_name,
-idempotency_key)` persisted before side effects; deadline enforcement; the closed
-`TradertonBoundaryFailureCode` union; readiness/health.
+> **Reshaped by investigation (2026-09-07): F is a `tools:invoke`-only boundary AUTHORED over the copied
+> tool surface — NOT a copy-adapt of the quarantined `api-routes/**`.** 005 is a single execution entry
+> point (a generic envelope dispatched to the 25 Traderton tools), not REST-per-resource; the quarantined
+> `api-routes/**` are herobids's *different* JWT per-resource control-plane; and herobids has **no**
+> 005-style boundary to copy (its auth is JWT `request.userId`). So the boundary is authored fresh over the
+> already-built `ToolRegistry` dispatch surface + the M1 ports. **Full design + evidence:
+> [028-F-m2-rest-proposal.md](./028-F-m2-rest-proposal.md) (APPROVED 2026-09-07).** This §8 is the
+> self-contained brief; an implementer works from §8 + 028 + 005, not this chat.
 
-**Authored-new (no herobids equivalent — 005 is a fresh contract):** the Fastify shell, HMAC middleware,
-envelope/idempotency/deadline machinery, the `tools:invoke` dispatcher, health endpoints. herobids' auth
-is JWT `request.userId` (user control-plane), **not** the HMAC boundary — not copied.
+### 8.1 Locked decisions (2026-09-07, human — do not re-litigate)
+- **(1) `tools:invoke`-only boundary.** F exposes the 005 endpoints (`POST /internal/v1/tools:invoke`,
+  `GET /internal/v1/invocations/:requestId`, `GET /health/{live,ready}`) and nothing else. The per-resource
+  `_deferred-authoring/api-routes/**` are **NOT reproduced** — their trading capability rides the 25 copied
+  tools invoked via `tools:invoke`; the platform-table routes (`agents`/`connections`/`blueprints`/
+  `agentRuntimeSessions`) are **signed-off Gaps** (log in 001/003). If a genuine trading query exists only
+  as a route and is not covered by a tool, it becomes a **new tool**, not a route.
+- **(2) Idempotency = Postgres.** A new `@traderton/db` `boundary_invocations` table + repo + migration
+  (key `(consumer_id, owner_id, tool_name, idempotency_key)`; fingerprint/requestId/correlationId/state/
+  terminal-response/timestamps/expiry). Retention configurable (`boundary.idempotencyRetentionHours: 168`).
+- **(3) Fastify** is the HTTP server lib (the boundary logic is authored fresh regardless).
+- **(4) F1/F2 split.** **F1** = the Fastify shell + HMAC-SHA-256 auth + envelope/version validation +
+  `tools:invoke` dispatcher over `ToolRegistry` + `/health/{live,ready}`, scoped to **read-only tools**.
+  **F2** = idempotency (the Postgres store) + deadline enforcement + side-effecting tools + the 7
+  required-verification tests. F1 lands + is reviewed before F2.
+- **(5) The 7 required-verification tests** (005 §"Required Verification") are the F acceptance gate.
 
-**Copied-and-adapted (the tool logic behind the dispatcher):** the 10 quarantined route handlers in
-`_deferred-authoring/api-routes/` become tool implementations, rewired `request.userId → subject.ownerId`
-and `userId → ownerId` columns (authored edits to copied files — logged Intentional Divergence). Cheapest:
-`reconciliation.ts`, `datasets.ts` (only #1+#2 blockers).
+### 8.2 What it is (authored 005 machinery over the copied tools)
+`tools:invoke` → authenticate (HMAC over `METHOD\nPATH\nX-Traderton-Timestamp\nSHA256(body)`; configured
+consumers/keys; clock-skew; constant-time; header↔body `caller` match) → validate `TradertonToolInvocationV1`
+(reject unknown outer keys; version compat) → `ToolRegistry.get(toolName)` → validate `payload` against
+`tool.parametersSchema` (Zod) → build a `TradingToolContext` (boundary supplies the signed `ownerId`/`actor`
++ the injected values) → `tool.execute(payload, ctx)` → map to `TradertonToolResultV1` with the closed
+`TradertonBoundaryFailureCode` union (10 codes; preserve `retryable`; leak no credentials/raw provider
+detail). F2 adds: persist idempotency **before** any side effect; reject expired `deadlineAt` pre-validation
++ re-check before each side effect; the status endpoint. Health: `/live` = process serves; `/ready` = config
++ persistence + boundary validation + mandatory deps.
 
-**Ports/invariant check.** The adapter is a **driver over the same M1 ports**; it injects values, not
-behaviour; unknown tool/payload/envelope → terminal validation failure before any side effect.
+### 8.3 Copied vs authored vs Gap
+- **AUTHORED (new — 005 is fresh, no herobids equivalent):** the Fastify shell, HMAC auth, envelope/version
+  validation, the `tools:invoke` dispatcher, result mapping, health (F1); the `boundary_invocations`
+  store+migration, idempotency logic, deadline enforcement, the status endpoint (F2); the 7 verification
+  tests. All boundary machinery — no trading behaviour.
+- **REUSED (copied M1 surface, unchanged):** the 25 tools + `ToolRegistry` (dispatch target), the
+  `TradingToolContext`, `createTradingRuntime` + the item-C/D drive path (side-effecting tools call it).
+- **GAP (signed off, Intentional Divergence — 001/003):** herobids's JWT per-resource control-plane
+  `_deferred-authoring/api-routes/**` — not reproduced; capability rides the tool surface; platform-table
+  routes stay herobids.
 
-**Open decision / possible Gap (surface to reviewer):** several route handlers reference platform tables
-absent from `@traderton/db` (`agents`, `connections`, `blueprints`, `blueprintRevisions`,
-`agentRuntimeSessions`). Options per route: inject the needed data at the boundary (value port), or
-declare the route out-of-scope for Traderton (a signed-off **Gap** — it stays a herobids control-plane
-route). This must be decided route-by-route at F step 1; flag any that can't be cleanly ported.
+**Ports/invariant check.** F injects values (signed `ownerId`/`actor`, deadline, idempotency key) and
+dispatches to copied tools; it authors no risk/planner/executor logic; HTTP/HMAC concerns stay in the
+adapter, never leaking into the core. ✓
 
-**Resolves / un-quarantines.** The API-surface rows; "Consumer boundary contract validated" cutover gate;
-un-quarantines `_deferred-authoring/api-routes/**` as adapted.
+### 8.4 Resolves
+The API-surface rows (as the tool surface over 005, not per-resource routes); the "Consumer boundary
+contract validated" cutover gate; F is the **mandatory shipped boundary** (legal REST-isolation posture —
+[000](../000-vision.md)/[004](../004-decision-log.md)). The quarantined `api-routes/**` are dispositioned as
+Gap (not un-quarantined). **F completes 9b.**
 
 ---
 
@@ -787,7 +817,7 @@ Buckets (§1a): **COPY** = verbatim / fused-file line-trim; **SEAM** = copied fi
 | E maxBots | COPY (bodies + advisory pattern) + AUTHORED wiring | count/insert/mark bodies (herobids broker `repositories.ts:905–1027`); `pg_advisory_xact_lock` form (herobids API `api-routes/bots.ts:135`, re-keyed `ownerId`) | the `createTradingRuntime` `BotLimitSeam` wiring (+ `maxBots` resolution) + the item-D `createAndStart` create→mark call | (drive-path create/start go fully live) |
 | G events (vocab/emitter) | COPY | event envelope + per-event trading emitter methods (Redis-window, parity) | — | — |
 | G events (durable outbox) | IMPROVEMENT (deferred) | — | — (tracked in [014](./014-decision-response-and-event-model.md), NOT 9b) | — |
-| F REST adapter | AUTHORED + COPY-adapt | trading route handlers (`userId`→`ownerId`); agent-only routes hand-back (Gap) | Fastify shell, HMAC, envelope/idempotency/deadline, dispatcher, health | `_deferred-authoring/api-routes/**` |
+| F REST adapter (tools:invoke-only; F1/F2) | AUTHORED (over copied tools) + GAP | (reuses the 25 copied tools + `ToolRegistry` as the dispatch target — unchanged) | F1: Fastify shell + HMAC auth + envelope/version validation + `tools:invoke` dispatcher + health (read-only tools). F2: `boundary_invocations` Postgres store + migration, idempotency, deadline, side-effecting tools, the 7 verification tests. | (per-resource `api-routes/**` NOT reproduced — signed-off Gap) |
 
 ## 10. Stop-gates specific to 9b (state the guard)
 
