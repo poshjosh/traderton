@@ -62,16 +62,20 @@ choice between them is a *deployment* decision, not an architectural one (§4 in
   contract. This is the **legally-motivated shipping posture today** (payment providers restrict
   trading, so trading must be isolable off the platform's payment rails — [004](./004-decision-log.md)).
 
-**⚠️ OPEN DECISION — which path herobids consumes FIRST (REST vs in-process) is NOT yet settled.** The
-existing docs (000/004/024) over-committed to "REST is the only cutover shape"; that overstates it. The
-*settled* facts are: (a) both paths are permanently supported; (b) REST is today's legal *shipping*
-posture. What is *open* is which path we build the herobids-consumption work against first. **Do not
-treat the first-path choice as decided.** (Awaiting the human's call — see §6 Open Decisions.)
+**SETTLED — herobids consumes over REST (M2); there is no in-process cutover.** This is recorded across
+[000](./000-vision.md), [004](./004-decision-log.md), and [024](./024-verification-and-consumption-roadmap.md)
+(L3 row: "over F's REST boundary (NOT in-process — legal constraint)"; sequencing: "the REST boundary is
+the ONLY shape a consumer legally uses — there is no in-process cutover"). The legal reason is decisive:
+consuming in-process would put `@traderton/*` back inside the herobids deployable, re-coupling trading to
+the platform's payment rails — the exact thing the split exists to prevent. **In-process is NOT the cutover
+path.** It remains a *permanently-supported non-cutover* path (dev/test/eval today; a future shipping option
+only if the legal hurdle lifts — invariant 3). So: which shape herobids *ships/cuts over* in is **decided —
+REST**; in-process is kept alive but is not how herobids consumes in production.
 
-**Immediate next work: herobids consumes Traderton** (the merge-gate work). This is governed by the
-verification & consumption roadmap [024](./024-verification-and-consumption-roadmap.md); the
-level structure there is L1 (done) → L2 (skipped) → **F (done)** → **L3 (herobids consumes → cutover)**.
-L3 is the next milestone. See §5 for the ownership-rule change L3 forces.
+**Immediate next work: herobids consumes Traderton over REST** (the merge-gate work). Governed by the
+verification & consumption roadmap [024](./024-verification-and-consumption-roadmap.md); the level structure
+is L1 (done) → L2 (skipped) → **F (done)** → **L3 (herobids consumes over REST → cutover)**. L3 is the next
+milestone. See §5 for the ownership-rule change L3 forces.
 
 ## 4. Invariants — the law (do not break)
 
@@ -104,35 +108,33 @@ L3 is the next milestone. See §5 for the ownership-rule change L3 forces.
    Intentional-divergence — never silently dropped. Forced mid-work deviations →
    [003](./003-anomalies-and-deviations.md).
 
-## 5. The consumption-phase rule change (herobids becomes editable — PENDING confirmation)
+## 5. The consumption-phase rule change (herobids is now editable — IN FORCE, scoped)
 
-Until now the roadmap [024](./024-verification-and-consumption-roadmap.md) drew a hard line: the
-herobids `consume-traderton` branch is *herobids-owner territory* — not ours to edit — because editing
-herobids violates invariant 6. **The consumption work (L3) inherently requires editing herobids**
-(deleting its trading code, wiring `@traderton/*`). So invariant 6 needs a scoped exception for this
-phase:
+Through extraction, invariant 6 held herobids fully READ-ONLY, and [024](./024-verification-and-consumption-roadmap.md)
+called the `consume-traderton` branch "herobids-owner territory." **The consumption work (L3) inherently
+requires editing herobids** (deleting its trading code, wiring the REST client to `@traderton/*`). So
+invariant 6 now carries a scoped exception, **CONFIRMED IN FORCE (2026-09-08, human):**
 
-> **Proposed (pending explicit human confirmation): the READ-ONLY rule is lifted for a designated
-> herobids consumption branch only.** On that branch, herobids trading code may be deleted and rewired
-> to consume `@traderton/*`. herobids `main` and all other branches remain untouchable. Extraction-era
-> copying still obeys copy-never-author; this exception is about *consuming*, not *authoring trading
-> behaviour*.
+> **The READ-ONLY rule is lifted for a designated herobids consumption branch ONLY.** On that branch,
+> herobids trading code may be deleted and rewired to consume Traderton over the REST boundary (F/005).
+> **herobids `main` and every other branch remain untouchable.** The branch's acceptance bar is herobids'
+> own trading test suite green + the REST differential; **merging that branch to herobids `main` = cutover
+> and requires explicit human approval** (matching the merge gate, invariant 5). Extraction-era copying
+> still obeys copy-never-author; this exception is about *consuming*, not *authoring trading behaviour*.
 
-**This is not yet confirmed.** Two things must be settled with the human before any herobids edit
-(§6): (a) whether the agent edits herobids on that branch or the human drives it; (b) which consumption
-path (REST vs in-process) that branch targets first. Until then, treat herobids as READ-ONLY.
+**Working posture (per the human, 2026-09-08):** the work continues *in herobids*, on that branch. Do NOT
+edit herobids `main` or any other branch; do NOT treat "herobids is editable" as general — it is the named
+consumption branch only.
 
 ## 6. Open decisions (need a human steer before proceeding)
 
-- **O1 — First consumption path: REST (M2) or in-process (M1)?** Both are supported; which does the
-  herobids-consumption work build against first? (§3.) In-process needs a package-linkage mechanism
-  (workspace/file/pin); REST needs only a base URL + signing secret + the running boundary. Not decided.
-- **O2 — Who edits herobids for L3, and confirm the read-only exception (§5)?** Agent-on-a-branch vs
-  human-driven. Until confirmed, herobids stays READ-ONLY.
-- **O3 — The `f-m2-rest` branch disposition.** F is complete + proven there but unmerged (merge gate
+- **O1 — The `f-m2-rest` branch disposition.** F is complete + proven there but unmerged (merge gate
   unmet). It stays a branch until the gate is met; confirm it is not merged early.
 - Longer-standing opens (from [000](./000-vision.md) "Open"): the backend→consumer event/streaming
   channel; venue/execution cost reporting across the boundary.
+
+*(Resolved and moved out of this list: the first/cutover consumption path = REST (§3, was O1); who edits
+herobids + the read-only exception = agent works on the herobids consumption branch (§5, was O2).)*
 
 ## 7. Settled decisions (flat index — the authority for each is in parentheses)
 
@@ -169,8 +171,8 @@ Later settled decisions (reasoning in [004](./004-decision-log.md), records wher
 
 **Live docs (authoritative for their scope; stay in `docs/`):**
 - [000-vision.md](./000-vision.md) — the goal, the copy-never-author law, "herobids becomes a consumer,"
-  the 17 settled decisions. The vision/law. *(Note: its REST-only-cutover framing is superseded by §3
-  here — the first-path choice is open.)*
+  the 17 settled decisions. The vision/law. *(Its REST-cutover framing is CORRECT and settled — see §3;
+  in-process is a supported non-cutover path, not the shipping shape.)*
 - [001-parity-ledger.md](./001-parity-ledger.md) — **the source of truth for capability done-vs-pending
   + the cutover gates.** Acceptance tracking.
 - [003-anomalies-and-deviations.md](./003-anomalies-and-deviations.md) — forced deviations + source-fix
@@ -187,8 +189,9 @@ Later settled decisions (reasoning in [004](./004-decision-log.md), records wher
 - [010-improvement-backlog.md](./010-improvement-backlog.md) — deliberate non-blocking later-options
   (B1–B9), graded Value/Effort + Risk-if-deferred. NOT cutover obligations (those → 001/003) or bugs.
 - [024-verification-and-consumption-roadmap.md](./024-verification-and-consumption-roadmap.md) — the
-  post-M1 level roadmap (L1 done, L2 skipped, F done, L3 next) + the L3 ownership boundary. *(Its
-  "REST is the only cutover shape" is superseded by §3/§5 here.)*
+  post-M1 level roadmap (L1 done, L2 skipped, F done, L3 next). *(Its REST-only-cutover call is CORRECT
+  and settled — §3. Its "L3 ownership = herobids-owner territory" is now superseded by §5: we work the
+  consumption branch in herobids ourselves.)*
 
 **Historical (in [`archive/`](../archive/) — reasoning trail; do NOT re-execute):** the extraction
 roadmap + phase plans (`archive/002`, `archive/008`, `archive/009`, `archive/features/001-009`), the M1

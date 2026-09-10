@@ -29,8 +29,8 @@ Those three orient you. The canonical brief points you to the rest below **when 
 - **[docs/004-decision-log.md](./docs/004-decision-log.md)** — the *why* behind every decision.
   Read when a rule seems arbitrary or a case isn't covered.
 - **[docs/000-vision.md](./docs/000-vision.md)** — the goal, the copy-never-author law, the 17
-  settled decisions. *(Its "REST is the only cutover shape" framing is superseded by
-  CANONICAL-STATE §3 — the first-consumption-path choice is OPEN.)*
+  settled decisions. *(Its REST-cutover framing is CORRECT and settled — CANONICAL-STATE §3; in-process
+  is a supported non-cutover path.)*
 - **[docs/003-anomalies-and-deviations.md](./docs/003-anomalies-and-deviations.md)** — forced
   deviations + source-fix request log. Read/append when you hit a deviation.
 - **[docs/010-improvement-backlog.md](./docs/010-improvement-backlog.md)** — deliberate,
@@ -43,8 +43,9 @@ Those three orient you. The canonical brief points you to the rest below **when 
 - **[docs/007-operational-readiness.md](./docs/007-operational-readiness.md)** — the cutover
   proof (latency/equivalence/restart/rollback). Read at L3/cutover.
 - **[docs/024-verification-and-consumption-roadmap.md](./docs/024-verification-and-consumption-roadmap.md)**
-  — the post-M1 level roadmap (L1 done, L2 skipped, F done, L3 next). *(Its "REST is the only
-  cutover shape" is superseded by CANONICAL-STATE §3/§5.)*
+  — the post-M1 level roadmap (L1 done, L2 skipped, F done, L3 next). *(REST-only-cutover = correct/settled;
+  its "L3 = herobids-owner territory" is superseded by CANONICAL-STATE §5 — we work the consumption branch
+  in herobids ourselves.)*
 - **[archive/](./archive/)** — **historical (do NOT re-execute):** the extraction roadmap + phase
   plans, the M1 review, the Phase-9b authoring plan + per-item proposals/prompts, and the F
   proposals/prompts. This is the *how-we-got-here* reasoning trail (incl. the F1–F2c landing logs
@@ -65,11 +66,11 @@ In brief (2026-09-08):
 - **F — the M2 REST boundary — is COMPLETE on branch `f-m2-rest`** (F1+F2a+F2b+F2c), proven
   end-to-end (compose up + all 7 of 005's required-verification tests). **NOT merged to `main`**
   (merge gate unmet). L1 done (its fix cherry-picked to `main` as `f7a0dd1`); L2 skipped.
-- **The next work is L3 — herobids consumes `@traderton/*` → cutover** (the merge-gate work),
-  governed by [024](./docs/024-verification-and-consumption-roadmap.md).
-- **Two OPEN decisions gate L3 (CANONICAL-STATE §6):** O1 — which consumption path herobids uses
-  FIRST (REST vs in-process — NOT decided); O2 — who edits herobids and confirming the read-only
-  exception below. Do not start herobids edits until these are settled with the human.
+- **The next work is L3 — herobids consumes `@traderton/*` over REST → cutover** (the merge-gate work),
+  governed by [024](./docs/024-verification-and-consumption-roadmap.md). SETTLED (CANONICAL-STATE §3/§5):
+  the cutover shape is **REST** (no in-process cutover); the work happens **in herobids, on a designated
+  `consume-traderton` branch** (the read-only exception is IN FORCE for that branch only — §5). herobids
+  `main` and all other branches stay untouchable; merging the branch = cutover, human-approved.
 - Run the usual loop: investigate → propose → **pause for human** → self-contained implementer
   prompt → coordinator loop → update docs. Each level/item on its own branch. Nothing merges to
   `main` without the human (the merge gate).
