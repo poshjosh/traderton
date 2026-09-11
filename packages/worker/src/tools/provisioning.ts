@@ -24,8 +24,9 @@
 import { z } from 'zod';
 import crypto from 'node:crypto';
 import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domain';
+import { and, eq } from 'drizzle-orm';
 import type { Database } from '@traderton/db';
-import { userCredentials, venueAccounts } from '@traderton/db';
+import { userCredentials, venueAccounts, bots } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
 import { encryptCredential, getEncryptionKey } from '../crypto.js';
 import { findProviderRegistryEntry } from '../providers/registry.js';
@@ -243,4 +244,137 @@ const provisionVenueAccountTool: AgentTool<TradingToolContext> = {
   },
 };
 
-export const provisioningTools: AgentTool<TradingToolContext>[] = [provisionVenueAccountTool];
+// AUTHORED SEAM (L3-P1c) — the `deprovision_venue_account` boundary tool.
+//
+// The delete counterpart of provision. Thin route→tool seam over the copied,
+// quarantined accounts DELETE handler (`_deferred-authoring/api-routes/accounts.ts`)
+// — it authors NO deletion policy. Copied behaviour (verified against CURRENT
+// herobids practice, the copy source): block on ANY bot referencing the venue
+// account (no status filter) + the FK-`23503` fallback for the pre-check→delete
+// race. Adapt (author only this): Fastify route → `AgentTool`; JWT `request.userId`
+// → boundary-resolved `ctx.ownerId`; replies → `ToolResult`; and the credential
+// CASCADE (delete the account THEN its credential, mirroring `deleteProviderLink`
+// — the quarantined single-account handler deleted only the account).
+//
+// Legal split (L3-P1c §4): this blocks ONLY on Traderton-owned dependents (running
+// or otherwise — any `bots` row on the account). The platform-owned blocking checks
+// (`connections`/`agent_connections`) STAY in herobids, run BEFORE it calls this.
+//
+// Metadata-only result — never secrets.
+const DeprovisionVenueAccountParamsSchema = z.object({
+  venueAccountId: z.string().min(1),
+});
+
+type DeprovisionVenueAccountParams = z.infer<typeof DeprovisionVenueAccountParamsSchema>;
+
+const deprovisionVenueAccountTool: AgentTool<TradingToolContext> = {
+  name: 'deprovision_venue_account',
+  description:
+    "Delete a venue account and its trading credential in one step. Refuses (in_use) if any bot references the account. Returns the deleted venueAccountId. Use this to offboard an owner's exchange/wallet; the consumer must first clear its own platform dependents (connections/agent grants).",
+  parametersSchema: DeprovisionVenueAccountParamsSchema,
+  parameters: convertZodToJsonSchema(DeprovisionVenueAccountParamsSchema),
+  category: 'write-database',
+  promptGuidance:
+    'Provide the venueAccountId to remove. Fails with in_use if a bot still references it. The account and its linked credential are both deleted. Irreversible.',
+  async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const params = rawParams as DeprovisionVenueAccountParams;
+
+    if (!ctx.db) {
+      return {
+        success: false,
+        fault: true,
+        error: 'Database access not available in this context',
+        errorCode: 'provision.db_unavailable',
+      };
+    }
+    if (!ctx.ownerId || !ctx.ownerId.trim()) {
+      return {
+        success: false,
+        fault: true,
+        error: 'Owner identity not available in this context',
+        errorCode: 'provision.owner_unavailable',
+      };
+    }
+    const db = ctx.db as Database;
+    const ownerId = ctx.ownerId;
+    const { venueAccountId } = params;
+
+    // 1. Load the account, owner-scoped. Capture its credentialId for the cascade.
+    //    Absent/unowned → not_found (copied practice: credentials.ts / provider-links.ts).
+    const [account] = await db
+      .select({ id: venueAccounts.id, credentialId: venueAccounts.credentialId })
+      .from(venueAccounts)
+      .where(and(eq(venueAccounts.id, venueAccountId), eq(venueAccounts.ownerId, ownerId)));
+
+    if (!account) {
+      return {
+        success: false,
+        fault: false,
+        error: `Venue account not found: ${venueAccountId}`,
+        errorCode: 'not_found.resource',
+      };
+    }
+
+    // 2. Fail-closed on ANY bot referencing the account (copied any-bot rule).
+    //    bots.venueAccountId is ON DELETE RESTRICT — pre-check, then FK fallback.
+    const inUseFailure = (botIds: string[]): ToolResult => ({
+      success: false,
+      fault: false,
+      error: `Venue account ${venueAccountId} is in use by bot(s): ${botIds.join(', ')}`,
+      errorCode: 'provision.in_use',
+    });
+
+    const blockingBots = await db
+      .select({ id: bots.id })
+      .from(bots)
+      .where(eq(bots.venueAccountId, venueAccountId));
+    if (blockingBots.length > 0) {
+      return inUseFailure(blockingBots.map((b) => b.id));
+    }
+
+    // 3. ONE transaction: delete the venue account FIRST, then its credential.
+    //    FK order: venue_accounts.credentialId → userCredentials is ON DELETE
+    //    RESTRICT, so the account must go before the credential.
+    const credentialId = account.credentialId;
+    try {
+      await db.transaction(async (tx) => {
+        await tx.delete(venueAccounts).where(eq(venueAccounts.id, venueAccountId));
+        if (credentialId) {
+          await tx.delete(userCredentials).where(eq(userCredentials.id, credentialId));
+        }
+      });
+    } catch (err: unknown) {
+      // FK violation — a bot linked between the pre-check and the delete (race).
+      // Re-query and return the same in_use failure (never a raw error).
+      const pgErr = err as { code?: string };
+      if (pgErr.code === '23503') {
+        const concurrentBots = await db
+          .select({ id: bots.id })
+          .from(bots)
+          .where(eq(bots.venueAccountId, venueAccountId));
+        return inUseFailure(concurrentBots.map((b) => b.id));
+      }
+      const message = err instanceof Error ? err.message : 'unknown error';
+      return {
+        success: false,
+        fault: true,
+        error: `Failed to deprovision venue account: ${message}`,
+        errorCode: 'provision.persist_failed',
+      };
+    }
+
+    // 4. Metadata-only success.
+    return {
+      success: true,
+      data: {
+        venueAccountId,
+        deleted: true,
+      },
+    };
+  },
+};
+
+export const provisioningTools: AgentTool<TradingToolContext>[] = [
+  provisionVenueAccountTool,
+  deprovisionVenueAccountTool,
+];
