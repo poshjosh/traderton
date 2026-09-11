@@ -247,3 +247,9 @@ explain the inventory state; they do not waive the mandatory contract, readiness
 or rollback gates. A `Deferred (required for cutover)` entry does **not** get to
 explain-and-pass — it must be resolved (or re-accepted as a signed-off `Gap`)
 before cutover.
+
+### L3-P1b outstanding issues (herobids-side re-point, reviewed 2026-09-11 — PASS, no critical/high)
+
+- **MEDIUM — `checkVenueAccountLimit` is ineffective for trading links post-L3-P1b. `Deferred (required for cutover)`.** herobids' `apps/api/src/plan-guards.ts` `checkVenueAccountLimit` counts rows in herobids' LOCAL `venue_accounts` table, but the trading path no longer writes that table (venue accounts are boundary-owned now). So the per-plan venue-account cap silently stops enforcing for boundary-provisioned accounts (the local count is ~0). §6 intended this check KEPT; it is kept in form but not in substance. Resolve before cutover — either (a) Traderton enforces the venue-account plan limit at the boundary (a VALUE herobids injects, mirroring maxBots #4), or (b) herobids counts `connections WHERE resolvedVenueAccountId IS NOT NULL` as a proxy for owned venue accounts. Belongs to the `venue_accounts` / provisioning rows.
+- **LOW — over-limit trading provision does a provision→deprovision round-trip.** In L3-P1b the venue-account/connection limit is re-checked in Phase 2 (after the boundary provision); an over-limit request therefore provisions then compensates (deprovisions). Correct (no orphan) but slightly wasteful. Acceptable — the compensation path must exist regardless. Optional optimisation: a pre-provision proxy check.
+- **LOW — `apps/api/src/trading-provisioner.ts` is now unused** (no importers after the setup.ts re-point). Left in place; delete in a later cleanup slice (part of the eventual venue/credential-table teardown).
