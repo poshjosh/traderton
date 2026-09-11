@@ -119,7 +119,13 @@ async function main(): Promise<void> {
       agentId: request.actor.id,
       sessionId: `boundary:${request.ownerId}`,
       executionMode: injection.ownerMode,
-      authorizationMode: 'approval_required',
+      // The boundary executes what it is given — human approvals are the
+      // consumer's PRE-boundary job (CANONICAL-STATE D3/§3.2 P2): Traderton owns
+      // no approval machinery, so `authorizationMode` is 'direct'. A consumer
+      // that needs approval holds `pending_approval` upstream and only calls the
+      // boundary for an already-approved decision; `pending_approval` never
+      // crosses the wire (the boundary result is success|failure only).
+      authorizationMode: 'direct',
       redis: redis as unknown as TradingToolContext['redis'],
       publishToInbound,
       botRepo: botRepo as unknown as TradingToolContext['botRepo'],
