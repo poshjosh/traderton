@@ -129,8 +129,17 @@ human; recorded here (Traderton is the authority until cutover).
   side of the seam; Traderton copies the `venue_accounts` + `user_credentials` half — the OWN side). This is
   **new 005 surface** and carries **`user_credentials` (venue API keys) across the boundary** → it requires
   its own credential-custody design pass (transport, encryption-at-rest, never-logged). **Its own slice
-  (call it L3-P1), sequenced AFTER L3c authoring, BEFORE L3e** (L3c unit-tests against a stub and does not
-  need it). Staging may operator-seed accounts in the interim.
+  (L3-P1), sequenced AFTER L3c authoring, BEFORE L3e** (L3c unit-tests against a stub and does not need it).
+  Staging may operator-seed accounts in the interim. **APPROVED 2026-09-08 —
+  [docs/features/L3-P1-provision-venue-account-proposal.md](./features/L3-P1-provision-venue-account-proposal.md);
+  decisions:** **D1** = ONE tool `provision_venue_account` (credential + venue_account in one idempotent
+  call, returns `venueAccountId`); **D2** = credentials cross the wire in the payload (HMAC+TLS →
+  `encryptCredential` at rest → never logged; result is metadata only); **D3** = the copied per-user
+  plan-limit (`checkCredentialLimit`) is DROPPED at the boundary (herobids pre-boundary concern, like #4);
+  **D4** = runs now on a Traderton branch, parallel to herobids L3c, before L3e. **Key:** the trading half is
+  already COPIED into the quarantine (`crypto.ts`, `_deferred-authoring/api-routes/{credentials,accounts}.ts`,
+  the `user_credentials` schema) → L3-P1 is un-quarantine+adapt (JWT-route→HMAC-tool, `userId`→`ownerId`),
+  not author.
 - **P2 — Traderton `authorizationMode` is vestigial → make it honest.** `packages/boundary/src/bin.ts`
   hardcodes `authorizationMode: 'approval_required'` on the built `TradingToolContext`, but Traderton has no
   approval machinery (deleted). **Decision:** set it to `'direct'` (the boundary executes what it is given;

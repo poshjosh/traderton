@@ -1,6 +1,10 @@
 # L3-P1 — `provision_venue_account` boundary tool (investigate → propose)
 
-**Status:** PROPOSAL — awaiting human decisions (§7). Do NOT implement yet.
+**Status:** APPROVED (2026-09-08, human). D1–D4 locked per §7 recommendations: (A) one
+`provision_venue_account` tool; credentials-in-payload/encrypted-at-rest confirmed; plan-limit dropped at
+the boundary; runs now on a Traderton branch parallel to L3c, before L3e. Decisions mirrored in
+CANONICAL-STATE §3.2. Implementation proceeds on branch `l3-p1-provision`, coordinator loop, pause before
+merge.
 **Slice:** L3-P1 of the consumption phase (its own slice, AFTER L3c authoring, BEFORE L3e — CANONICAL-STATE
 §3.2 P1). Traderton-side; I do this on a Traderton branch.
 **Reads:** [CANONICAL-STATE.md](../CANONICAL-STATE.md) §3.2 (P1), [005](./../005-consumer-boundary-contract.md)
