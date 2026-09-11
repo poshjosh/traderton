@@ -82,28 +82,68 @@ milestone. See §5 for the ownership-rule change L3 forces.
 The investigation + proposal are in **herobids** on branch `consume-traderton` (the working spec lives where
 the work is; it points back to this brief + [005](./005-consumer-boundary-contract.md)). The seam: herobids
 deletes its in-tree trading execution (packages `engine`/`venues`/`market-data`/`strategy`/`backtesting` +
-the worker actor/runtime loop + the trading DB) and rewires ~5–6 fusion points (the message-broker
-`handleManageBot`, the decision handler `handleDecisionSubmit`, the worker composition root, the API bot
-route, the `ToolContext` type, the read tools) to signed REST `tools:invoke` calls, keeping the platform
-grant layer / broker / LLM / approvals / `maxBots` and injecting their VALUES into the 005 envelope.
+the worker actor/runtime loop + the trading DB, **incl. the `bots` table + all `maxBots` logic** — see §3.2 #4)
+and rewires ~5–6 fusion points (the message-broker `handleManageBot`, the decision handler
+`handleDecisionSubmit`, the worker composition root, the API bot route, the `ToolContext` type, the read
+tools) to signed REST `tools:invoke` calls, keeping the platform grant layer / broker / LLM / (pre-boundary)
+approvals and injecting only `ownerId`+`actor` into the 005 envelope.
 
 **Locked decisions (D1–D5):**
 - **D1** — work on herobids `consume-traderton`; herobids `main` + all other branches untouchable; merge =
   cutover, human-approved (invariant 5).
-- **D2 — `venue_accounts` ownership after cutover:** **Traderton owns `venue_accounts` + `user_credentials`**
-  (it makes the venue calls — vision decision 12). herobids injects the `venueAccountId` it resolves from
-  the **connection grant it already owns** (`connections.resolvedVenueAccountId`) — a platform VALUE it
-  holds without storing the account row.
+- **D2 — venue-account ownership + what crosses the wire (CORRECTED 2026-09-08 to match the 005 contract):**
+  **Traderton owns `venue_accounts` + `user_credentials` and RESOLVES the venue account itself** (its
+  `subject-resolver.ts` reads its own DB — `getBotById` for bot-scoped tools, `listVenueAccountsByOwner`
+  for `submit_decision`/`create_bot`). **herobids injects `ownerId` + `actor` ONLY** — the 005 envelope
+  (`TradertonToolInvocationV1`, `.strict()`) has NO `venueAccountId` field, so nothing else can cross the
+  wire. *(The earlier D2 wording — "herobids injects `venueAccountId` from `connections.resolvedVenueAccountId`"
+  — was the stale pre-extraction in-process mental model; it does not apply on the REST path and is void.)*
 - **D3 — `submit_decision` async mapping:** the current synchronous 30s Redis-BLPOP reply maps onto 005 as
-  **invoke → poll `GET invocations/:requestId` to the deadline**, preserving all reply statuses;
-  `pending_approval` stays a **herobids** outcome produced by the platform approval gate *before* the
-  boundary call (the boundary only executes an already-approved decision). *Shortcoming of polling +
-  the push/webhook alternative are recorded as backlog B10 ([010](./010-improvement-backlog.md)).*
+  **invoke → poll `GET invocations/:requestId` to the deadline**, preserving all reply statuses. **`pending_approval`
+  is NOT a Traderton concept** — Traderton has no approval machinery (the `decision_approvals` table +
+  `ApprovalService` were deleted; the `TradertonToolResultV1` outcome union is only `success`|`failure`). The
+  herobids approval gate runs **entirely pre-boundary**: if a decision needs approval, herobids produces
+  `pending_approval` itself and does NOT call the boundary; on human approve it calls `submit_decision` as a
+  plain execute. `pending_approval` never crosses the wire. *(Polling shortcoming + push/webhook alternative:
+  backlog B10 ([010](./010-improvement-backlog.md)).)*
 - **D4 — sub-phasing:** **L3a** (Traderton REST client + config + signer; no rewire) → **L3b** (rewire the
   read tools) → **L3c** (rewire the side-effecting path) → **L3d** (delete the trading packages + worker
   loop + trading DB) → **L3e** (REST-boundary differential + staging soak + the merge gate). Read-path
-  before write-path; delete last (mirrors F1's read-only-first).
+  before write-path; delete last (mirrors F1's read-only-first). **P1 (venue-account provisioning, §3.2) is
+  its own slice before L3e.**
 - **D5 — doc placement + repo-of-record transition (see §5.1).**
+
+### 3.2 L3c investigation — cross-boundary items surfaced + resolved (2026-09-08)
+
+L3c investigation surfaced four things that cross the herobids/Traderton boundary. All resolved with the
+human; recorded here (Traderton is the authority until cutover).
+
+- **#1 — D2 wording was stale.** Resolved: see the corrected D2 above. herobids injects `ownerId`+`actor`
+  only; Traderton owns+resolves `venue_accounts`. (herobids' own D2 §8 to be corrected on its branch.)
+- **P1 — venue-account provisioning into Traderton (a real gap; its OWN slice before L3e).** For
+  `submit_decision`/`create_bot` to work end-to-end, Traderton's `venue_accounts` (+ `user_credentials`)
+  must already hold the owner's account, or `subject-resolver.ts` returns `precondition.not_ready`. There is
+  **no provisioning tool** in the 005 contract/registry today. **Decision:** author a Traderton
+  **`provision_venue_account`** boundary tool, **COPIED from the trading half of herobids' holistic
+  connection-provisioning endpoint** (herobids keeps the `connection`/`agent_connection` half — the KEEP
+  side of the seam; Traderton copies the `venue_accounts` + `user_credentials` half — the OWN side). This is
+  **new 005 surface** and carries **`user_credentials` (venue API keys) across the boundary** → it requires
+  its own credential-custody design pass (transport, encryption-at-rest, never-logged). **Its own slice
+  (call it L3-P1), sequenced AFTER L3c authoring, BEFORE L3e** (L3c unit-tests against a stub and does not
+  need it). Staging may operator-seed accounts in the interim.
+- **P2 — Traderton `authorizationMode` is vestigial → make it honest.** `packages/boundary/src/bin.ts`
+  hardcodes `authorizationMode: 'approval_required'` on the built `TradingToolContext`, but Traderton has no
+  approval machinery (deleted). **Decision:** set it to `'direct'` (the boundary executes what it is given;
+  approvals are the consumer's pre-boundary job — see D3). One-line `bin.ts` change (a remaining
+  Traderton code step, not blocking L3c authoring).
+- **#4 — herobids owns NO bot state or maxBots logic; Traderton owns bots + `maxBots` ENTIRELY.** Rationale:
+  the legal isolation says trading policy (a bot-count limit) and trading state (a `bots` table) must not
+  live on the platform. So herobids has **no `bots` table and no maxBots enforcement**;
+  `create_bot`/`start_bot`/`list_bots`/etc. all go to the boundary; Traderton enforces the limit (it already
+  has the per-owner `maxBots` advisory-lock primitive from item E). Forward design: `maxBots` **tiered by
+  authorization/permission level** (a VALUE herobids may inject, but ENFORCED by Traderton). In L3c,
+  `create_bot`/`start_bot` are **boundary-only** (no herobids `bots` write); herobids' `bots` table is
+  deleted at L3d (after auditing its consumers).
 
 ## 4. Invariants — the law (do not break)
 
