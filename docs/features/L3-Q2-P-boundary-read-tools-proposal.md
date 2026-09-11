@@ -132,6 +132,23 @@ category prefix — see Open Question 1). Shape mirrors `check_regime`:
 Verified: `pnpm build` clean; `pnpm lint` clean; full suite **2389 passed / 39 skipped / 0 failed**
 (+8 new). `evaluate_regime` needs NO Traderton code (already `check_regime`).
 
+### Review + rework (2026-09-08, CodeReviewer)
+
+Independent review: the critical authorization question (does the read-only resolver short-circuit
+create a cross-owner hole?) → **NO HOLE**. Read tools enforce ownership by `ctx.agentId` (set from
+the signed subject on both resolver branches); the empty venue coords are never consumed by a read;
+`isReadOnlyCategory` matches the dispatcher's own read/write split. Reworked the review findings:
+- **HIGH (fixed):** added 3 subject-resolver unit tests for the seam — read category returns the
+  minimal injection; a read succeeds with zero venue accounts (where a write fails
+  `precondition.not_ready`); a read never consults the bot row even when the payload names a `botId`.
+- **MEDIUM (documented, not fixed):** the candle-fetch double-acquire (~half throughput) is inherent
+  to the copied `createScannerCandleFetcher`; per copy-never-author it is NOT re-authored here —
+  documented in `scanner-candle-fetcher.ts` as a tracked follow-up (share one bucket per provider
+  inside the copied fetcher).
+- **LOW:** noted, no change (timeoutMs/maxWaitMs conflation; per-call swap fetcher is correct).
+
+Re-verified: build + lint clean; full suite **2392 passed / 39 skipped / 0 failed** (+3 resolver tests).
+
 ## 7. Next step (on approval)
 
 1. Resolve OQ1–OQ3 (category, swap scope, context-factory check).

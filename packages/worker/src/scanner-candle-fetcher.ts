@@ -57,6 +57,13 @@ export function createScannerCandleFetcher(params: {
 export function createScannerCandleFetcherFromConfig(
   marketData: MarketDataConfig,
 ): (target: ScannerCandleTarget, interval: string, limit: number) => Promise<PriceCandle[]> {
+  // NOTE: createScannerCandleFetcher acquires its scanner limiter AND the fetch
+  // then acquires the config's own rate-limiter — two acquisitions per fetch.
+  // That double-acquire is inherent to the (copied) createScannerCandleFetcher /
+  // VenueCandleFetcher design and is NOT re-authored here. Effect: effective
+  // candle throughput is ~half the configured budget. Tracked as a follow-up
+  // (share one bucket per provider inside createScannerCandleFetcher) rather than
+  // fixed here, to keep this a thin config→fetcher adapter (copy-never-author).
   const binanceConfig: BinanceCandlesConfig = {
     baseUrl: marketData.binance.baseUrl,
     rateLimiter: new TokenBucketRateLimiter({
