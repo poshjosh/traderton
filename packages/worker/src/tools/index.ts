@@ -17,6 +17,7 @@ export { botManagementTools } from './bots.js';
 export { instrumentTools } from './find-instrument.js';
 export { marketDataTools } from './market-data.js';
 export { priceTools } from './price.js';
+export { provisioningTools } from './provisioning.js';
 export { resolverTools } from './resolvers.js';
 export { riskLimitsTools } from './risk-limits.js';
 export { schemaTools } from './schema.js';

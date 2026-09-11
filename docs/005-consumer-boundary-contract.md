@@ -327,6 +327,47 @@ In local development, TLS may terminate at an ingress or service-mesh edge and
 forward privately to a repo-local Traderton process. That does not change the
 consumer-facing contract: consumers still treat the boundary as HTTPS.
 
+Traderton-side credential-encryption config (required for the provisioning tool
+below):
+
+```text
+CREDENTIAL_ENCRYPTION_KEY   # 64 hex chars (32-byte AES-256-GCM key)
+```
+
+This is the at-rest key for venue credentials. It is operator-supplied env/config
+and is NEVER hard-coded or crossed over the boundary. `provision_venue_account`
+fails closed if it is unset or malformed: the tool returns its own
+`provision.encryption_unavailable` errorCode (a fault), which the dispatcher maps
+to `internal.non_retryable` at the boundary. The error message and result never
+contain the key value or any secret.
+
+## Boundary Tools
+
+Tool payload/result schemas are Traderton-owned (Fixed Decision 5); this doc
+records only the boundary-visible shape, not the internal logic.
+
+### `provision_venue_account` (side-effecting)
+
+Provisions a venue account together with its trading credential in one
+idempotent transaction. Registered as a side-effecting (non-read-only) tool, so
+it flows through the standard idempotency store + deadline path — a retry with
+the same `idempotencyKey` yields one persisted invocation and one set of rows.
+
+- **payload:** `{ venue: string, label: string, secrets: Record<string,string>,
+  venueAccountRef?: string }`
+- **result (success):** `{ venueAccountId: string, venue: string, label: string }`
+  — **metadata only; never the secrets.**
+- **credential custody:** `secrets` arrive over the HMAC+TLS channel, are
+  validated + canonicalized per venue, encrypted at rest (AES-256-GCM via
+  `CREDENTIAL_ENCRYPTION_KEY`) before insert, and are never logged or returned.
+- **validation → `validation.invalid_payload`:** venue-secret validation
+  (required fields / patterns per venue) and the Jupiter `venueAccountRef`
+  (Solana wallet) rule.
+- **owner scope:** rows are keyed by the signed `subject.ownerId`.
+- **out of scope:** plan/entitlement limits (a consumer pre-boundary concern) and
+  the platform `connections` table (the consumer links
+  `resolvedVenueAccountId` to the returned `venueAccountId` itself).
+
 ## Deployment And Health
 
 Health semantics are fixed:

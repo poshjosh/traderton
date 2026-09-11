@@ -50,3 +50,21 @@ export function decryptCredential(encryptedData: string, keyHex: string): string
   const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   return decrypted.toString('utf8');
 }
+
+/**
+ * Get the credential-encryption key from the environment.
+ * Throws if not configured.
+ *
+ * COPY (L3-P1) — copied verbatim from herobids `apps/api/src/crypto.ts`
+ * `getEncryptionKey`. This is the credential-custody config seam: the AES-256-GCM
+ * key MUST be supplied via the `CREDENTIAL_ENCRYPTION_KEY` env var (64 hex chars =
+ * 32 bytes) — it is NEVER hard-coded. `encryptCredential`/`decryptCredential`
+ * were already copied here; only this key-source accessor was outstanding.
+ */
+export function getEncryptionKey(): string {
+  const key = process.env['CREDENTIAL_ENCRYPTION_KEY'];
+  if (!key || key.length !== 64) {
+    throw new Error('CREDENTIAL_ENCRYPTION_KEY env var must be set (64 hex chars = 32 bytes)');
+  }
+  return key;
+}

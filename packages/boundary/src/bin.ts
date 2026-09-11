@@ -118,6 +118,9 @@ async function main(): Promise<void> {
     return {
       agentId: request.actor.id,
       sessionId: `boundary:${request.ownerId}`,
+      // The signed owner id — owner-scoped write tools (provision_venue_account)
+      // write it to the soft `ownerId` columns (L3-P1).
+      ownerId: request.ownerId,
       executionMode: injection.ownerMode,
       // The boundary executes what it is given — human approvals are the
       // consumer's PRE-boundary job (CANONICAL-STATE D3/§3.2 P2): Traderton owns
@@ -129,6 +132,8 @@ async function main(): Promise<void> {
       redis: redis as unknown as TradingToolContext['redis'],
       publishToInbound,
       botRepo: botRepo as unknown as TradingToolContext['botRepo'],
+      // Raw Drizzle handle for tools that write tables directly (provisioning).
+      db,
     };
   };
 

@@ -124,6 +124,13 @@ export interface ToolAnalyticsResult {
 export interface TradingToolContext {
   agentId: string;
   sessionId: string;
+  /**
+   * The signed owner id the boundary resolved from the request subject
+   * (`subject.ownerId`). Trading tools that persist owner-scoped rows
+   * (provisioning) write this to the soft `ownerId` columns. Optional because
+   * most tools operate on already-owner-scoped repos and never need it.
+   */
+  ownerId?: string;
   /** The agent's own execution mode. Used by tools that enforce mode-rank constraints. */
   executionMode: 'paper' | 'shadow' | 'live';
   /** Authorization mode for agent-direct trade decisions: 'direct' (execute immediately) or 'approval_required' (require user approval). */

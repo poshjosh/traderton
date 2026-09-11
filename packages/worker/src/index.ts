@@ -35,6 +35,11 @@ export type { ExecutionActor, IntakeResult, IntakeRejection, IntakeRejectionCode
 // re-export; it only widens the package's public surface.
 export { loadConfig } from './config.js';
 
+// Credential encryption seam — re-exported so the M2 REST boundary
+// (@traderton/boundary) can verify credential custody (encrypt-at-rest) in its
+// L3-P1 provision_venue_account tests. No behaviour authored by the re-export.
+export { encryptCredential, decryptCredential, getEncryptionKey } from './crypto.js';
+
 // Tool surface — the copied trading tools + the ToolRegistry dispatch target.
 // Re-exported so the M2 REST boundary (@traderton/boundary, Phase 9b item F) can
 // assemble a registry and dispatch to the copied tools. No behaviour is authored
@@ -46,6 +51,7 @@ export {
   instrumentTools,
   marketDataTools,
   priceTools,
+  provisioningTools,
   resolverTools,
   riskLimitsTools,
   schemaTools,
