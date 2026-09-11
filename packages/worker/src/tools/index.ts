@@ -21,6 +21,7 @@ export { provisioningTools } from './provisioning.js';
 export { resolverTools } from './resolvers.js';
 export { riskLimitsTools } from './risk-limits.js';
 export { schemaTools } from './schema.js';
+export { strategyTools } from './strategy.js';
 export { tradingTools } from './trading.js';
 export { watchTools } from './watch.js';
 

@@ -18,6 +18,7 @@ import {
   resolverTools,
   riskLimitsTools,
   schemaTools,
+  strategyTools,
   tradingTools,
   watchTools,
 } from '@traderton/worker';
@@ -41,6 +42,7 @@ export function buildToolRegistry(): ToolRegistry {
     ...resolverTools,
     ...riskLimitsTools,
     ...schemaTools,
+    ...strategyTools,
     ...tradingTools,
     ...watchTools,
   ];

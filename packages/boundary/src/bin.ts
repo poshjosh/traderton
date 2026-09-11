@@ -19,7 +19,7 @@ import {
   computeRequestFingerprint,
   venueAccounts,
 } from '@traderton/db';
-import { createTradingRuntime, loadConfig } from '@traderton/worker';
+import { createTradingRuntime, loadConfig, createScannerCandleFetcherFromConfig } from '@traderton/worker';
 import { createBoundaryApp } from './app.js';
 import { BoundaryConfigSchema, type BoundaryConfig } from './config.js';
 import type {
@@ -72,6 +72,14 @@ async function main(): Promise<void> {
     instanceLoader: async () => [],
   });
   await runtime.start();
+
+  // ── Venue-aware candle fetcher for read-only scoring tools (score_candidate).
+  //    Candles are fetched BEHIND the boundary (legal-isolation: the consumer
+  //    must not fetch trading candle data). Undefined when marketData is absent
+  //    from config — the tool then degrades to `market_data_not_configured`.
+  const scannerCandleFetcher = appConfig.marketData
+    ? createScannerCandleFetcherFromConfig(appConfig.marketData)
+    : undefined;
 
   // ── The idempotency store (F2a repo) injected via the thin dispatcher port ──
   const invocationStore: BoundaryInvocationStore = new BoundaryInvocationRepository(db);
@@ -132,6 +140,8 @@ async function main(): Promise<void> {
       redis: redis as unknown as TradingToolContext['redis'],
       publishToInbound,
       botRepo: botRepo as unknown as TradingToolContext['botRepo'],
+      // Venue-aware candle fetcher for read-only scoring tools (score_candidate).
+      scannerCandleFetcher,
       // Raw Drizzle handle for tools that write tables directly (provisioning).
       db,
     };

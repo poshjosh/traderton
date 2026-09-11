@@ -245,6 +245,19 @@ export interface TradingToolContext {
     maxDrawdownPct: number;
   };
   /**
+   * Venue-aware candle fetcher for read-only market/strategy tools (e.g.
+   * score_candidate). Fetches candles BEHIND the boundary — orderbook targets
+   * route to the orderbook provider, swap targets to the swap provider by
+   * network + poolAddress. Keeping the fetch here (not in the caller's payload)
+   * is required by the legal-isolation objective: the consumer must not fetch
+   * trading candle data. Optional because most tools don't score candidates.
+   */
+  scannerCandleFetcher?: (
+    target: import('../scanner-types.js').ScannerCandleTarget,
+    interval: string,
+    limit: number,
+  ) => Promise<import('../ports/candle-fetcher.js').PriceCandle[]>;
+  /**
    * Raw Drizzle database instance for direct table access.
    * Used by tools that need to query tables without a dedicated repository
    * (e.g., market assessment artifacts, preset transitions).
