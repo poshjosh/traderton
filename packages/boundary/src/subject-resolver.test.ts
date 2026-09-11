@@ -141,3 +141,72 @@ describe('resolveSubjectInjection — no bot named (per-owner default)', () => {
     });
   });
 });
+
+describe('resolveSubjectInjection — read-only tools (the read-tool seam)', () => {
+  it('short-circuits a read-* category to a minimal injection (ownerId + actorId; empty venue coords)', async () => {
+    // A pure market read (e.g. score_candidate) names no bot and needs no venue
+    // account. The read-only short-circuit returns identity only; venue coords are
+    // empty because reads never invoke the drive target that would consume them.
+    const res = await resolveSubjectInjection(
+      SUBJECT,
+      'read-market-data',
+      { symbol: 'BTC' },
+      ports(),
+    );
+    expect(res).toEqual({
+      ok: true,
+      injection: {
+        ownerId: 'owner-1',
+        actorId: 'actor-1',
+        ownerMode: 'paper',
+        venue: '',
+        venueType: 'orderbook',
+        venueAccountId: '',
+      },
+    });
+  });
+
+  it('succeeds for a read tool even when the owner has NO venue account (write tools fail here)', async () => {
+    // Ports return no venue accounts. A write/no-bot tool would fail
+    // precondition.not_ready; a read must NOT — it skips the venue-account gate.
+    const readRes = await resolveSubjectInjection(
+      SUBJECT,
+      'read-market-data',
+      {},
+      ports({ listVenueAccountsByOwner: async () => [] }),
+    );
+    expect(readRes.ok).toBe(true);
+
+    // Contrast: the same empty-accounts ports fail for a non-read, no-bot tool.
+    const writeRes = await resolveSubjectInjection(
+      SUBJECT,
+      'execute-trade',
+      {},
+      ports({ listVenueAccountsByOwner: async () => [] }),
+    );
+    expect(writeRes.ok).toBe(false);
+    if (!writeRes.ok) {
+      expect(writeRes.code).toBe('precondition.not_ready');
+    }
+  });
+
+  it('does NOT consult the bot row for a read tool even if the payload names a botId', async () => {
+    // A read categorized read-* short-circuits before any bot lookup. Prove the
+    // bot port is never called (identity comes from the signed subject, and read
+    // tools enforce their own ownership by ctx.agentId downstream).
+    let botLookupCalls = 0;
+    const res = await resolveSubjectInjection(
+      SUBJECT,
+      'read-database',
+      { botId: 'bot-1' },
+      ports({
+        getBotById: async () => {
+          botLookupCalls += 1;
+          return BOT;
+        },
+      }),
+    );
+    expect(res.ok).toBe(true);
+    expect(botLookupCalls).toBe(0);
+  });
+});

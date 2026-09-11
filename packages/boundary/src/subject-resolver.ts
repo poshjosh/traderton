@@ -12,6 +12,7 @@
 // ownership check here is defence in depth, not a replacement.
 
 import type { ToolCategory } from '@traderton/domain';
+import { isReadOnlyCategory } from '@traderton/domain';
 
 /** A resolution outcome — either the injection VALUES or a typed boundary failure. */
 export type SubjectResolution =
@@ -120,12 +121,32 @@ function coordsFromBotConfig(config: Record<string, unknown>): {
  */
 export async function resolveSubjectInjection(
   subject: ResolverSubject,
-  _toolCategory: ToolCategory,
+  toolCategory: ToolCategory,
   payload: unknown,
   ports: SubjectResolverPorts,
 ): Promise<SubjectResolution> {
-  // The category is retained in the signature (callers pass it positionally) but
-  // is NOT consulted here: the payload's `botId` is the actual discriminator.
+  // Read-only tools drive nothing: the copied drive target is never invoked for
+  // a read, so the venue coordinates in ResolvedInjection are unused. A pure
+  // market read (e.g. check_regime, score_candidate) names no bot and needs no
+  // venue account — requiring one here would wrongly fail `precondition.not_ready`
+  // for owners without an account. So read-only categories short-circuit to a
+  // minimal injection (ownerId + actorId only). This is the read-tool seam; it
+  // authors no trading behaviour (venue fields left empty, never consumed).
+  if (isReadOnlyCategory(toolCategory)) {
+    return {
+      ok: true,
+      injection: {
+        ownerId: subject.ownerId,
+        actorId: subject.actor.id,
+        ownerMode: 'paper',
+        venue: '',
+        venueType: 'orderbook',
+        venueAccountId: '',
+      },
+    };
+  }
+
+  // Side-effecting tools: the payload's `botId` is the actual discriminator.
   const botId = botIdOf(payload);
 
   if (botId) {

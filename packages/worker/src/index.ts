@@ -35,6 +35,11 @@ export type { ExecutionActor, IntakeResult, IntakeRejection, IntakeRejectionCode
 // re-export; it only widens the package's public surface.
 export { loadConfig } from './config.js';
 
+// The venue-aware scanner candle fetcher (orderbook→Binance, swap→GeckoTerminal).
+// Exported so the boundary composition root can surface it onto the read-tool
+// context (score_candidate fetches candles behind the boundary — legal-isolation).
+export { createScannerCandleFetcher, createScannerCandleFetcherFromConfig } from './scanner-candle-fetcher.js';
+
 // Credential encryption seam — re-exported so the M2 REST boundary
 // (@traderton/boundary) can verify credential custody (encrypt-at-rest) in its
 // L3-P1 provision_venue_account tests. No behaviour authored by the re-export.
@@ -55,6 +60,7 @@ export {
   resolverTools,
   riskLimitsTools,
   schemaTools,
+  strategyTools,
   tradingTools,
   watchTools,
   ToolRegistry,
