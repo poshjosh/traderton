@@ -544,3 +544,56 @@ Load-bearing consequences for how agents work this phase:
   generality restraint used throughout — do not abstract beyond a memory-driven single-pool autoscaler.
 
 This does not affect the M1 holistic review or Phase 9b; it is Phase 10 shape, recorded now so it is not lost.
+
+## Why trading credentials are NOT mirrored into herobids (credential custody follows use)
+
+Settled 2026-09-11 (human), during L3-P1b scoping. Extends decision 12 (credential
+custody follows the venue caller → Traderton) and the soft-reference rule.
+
+**The question.** herobids and Traderton each already have their OWN `user_credentials`
+table (two physical tables in two databases — herobids' is `userId`-FK'd to `users`;
+Traderton's is soft-`ownerId`). During L3-P1b scoping it looked like a "shared table
+ownership" problem: the herobids `credentials.ts` DELETE operates on credentials of ANY
+provider (trading AND non-trading), and its dependents check spans platform-owned
+(`connections`, `agent_connections`) and trading-owned (`venue_accounts`, `bots`) rows.
+Proposed idea: keep ALL credentials (incl. trading) in a usage-agnostic herobids table,
+mirroring the trading ones for ease of reference.
+
+**What the code actually shows (traced 2026-09-11).** Credential *use* splits cleanly
+into two kinds:
+- **Decrypt-and-use (custody — the legally-loaded use):** the only sites that decrypt a
+  secret to plaintext are Gmail (`apps/worker/src/gmail-credential-resolver.ts` — a
+  platform capability, legitimately in herobids) and the trading venue adapters
+  (`venue-adapter-factory.ts`, which decrypts API/private keys to sign orders). That
+  file is **already gone from herobids `consume-traderton`** and lives in Traderton —
+  i.e. trading-credential custody has ALREADY moved behind the boundary.
+- **Metadata-only (reference — legally harmless):** every OTHER herobids touch of
+  `user_credentials` reads only non-secret columns or does lifecycle bookkeeping and
+  NEVER decrypts — plan-limit counting (`plan-guards.ts`), link validation
+  (`accounts.ts`/`connections.ts` read `{id, provider}`), the `credentials.ts` list/get
+  (returns `id/provider/label/timestamps`, never `encryptedData`), delete, rotate, FKs.
+
+**Decision.** Each side stores ONLY the credentials it actually uses; there is NO
+trading-credential mirror in herobids.
+- Trading credentials are Traderton-owned (custodied + decrypted behind the boundary).
+- Non-trading credentials (Gmail/OAuth/social) stay entirely herobids-owned; Gmail token
+  refresh is unaffected (it reads herobids' own table — correct, a platform concern).
+- If a unified credential VIEW is ever needed (e.g. a UI list across both), COMPOSE it at
+  read time (herobids' own credentials + a boundary read call) — a read-time composition,
+  never a stored mirror.
+
+**Why not the mirror.** A herobids reference-row for a trading credential (metadata only,
+no `encryptedData`) would NOT break the legal rule (no secret material, no decrypt). But
+it introduces a second writer of one fact → drift, plus a reconciliation burden, to save
+provisioning-time/plan-check reads that are not on any hot path found. The extraction is
+removing trading-shaped state from the platform, not adding a synced copy of it. A
+metadata-only read-cache with an explicit reconciliation job remains a future option IF a
+hot path that frequently lists/counts trading credentials is later found — declared as a
+cache, never a second source of truth. None was found (touches are provisioning-time +
+plan-checks, not per-request-hot).
+
+**Consequence for L3-P1b.** The herobids `credentials.ts` route stays LOCAL and unchanged
+— it correctly manages herobids' own credentials. Only the holistic TRADING path
+re-points to the boundary (`setup.ts` → `provision_venue_account`; `provider-links.ts` +
+`accounts.ts` deletes → `deprovision_venue_account`). See the parity-ledger cutover
+obligation for migrating pre-existing trading-credential rows into Traderton at cutover.
