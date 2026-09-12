@@ -253,3 +253,39 @@ before cutover.
 - **MEDIUM — `checkVenueAccountLimit` is ineffective for trading links post-L3-P1b. `Deferred (required for cutover)`.** herobids' `apps/api/src/plan-guards.ts` `checkVenueAccountLimit` counts rows in herobids' LOCAL `venue_accounts` table, but the trading path no longer writes that table (venue accounts are boundary-owned now). So the per-plan venue-account cap silently stops enforcing for boundary-provisioned accounts (the local count is ~0). §6 intended this check KEPT; it is kept in form but not in substance. Resolve before cutover — either (a) Traderton enforces the venue-account plan limit at the boundary (a VALUE herobids injects, mirroring maxBots #4), or (b) herobids counts `connections WHERE resolvedVenueAccountId IS NOT NULL` as a proxy for owned venue accounts. Belongs to the `venue_accounts` / provisioning rows.
 - **LOW — over-limit trading provision does a provision→deprovision round-trip.** In L3-P1b the venue-account/connection limit is re-checked in Phase 2 (after the boundary provision); an over-limit request therefore provisions then compensates (deprovisions). Correct (no orphan) but slightly wasteful. Acceptable — the compensation path must exist regardless. Optional optimisation: a pre-provision proxy check.
 - **LOW — `apps/api/src/trading-provisioner.ts` is now unused** (no importers after the setup.ts re-point). Left in place; delete in a later cleanup slice (part of the eventual venue/credential-table teardown).
+
+### L3-P1b end-to-end verification (2026-09-11) + a blocker found & fixed
+
+**Blocker found by the live end-to-end run (would NOT surface in unit tests / mocks):**
+the F2b subject-resolver (`packages/boundary/src/subject-resolver.ts`) had only two
+side-effecting paths — bot-scoped (payload names `botId`) and no-bot (resolve a
+per-owner DEFAULT venue account, else `precondition.not_ready`). `provision_venue_account`
+is the tool that CREATES an owner's first venue account, so it hit "no venue account for
+owner" → `precondition.not_ready` and could NEVER run — a chicken-and-egg deadlock.
+`deprovision_venue_account` (takes `venueAccountId`, needs no venue coordinates) hit the
+same wall. The resolver was authored (F2b) before provision/deprovision existed.
+
+**Fix (traderton side, on `l3-integration`):** added an owner-scoped provisioning-tool
+short-circuit to the resolver — mirroring the read-tool seam — that returns a minimal
+injection (`ownerId` + `actorId`, empty venue coords) for `provision_venue_account` /
+`deprovision_venue_account`, skipping the venue-account requirement (they write tables via
+`ctx.db` and drive no executor). Name-scoped (an explicit set), NOT category-wide: other
+`write-database` tools (e.g. `create_bot`) still require a resolved venue account. Added
+`toolName` to `resolveSubjectInjection(...)` + updated `bin.ts` + 14 resolver tests green
+(new provisioning-seam block; guard test that `create_bot` still requires an account).
+A future `drivesExecutor: false` tool-contract flag could replace the explicit set (noted).
+
+**End-to-end PROVEN (herobids-style signed calls → live boundary → real Postgres:16, via
+the committed dev signer):** provision → success (`{venueAccountId}`, metadata only) ·
+idempotent retry (same key) → same id, no duplicate row (idempotency store works) ·
+deprovision → success (real FK cascade venue_account→credential) · second deprovision →
+`not_found.resource` under `details.errorCode` (confirms the wire-code collapse the
+herobids re-points branch on) · bad payload (Jupiter missing privateKey) → validation
+failure, no persist. This exercises the encryption, the FK cascade, and the idempotency
+store that the mock-only tool tests (the logged deprovision MEDIUM) could not.
+
+**Verification method note (cutover):** the base `docker-compose.yml` omits
+`CREDENTIAL_ENCRYPTION_KEY`, which `provision_venue_account` needs to encrypt secrets (F2c
+only ran paper-mode create_bot). The e2e run supplied it via a local, uncommitted compose
+override. **Cutover obligation (LOW): add a dev `CREDENTIAL_ENCRYPTION_KEY` to the compose
+stack** so provisioning is exercisable from the committed stack without an override.

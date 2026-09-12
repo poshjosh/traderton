@@ -111,6 +111,7 @@ async function main(): Promise<void> {
     const resolution = await resolveSubjectInjection(
       { ownerId: request.ownerId, actor: request.actor },
       category,
+      request.toolName,
       request.payload,
       resolverPorts,
     );

@@ -32,6 +32,7 @@ describe('resolveSubjectInjection — bot-scoped tool', () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
       'write-database',
+      'adjust_bot_config',
       { botId: 'bot-1' },
       ports({ getBotById: async () => BOT }),
     );
@@ -52,6 +53,7 @@ describe('resolveSubjectInjection — bot-scoped tool', () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
       'write-database',
+      'adjust_bot_config',
       { botId: 'bot-1' },
       ports({ getBotById: async () => ({ ...BOT, config: { venue: 'jupiter' } }) }),
     );
@@ -63,6 +65,7 @@ describe('resolveSubjectInjection — bot-scoped tool', () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
       'write-database',
+      'adjust_bot_config',
       { botId: 'bot-1' },
       ports({ getBotById: async () => ({ ...BOT, ownerId: 'other-owner' }) }),
     );
@@ -70,7 +73,7 @@ describe('resolveSubjectInjection — bot-scoped tool', () => {
   });
 
   it('rejects a missing bot with precondition.not_ready', async () => {
-    const res = await resolveSubjectInjection(SUBJECT, 'write-database', { botId: 'gone' }, ports());
+    const res = await resolveSubjectInjection(SUBJECT, 'write-database', 'adjust_bot_config', { botId: 'gone' }, ports());
     expect(res.ok).toBe(false);
     expect(!res.ok && res.code).toBe('precondition.not_ready');
   });
@@ -83,6 +86,7 @@ describe('resolveSubjectInjection — no bot named (per-owner default)', () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
       'execute-trade',
+      'submit_decision',
       {},
       ports({ listVenueAccountsByOwner: async () => [ACCOUNT] }),
     );
@@ -100,7 +104,7 @@ describe('resolveSubjectInjection — no bot named (per-owner default)', () => {
   });
 
   it('refuses (precondition.not_ready) when the owner has no venue account', async () => {
-    const res = await resolveSubjectInjection(SUBJECT, 'execute-trade', {}, ports());
+    const res = await resolveSubjectInjection(SUBJECT, 'execute-trade', 'submit_decision', {}, ports());
     expect(res).toEqual({ ok: false, code: 'precondition.not_ready', message: 'no venue account for owner' });
   });
 
@@ -108,6 +112,7 @@ describe('resolveSubjectInjection — no bot named (per-owner default)', () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
       'execute-trade',
+      'submit_decision',
       {},
       ports({
         listVenueAccountsByOwner: async () => [ACCOUNT, { id: 'va-2', venue: 'hyperliquid' }],
@@ -121,6 +126,7 @@ describe('resolveSubjectInjection — no bot named (per-owner default)', () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
       'execute-trade',
+      'submit_decision',
       {},
       ports({
         listVenueAccountsByOwner: async () => [ACCOUNT, { id: 'va-2', venue: 'hyperliquid' }],
@@ -150,6 +156,7 @@ describe('resolveSubjectInjection — read-only tools (the read-tool seam)', () 
     const res = await resolveSubjectInjection(
       SUBJECT,
       'read-market-data',
+      'score_candidate',
       { symbol: 'BTC' },
       ports(),
     );
@@ -172,6 +179,7 @@ describe('resolveSubjectInjection — read-only tools (the read-tool seam)', () 
     const readRes = await resolveSubjectInjection(
       SUBJECT,
       'read-market-data',
+      'score_candidate',
       {},
       ports({ listVenueAccountsByOwner: async () => [] }),
     );
@@ -181,6 +189,7 @@ describe('resolveSubjectInjection — read-only tools (the read-tool seam)', () 
     const writeRes = await resolveSubjectInjection(
       SUBJECT,
       'execute-trade',
+      'submit_decision',
       {},
       ports({ listVenueAccountsByOwner: async () => [] }),
     );
@@ -198,6 +207,7 @@ describe('resolveSubjectInjection — read-only tools (the read-tool seam)', () 
     const res = await resolveSubjectInjection(
       SUBJECT,
       'read-database',
+      'get_bot_status',
       { botId: 'bot-1' },
       ports({
         getBotById: async () => {
@@ -208,5 +218,55 @@ describe('resolveSubjectInjection — read-only tools (the read-tool seam)', () 
     );
     expect(res.ok).toBe(true);
     expect(botLookupCalls).toBe(0);
+  });
+});
+
+describe('resolveSubjectInjection — owner-scoped provisioning tools (the provisioning seam)', () => {
+  // provision_venue_account / deprovision_venue_account are write-database tools
+  // that need only ownerId; they must NOT require a pre-existing venue account
+  // (provision creates the FIRST one — requiring one is a chicken-and-egg deadlock).
+  for (const toolName of ['provision_venue_account', 'deprovision_venue_account']) {
+    it(`short-circuits ${toolName} to a minimal injection even with NO venue account`, async () => {
+      let listCalls = 0;
+      let botCalls = 0;
+      const res = await resolveSubjectInjection(
+        SUBJECT,
+        'write-database',
+        toolName,
+        { venue: 'hyperliquid', label: 'x', secrets: {} },
+        ports({
+          listVenueAccountsByOwner: async () => { listCalls += 1; return []; },
+          getBotById: async () => { botCalls += 1; return null; },
+        }),
+      );
+      expect(res).toEqual({
+        ok: true,
+        injection: {
+          ownerId: 'owner-1',
+          actorId: 'actor-1',
+          ownerMode: 'paper',
+          venue: '',
+          venueType: 'orderbook',
+          venueAccountId: '',
+        },
+      });
+      // The short-circuit must not consult the venue-account or bot ports.
+      expect(listCalls).toBe(0);
+      expect(botCalls).toBe(0);
+    });
+  }
+
+  it('a NON-provisioning write-database tool still requires a venue account', async () => {
+    // Guard: the seam is name-scoped, not category-wide — other write-database
+    // tools (e.g. create_bot with no bot yet) still hit the default-account path.
+    const res = await resolveSubjectInjection(
+      SUBJECT,
+      'write-database',
+      'create_bot',
+      {},
+      ports({ listVenueAccountsByOwner: async () => [] }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe('precondition.not_ready');
   });
 });
