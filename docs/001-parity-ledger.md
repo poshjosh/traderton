@@ -398,3 +398,32 @@ verified by suites + the proven signed-invoke path (a full worker-process e2e is
 **Follow-on obligations opened:** swap `score_candidate` re-point (token→pool); coordinator discovery-loop
 re-point (needs snapshot-parity boundary surface); `get_risk_limits` read re-point (L3d); watch-tools
 state-move (own slice, carved earlier).
+
+### Market-intelligence extraction + risk-limits read group — DONE (2026-09-12, autonomous to branch; nothing merged)
+
+Decided via the 008 process; traderton `l3-integration`, herobids `consume-traderton`. Nothing pushed/merged.
+
+- **T1 `get_risk_limits` read re-point — Met.** herobids routes the read through `ctx.tradertonBoundary`
+  when configured (Traderton tool is a byte-identical copy → parity by construction); read-fallback to
+  in-process `riskContractOps` when absent. Completes the risk-limits pair with the `adjust_risk_limits`
+  write (fail-closed). herobids `7748c199`.
+- **T2 swap `score_candidate` — approach decided (Option B), BUILD DEFERRED.** Grounded finding: swap
+  scoring is INERT today (evidence path returns null candles for swap; `scoreSwapInProcess` scores empty
+  → no signal; no in-process market-data fetch on this path). So not urgent for isolation; re-pointing
+  would be an improvement (real pool candles) requiring Traderton authoring (`score_candidate` accepts a
+  token + resolves pool behind the boundary). Deferred as its own slice. Orderbook/perp already Met (prior Q2).
+- **T3 coordinator discovery-loop re-point — Met; clears the coupling.** `discover_tokens` widened to
+  `networks[]` + `maxResults` + reachable `rate_limit.exceeded` (traderton `e3a2e75`; engine already
+  multi-network, cross-network dedupe/rank stays behind the boundary — not re-authored). herobids
+  `refreshDiscovery` calls it over the boundary; telemetry re-sourced (both providers); snapshot assembly +
+  per-network slices + TTLs unchanged (parity); fail-closed when absent. **`providerRegistry` REMOVED from
+  the coordinator — its last in-process `@herobids/market-data` coupling is cleared.** herobids `73348523`.
+  (`sharedMarketDataRegistry` stays in index.ts for the scanner-candle-fetcher — a separate consumer.)
+
+**Verification:** traderton build/lint green + 2418+ tests; herobids build/lint green + 7754 passed / 320
+skipped (independently re-run). Traderton boundary behaviours proven e2e earlier against the live docker
+boundary; the herobids worker→boundary discovery/regime live run is a staging-soak item (verified by suites
++ the proven signed-invoke path). **Pending human ratification** (parity-touching): regime + discovery
+telemetry re-source; T2 approach B; T3 discovery snapshot re-source.
+**Open follow-ons:** T2 swap score build (token→pool, Traderton authoring); `@herobids/market-data` still
+held by the scan pipeline + scanner-candle-fetcher (separate extract); watch-tools state-move.
