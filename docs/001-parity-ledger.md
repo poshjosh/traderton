@@ -474,3 +474,12 @@ From the CodeReviewer pass on the boundary-registry wiring + herobids B2 re-poin
 - **[herobids B2] L1:** the `result.kind !== 'success'` → throw block is repeated 4x (get_market_overview / discover_tokens / search_tokens / check_regime). Could DRY into a `boundaryResultError(toolName, result)` helper. Deferred (4x, each trivially readable).
 - **[herobids B2] L2:** `parseRegimeBoundaryPayload` defaults `freshness.provider` to `'binance'` (a magic literal tied to the regime candle source). Correct today; add a clarifying comment.
 - **[herobids B2] L3:** `DexDiscoveryMeta`/`DexSearchToken` inline types in `agent.ts` duplicate a subset of the exported `DexBoundaryToken` parser interface. Intentional narrowing to rendered fields; minor.
+
+### Outstanding Issues — swap score_candidate re-point (2026-09-12 code review, non-blocking)
+
+CodeReviewer pass on the swap token→pool re-point. No CRITICAL/HIGH — implementation faithful to the ruling and cleanly layered. Deferred, non-blocking:
+
+- **[swap score_candidate] M1:** the 4-field pool shape (poolAddress/network/liquidityUsd/volume24hUsd) is duplicated across 3 sites — `strategy.ts` (ResolvedPool), `tool-contract.ts` (inline scannerPoolResolver port type), `strategy.test.ts` (PoolResolver). Extract a single named domain type (e.g. `ScannerPoolCandidate`) to prevent silent drift. Follow-on.
+- **[swap score_candidate] M2:** `selectCanonicalPool`'s pure lexicographic tie-break (equal liquidity AND equal volume → poolAddress localeCompare) is not asserted on its own. Add a dedicated unit test.
+- **[swap score_candidate] L1/L2/L3:** non-null `[0]!` in selectCanonicalPool (prefer destructuring); dual-rate-limiter double-acquire on the resolver+fetch path (documented; ledger note only); buildTarget three-arm union readability. Cosmetic.
+- **Note (adjacent):** traderton already has a `swap-token-resolver.ts` (liquidity-ranked token→pool). The GeckoTerminal point resolver was chosen per the 008 ruling (guaranteed candle-fetchable by the same provider). If a future consolidation is wanted, evaluate whether the two resolvers should converge — follow-on, not this slice.
