@@ -741,3 +741,44 @@ static-fallback); hybrid get_price-vs-resolvePriceTarget contract; venue-intel f
 whether registry removal / read-tool re-pointing is in B2 scope; economic-calendar scope.
 Consequence: B2 = a track (several slices), not one slice. Surfaced to human for scope steer before routing
 all 5 + building.
+
+## B2 — four coupling decisions (2026-09-12, 008-routed; parity-touching → pending ratification)
+
+The decision agent corrected two wrong premises in the brief (get_price shares resolvePriceTarget's
+signature; bybit longShortRatio is ALREADY behind the boundary via get_market_overview). Outcomes:
+
+- **Q-A volatility candles → DEFER (A4).** The in-process `binance.candles('BTC',1h,24)` → `calculateAtrPercent`
+  → adaptive tick interval rides the SAME `marketDataRegistry` B2 defers. Moving it now needs new candle/ATR
+  boundary surface for a coupling already agreed to persist until the read-tools slice → fails minimal-surface.
+  Eventual surface (at the read-tools slice): a `get_volatility` tool returning `{volatilityPct, freshness}`
+  (value, not candles — keeps ATR source-side per ports-carry-values). Deferred, no new surface now.
+- **Q-B hybrid sizing → DEFER (B3).** Depends on `priceService` (stays until the read-tools slice). Re-pointing
+  to today's `get_price` would DROP `resolvedChain/resolvedAddress` from the submitted-decision metadata (silent
+  degrade) — rejected. Eventual: extend the boundary price contract (or add `resolve_price_target`) to return the
+  resolved identity + {priceUsd,source,fetchedAt,stale}. Deferred with priceService/read-tools slice.
+- **Q-C venue-intelligence → LAND NOW (C1).** Re-point each read to its EXISTING tool (reads already have boundary
+  tools, independent of registry removal): hyperliquid.assetContexts + bybit.longShortRatio → `get_market_overview`
+  (venue bybit); discovery.discover → `discover_tokens`; dexscreener.search → `search_tokens`. Compose the LLM signal
+  herobids-side from boundary values (presentation stays herobids; rejected an aggregated tool = authoring on the
+  seam). **Parity carve-out:** `get_market_overview` projection LACKS `markOracleSpreadPct` which herobids surfaces
+  to the LLM ("Mark/oracle spread"). Resolution (coordinator, copy-faithful/not four-risk): ADD `markOracleSpreadPct`
+  to the traderton `get_market_overview` projection (the source `HyperliquidAssetContext` already has it) — restores
+  parity, no field dropped. Also verify search_tokens/discover_tokens field-shape parity before re-point.
+- **Q-D economic calendar → RECLASSIFY AS PLATFORM (D2).** Macro/economic data (not venue/trading market-data), zero
+  traderton presence, and the tick read is `getUpcomingEvents({cacheOnly:true})` — a cache-only read of
+  herobids-owned Redis (a herobids loop populates it). NOT a trading-boundary coupling. Stays in herobids;
+  recorded as explicitly-platform (NOT a Gap) so it isn't mistaken for an unmoved coupling.
+
+**B2-now = Q-C only** (+ regime, the known coordinator pattern). A/B deferred to the read-tools slice; D out.
+
+
+## 2026-09-12 — Market-intelligence boundary registry gap + DEX top-pick (routed via 008; decision agent = Contemplator)
+
+**Trigger:** reviewing the B2 venue-intelligence re-point before commit, the DEX top-pick selection appeared to diverge between the in-process path (highest-liquidity ≥$10k) and the boundary `search_tokens` path — a parity/behaviour-change four-risk. Routed a neutral §2 brief.
+
+**The decision agent corrected a MATERIAL false premise** (the value of the 008 process, again): the divergence I framed is moot in production because the boundary tools return `market_data_not_configured` — the boundary context factory (`bin.ts`) never wires `marketDataRegistry`. Verified by the coordinator: the only place `marketDataRegistry` is set on a tool context is the unit tests; no prod/dev bootstrap wires it; `check_regime` uses `ctx.marketDataRegistry!` (NOT the wired `scannerCandleFetcher`).
+
+**Ruling:**
+- **D1 (rule-forced, settled):** record the capability gap — the four market-intel read tools are inert over the boundary until the registry is wired. Recorded in 003 + 001. Wiring is the prerequisite work item (feasible: `appConfig.marketData` present; `createProviderRegistry` is the established path in `create-trading-runtime.ts`). Parity-touching → pending ratification; merge gate.
+- **D2 (parity-touching, pending ratification):** once wired, adopt Option A — accept Traderton's safety-aware `search_tokens` ranking as the DEX top-pick (Intentional-divergence). herobids keeps its network filter + `[0]`, does NOT re-author a liquidity floor/sort (Option B rejected = re-homes market-data policy in herobids, violates the top rule). Option C rejected = rule-unviable (ranking is always safety-score desc; no param yields liquidity-desc). Justification: the DEX venue-intel signal is display-only (LLM prompt context; no execution/sizing/risk path consumes it), so a safety-first pick is an improvement, not a degrade. If the $10k floor must persist, pass `minLiquidityUsd:10000` (a filter) — ordering stays Traderton's.
+- Also resolved by the agent: `discover_tokens` list ordering does not affect the discovery-metadata join (by network:address into a Map, order-independent).

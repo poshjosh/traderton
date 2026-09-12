@@ -457,3 +457,20 @@ re-source + `discover_tokens` widening. All "pending human ratification" flags o
 - **B2 open decisions (to route via 008 as B2 builds):** volatility-candle-series gap (no boundary tool);
   hybrid `get_price` vs `resolvePriceTarget` contract; venue-intelligence field-shape coverage;
   economic-calendar scope.
+
+### Market-intelligence boundary registry-wiring gap + DEX top-pick divergence (2026-09-12, routed via 008)
+
+Surfaced by the 008 decision agent while reviewing the B2 venue-intelligence re-point; verified by the coordinator against `bin.ts` + the four read tools.
+
+- **D1 — GAP (rule-forced, recorded):** the production boundary context factory (`packages/boundary/src/bin.ts`) does NOT wire `marketDataRegistry`/`marketDataConfig` into the `TradingToolContext`, so `check_regime` / `get_market_overview` / `discover_tokens` / `search_tokens` return `market_data_not_configured` over the boundary. herobids' B2 market-intelligence re-point (regime tick-gate + perps/DEX venue-intelligence) is therefore **code-complete but INERT in production** until the registry is wired. See 003-anomalies row 2026-09-12. **Status: Gap (required for the B2 market-intel re-point to be live).** Prerequisite work item — wire the registry into the boundary context (feasible; `appConfig.marketData` present, `createProviderRegistry` is the established path). Parity-touching → PENDING human ratification; stops at merge gate.
+
+- **D2 — DEX venue-intel top-pick selection = Intentional-divergence (Option A), PENDING human ratification:** once the registry is wired, the boundary `search_tokens` selects the top DEX token by Traderton's safety-aware ranking (`rankAndFilterCandidates`: eligible-first, then safety-score desc), whereas the in-process path selected by highest-liquidity (≥$10k floor, liquidity-desc). herobids keeps its own network filter + takes `search_tokens`[0]; it does NOT re-author a liquidity floor/sort (that would re-home market-data policy in herobids, violating the top rule). Rationale (decision agent): the DEX venue-intel signal is DISPLAY-ONLY (flows to the LLM prompt context via `recordVenueSignals` → `venueIntelligence` block; no execution/sizing/risk-gate consumes the chosen token), so a safety-first pick is a defensible improvement, not a degrade; Option C (a `search_tokens` param reproducing liquidity ordering) is rule-unviable (ranking is always safety-score desc). If the $10k liquidity floor must be preserved, pass `minLiquidityUsd:10000` to `search_tokens` (a filter honoured by `applyTokenSearchPolicy`) — ordering stays Traderton's. **Status: Intentional-divergence, pending ratification.**
+
+### Outstanding Issues — market-intel boundary wiring + B2 re-point (2026-09-12 code review, non-blocking)
+
+From the CodeReviewer pass on the boundary-registry wiring + herobids B2 re-point. No CRITICAL/HIGH. M1 (bybit rejection-telemetry parity on the boundary perps failure path) was FIXED in the same slice. Remaining, deferred as non-blocking:
+
+- **[boundary wiring] M2 (LOW-ish):** `bin.ts` injects `marketDataRegistry`/`marketDataConfig`/`priceService` via `as unknown as TradingToolContext[...]` casts. Consistent with the pre-existing `botRepo`/`redis` cast style in the same object (a cross-package structural-typing seam), not new debt. Optional: add a one-line comment or a shared type alias explaining the structural cast.
+- **[herobids B2] L1:** the `result.kind !== 'success'` → throw block is repeated 4x (get_market_overview / discover_tokens / search_tokens / check_regime). Could DRY into a `boundaryResultError(toolName, result)` helper. Deferred (4x, each trivially readable).
+- **[herobids B2] L2:** `parseRegimeBoundaryPayload` defaults `freshness.provider` to `'binance'` (a magic literal tied to the regime candle source). Correct today; add a clarifying comment.
+- **[herobids B2] L3:** `DexDiscoveryMeta`/`DexSearchToken` inline types in `agent.ts` duplicate a subset of the exported `DexBoundaryToken` parser interface. Intentional narrowing to rendered fields; minor.
