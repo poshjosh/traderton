@@ -597,3 +597,38 @@ plan-checks, not per-request-hot).
 re-points to the boundary (`setup.ts` → `provision_venue_account`; `provider-links.ts` +
 `accounts.ts` deletes → `deprovision_venue_account`). See the parity-ledger cutover
 obligation for migrating pre-existing trading-credential rows into Traderton at cutover.
+
+## Q2 `score_candidate` re-point — decision + resolved unknowns (2026-09-11)
+
+**Decision (Option A, human-ratified via the 008 process):** re-point herobids'
+`preset-scorecard-runner.ts` from the in-process `scoreCandidate(candidate, scanConfig)` to the
+boundary `score_candidate` tool. Make the runner + its assessor caller async; STOP feeding local
+candles to scoring; call the boundary with IDENTIFIERS; reconstruct `scanHealth` from the boundary
+result's `candlesEvaluated` (signal→healthy; null&count>0→no_signal; null&count===0→stale); map
+`failure`/`transport_error` to a propagated Result error (NOT to a synthesized `stale` — that would
+degrade parity by conflating infra failure with market staleness). No traderton-side change for the
+happy path (`candlesEvaluated` already exists in the result). Decision made by the `Contemplator`
+decision agent from a neutral brief; the agent corrected a false premise in the brief (candles are an
+evidence-collection byproduct, not a scoring fetch). Parity-touching → human ratified.
+
+**Parity impact (→ [001](./001-parity-ledger.md), Intentional-divergence):** `scanHealth='stale'` now
+reflects the BOUNDARY's fetched candle count, not herobids' evidence-candle count. Accepted as an
+improvement (source of truth = the candles actually scored). **Separate Deferred (out of scope for this
+slice):** `collectEvidence` still fetches candles in-process — a distinct market-data coupling to be cut
+by the `check_regime`/evidence-ports work.
+
+**Resolved unknowns (traced in `packages/domain/src/market-assessment.ts`):** `MarketAssessmentIdentity`
+is a discriminated union — orderbook/perp carry `symbol` (venue-canonical) + `venueFamily`; swap/dex
+carry `network` + `address` (canonical TOKEN address).
+- **Orderbook `providerSymbol`:** the old path passed `identity.symbol` directly as the candidate symbol,
+  so mapping `providerSymbol = identity.symbol` reproduces the old scored behaviour by construction
+  (parity holds — same symbol the old scan used). Clean thin seam; no resolver.
+- **Swap `poolAddress` — a REAL GAP (new sub-decision, route via 008).** The boundary REQUIRES a DEX
+  `poolAddress` for swap (errors without it), but the identity carries only a TOKEN `address`, and the
+  OLD in-process path never resolved a pool — it sidestepped this by passing pre-fetched candles +
+  `venueType: undefined`. So swap scoring CANNOT be reproduced over the boundary from identity alone.
+  Consequence for the slice: **orderbook/perp scoring re-points cleanly now; swap/dex scoring is a
+  separate decision** — where does token→pool resolution live (herobids seam? boundary accepts a token
+  and resolves pool-side?), and is that resolution trading-adjacent? To be briefed + routed via 008
+  before swap scoring is re-pointed. The score_candidate slice covers orderbook/perp; swap is Deferred
+  (required for cutover) with this reason.

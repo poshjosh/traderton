@@ -280,6 +280,10 @@ Later settled decisions (reasoning in [004](./004-decision-log.md), records wher
   inventory the ledger scores against.
 - [007-operational-readiness.md](./007-operational-readiness.md) — the cutover proof (latency/
   equivalence/restart/rollback). Read at L3/cutover.
+- [008-decision-process.md](./008-decision-process.md) — **the outsourced decision process + brief
+  template + trigger checkpoint.** Use when a choice risks degrading parity, weakening legal isolation,
+  dropping a feature, or changing behaviour/a contract. The implementing agent briefs-and-routes; it does
+  not self-rank these.
 - [010-improvement-backlog.md](./010-improvement-backlog.md) — deliberate non-blocking later-options
   (B1–B9), graded Value/Effort + Risk-if-deferred. NOT cutover obligations (those → 001/003) or bugs.
 - [024-verification-and-consumption-roadmap.md](./024-verification-and-consumption-roadmap.md) — the
@@ -300,3 +304,12 @@ live docs are authoritative for what's true now.
 Investigate → propose → **pause for the human** → write a self-contained implementer prompt →
 coordinator loop (Implementer → CodeReviewer → fix-loop → commit → gap-review) → update docs → pause at
 each milestone. Each level/item on its own branch. This loop is unchanged and is how L3 will run.
+
+**Decision checkpoint ([008](./008-decision-process.md)):** insert a checkpoint after *investigate*. For
+every open choice apply the trigger test — does it risk **degrading parity, weakening the legal isolation,
+dropping a feature, or changing externally-visible behaviour / a contract**? If yes, the implementing agent
+MUST NOT decide or express a lean — it fills the neutral fact-grounded brief (008 §2) and routes it to a
+fresh decision agent; the human ratifies parity/legal-touching outcomes; the decision + reasoning is
+recorded in [004](./004-decision-log.md) and any parity impact in [001](./001-parity-ledger.md). Low-stakes
+mechanical choices are decided normally. This exists because the implementing agent repeatedly mis-weighted
+parity/the top objective — the fix is structural (brief-and-route, never self-rank on the four risks).
