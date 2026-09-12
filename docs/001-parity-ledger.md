@@ -289,3 +289,61 @@ store that the mock-only tool tests (the logged deprovision MEDIUM) could not.
 only ran paper-mode create_bot). The e2e run supplied it via a local, uncommitted compose
 override. **Cutover obligation (LOW): add a dev `CREDENTIAL_ENCRYPTION_KEY` to the compose
 stack** so provisioning is exercisable from the committed stack without an override.
+
+### Side-effecting boundary tools NOT yet consumed over REST — goal-blocking obligations (classified 2026-09-11)
+
+**Context.** The goal is: no trading logic runs in the herobids process. herobids currently
+routes only these to the boundary: `create_bot`, `submit_decision`, `provision_venue_account`,
+`deprovision_venue_account`, `start_bot`, `stop_bot`, `adjust_bot_config`, and the read tools
+(`get_account_summary`, `get_analytics`, `get_bot_status`, `get_price`, `get_market_overview`,
+`get_positions`, `list_bots`, `list_positions`). The tools below are trading (or trading-adjacent)
+but are STILL invoked in-process in herobids (they import `@herobids/*` directly). Each is
+**goal-blocking, not optional** — deferred only in *when* (sequencing), never in *whether*. Until
+each is re-pointed to the boundary, the legal-isolation goal is unmet.
+
+- **`adjust_risk_limits` — trading. `Deferred (required for cutover)`.** Mutates the risk contract
+  (trading policy). Already a copied boundary tool (`tools/risk-limits.ts`, `write-database`). Uses
+  `ctx.riskContractOps` — needs NO resolved venue account. Obligation: re-point herobids' call site
+  to the boundary (like Q2). Blocked on nothing; sequenced after the current L3 slices.
+
+- **`watch_token` / `remove_watch` / `check_watches` (+ `list_watches`, `resolve_watch`) — trading,
+  traderton-owned, pull-based. `Deferred (required for cutover)`.**
+  **Classification rationale:** watching a *token price* for a threshold is trading-adjacent by
+  definition — the concept "token price threshold" is trading. The litmus test (human, 2026-09-11):
+  "a user should be able to write a skill teaching a herobids agent to use traderton, with NO
+  herobids code doing or knowing trading-adjacent aspects." A herobids-side "generic watch engine +
+  injected price provider" FAILS this — either herobids ships trading-aware provider code, or a skill
+  would have to inject code (skills are data, not code). Therefore the watch system is **traderton-owned
+  and reached as boundary tools**, so a skill can teach the agent to watch tokens by naming traderton
+  tools alone. This matches the code as-is: `watch.ts` already lives in traderton
+  (`packages/worker/src/tools/watch.ts`, `TradingToolContext`, boundary-registered); watches persist
+  in traderton Redis (`agent:watches:{agentId}`); position-linkage/instrument resolution is already
+  traderton-side. **Event delivery is a NON-issue: watches are agent-PULL** — the agent invokes
+  `check_watches` (an eval tool) over the boundary; no push/streaming channel to design. Obligation:
+  re-point herobids' agent tool-calls for these to the boundary. Design points for that slice:
+  confirm `check_watches` context needs only agent-scope + price reads (no venue account), and it
+  rides the resolver-signal fix below.
+
+- **`check_regime`, `score_candidate` — trading. DONE (Q2, boundary tools built + reviewed).**
+  Re-point of herobids' 3 market-intelligence call sites → boundary is the pending step (Q2 re-point
+  slice); tracked in the direction overview.
+
+### Subject-resolver: replace the provisioning name-set with a per-tool signal (before routing the above)
+
+**Finding (latent, not live).** `packages/boundary/src/subject-resolver.ts` decides "needs a resolved
+venue account" by fall-through: read-only → skip; bot-scoped → resolve from bot; ELSE → require a
+per-owner default venue account (else `precondition.not_ready`). That final catch-all wrongly requires
+a venue account for side-effecting tools that DON'T drive the executor. Evidence: only `submit_decision`
++ the bots tools use `ctx.publishToInbound` (the drive target that consumes venue coords); `provision`,
+`deprovision`, `adjust_risk_limits`, and the watch tools do NOT. L3-P1b patched `provision`/`deprovision`
+with an explicit name-set (`OWNER_SCOPED_PROVISIONING_TOOLS`). `adjust_risk_limits` + the watch tools
+are currently mishandled by the fall-through, but the boundary does not receive them from herobids yet
+→ **latent, not a live bug.**
+
+**Decision.** Do NOT grow the name-set to silence this. Before the FIRST non-drive side-effecting tool
+(`adjust_risk_limits` or a watch tool) is routed over REST, replace the name-set with a per-tool signal
+(e.g. `drivesExecutor` / `needsVenueResolution` on the tool contract), **default chosen deliberately**
+(the safe default needs real thought: wrongly requiring an account → the correct tool refuses to run;
+wrongly skipping → a drive tool runs without venue coords, arguably worse). This is category-blind (both
+live in `write-database`), so it MUST be a per-tool property, not derivable from category. Its own small
+slice with tests; leave the code as-is until its trigger lands.
