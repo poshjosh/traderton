@@ -112,3 +112,49 @@ dropping/deferring features rather than honouring parity, and expressed "leans" 
 call. Removing its ranking authority on high-stakes choices — and grounding the decision in the
 code + the rules via a fresh agent — is the structural fix. Keep it structural: the rule is not
 "try harder," it is "on the four risks, brief-and-route, never self-rank."
+
+## 6. Autonomy contract (adopted 2026-09-11)
+
+The implementing/coordinating agent operates autonomously up to the merge gate. The decision
+process (§1–§4) is what makes this safe: high-stakes judgment is routed to a fresh decision
+agent, not carried by the implementer. This section defines the boundary precisely.
+
+### 6.1 The ONE hard stop
+**Merging to either repo's `main`.** Nothing merges to `main` without explicit human approval —
+this is the legal cutover gate and is non-negotiable. It is the only mandatory stop.
+
+### 6.2 Proceed without asking (the default)
+Everything up to the gate runs continuously, across as many slices as the task spans, without
+pausing between them:
+- investigate → decision checkpoint (route the four-risk choices per §1–§4) → implement both
+  sides → verify end-to-end (incl. the local docker boundary) → self-review + re-run
+  build/lint/test → commit to a branch → update the durable docs.
+- Work on branches. Branch commits are reversible; that is the safety net.
+- Make the minor/medium calls directly. Re-check from a couple of angles before committing to
+  a direction, but do not stop to ask.
+
+### 6.3 Route to the decision agent (do not self-rank)
+Any choice hitting the four risks (§1: parity / legal-isolation / feature-drop / behaviour-or-
+contract change). The decision agent's ruling is **authoritative and the agent proceeds on it
+immediately** — it is NOT a stop. Parity/legal-touching rulings are marked *pending human
+ratification* in the journal (§6.5) and the agent keeps going; the human reviews the batch
+after the fact and vetoes if needed (a veto is cheap — the work is on a branch).
+
+### 6.4 Surface to the human (rare, soft)
+Only when: the merge gate is reached; OR the decision agent itself says a choice cannot be
+grounded in the rules and needs a product/policy call (genuinely the human's, e.g. "should this
+limit exist at all"); OR a blocker is hit that cannot be resolved on a branch. Surfacing is a
+note in the journal + a heads-up, not a halt to all other work.
+
+### 6.5 The autonomy journal
+A running, auditable trail so the human reviews after the fact instead of watching live. Record,
+per slice: decisions made directly, decision-agent rulings (+ which are pending ratification),
+what was built, what was verified (with counts), commits (SHAs/branches), and any surfaced item.
+Home: the parity ledger's slice entries + the decision log — the same durable docs, so the
+journal is not a separate artifact to maintain. The "ratify-list" is just the pending-ratification
+rulings collected for one review pass.
+
+### 6.6 Tone note
+The governing docs describe the loop with an autonomous default (proceed to the branch, record
+the trail) rather than "pause and ask at each step." The historical investigate→propose→**pause**
+framing is superseded by this contract; the merge gate remains the hard stop.

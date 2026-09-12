@@ -71,9 +71,11 @@ In brief (2026-09-08):
   the cutover shape is **REST** (no in-process cutover); the work happens **in herobids, on a designated
   `consume-traderton` branch** (the read-only exception is IN FORCE for that branch only — §5). herobids
   `main` and all other branches stay untouchable; merging the branch = cutover, human-approved.
-- Run the usual loop: investigate → propose → **pause for human** → self-contained implementer
-  prompt → coordinator loop → update docs. Each level/item on its own branch. Nothing merges to
-  `main` without the human (the merge gate).
+- Run the loop: investigate → **decision checkpoint (route four-risk choices to a fresh decision
+  agent — [docs/008-decision-process.md](./docs/008-decision-process.md))** → implement → coordinator
+  loop → verify end-to-end → update docs. **Run it autonomously to the branch, across slices, without
+  pausing between them** — the merge to `main` is the ONE hard stop (008 §6, the autonomy contract).
+  Each level/item on its own branch. Nothing merges to `main` without the human (the merge gate).
 
 ## The rule you must not break
 

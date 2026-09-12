@@ -301,9 +301,11 @@ live docs are authoritative for what's true now.
 
 ## 9. How work is run (the loop)
 
-Investigate → propose → **pause for the human** → write a self-contained implementer prompt →
-coordinator loop (Implementer → CodeReviewer → fix-loop → commit → gap-review) → update docs → pause at
-each milestone. Each level/item on its own branch. This loop is unchanged and is how L3 will run.
+Investigate → **[decision checkpoint — route the four-risk choices, [008](./008-decision-process.md)]** →
+implement → coordinator loop (Implementer → CodeReviewer → fix-loop → commit → gap-review) → verify
+end-to-end → update docs. **The agent runs this continuously to the branch, across slices, without
+pausing between them** — the merge to `main` is the ONE hard stop ([008 §6](./008-decision-process.md) —
+the autonomy contract). Each level/item on its own branch.
 
 **Decision checkpoint ([008](./008-decision-process.md)):** insert a checkpoint after *investigate*. For
 every open choice apply the trigger test — does it risk **degrading parity, weakening the legal isolation,
