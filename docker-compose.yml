@@ -67,6 +67,10 @@ services:
       BOUNDARY_CONSUMER_ID: dev-consumer
       BOUNDARY_KEY_ID: dev-key
       BOUNDARY_SIGNING_SECRET: dev-signing-secret
+      # Credential-encryption key for provision_venue_account (AES-256-GCM, 64
+      # hex = 32 bytes). LOCAL DEV VALUE ONLY — not a secret; override for any
+      # shared env. Without it, provisioning fails `provision.encryption_unavailable`.
+      CREDENTIAL_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
     ports:
       - "8080:8080"
     depends_on:
