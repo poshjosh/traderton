@@ -171,6 +171,14 @@ function mapToolResult(
   const message = result.error ?? 'tool execution failed';
   const details = result.errorCode ? { errorCode: result.errorCode } : undefined;
 
+  // A tool-signalled rate-limit throttle maps to the closed-union `rate_limit.exceeded`
+  // (still retryable) — checked BEFORE the generic retryable branch so a throttle is
+  // distinguishable from a generic transient fault at the boundary. Consumers rely on
+  // this to split throttle-vs-failure telemetry (L3 Q2 regime re-point; parity).
+  if (result.errorCode === 'rate_limit') {
+    return failureResult(identity, 'rate_limit.exceeded', message, true, details);
+  }
+
   // A transient/retryable fault → upstream.transient (infrastructure/dependency).
   if (result.retryable === true) {
     return failureResult(identity, 'upstream.transient', message, true, details);

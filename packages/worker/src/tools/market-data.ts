@@ -274,14 +274,24 @@ const checkRegimeTool: AgentTool<TradingToolContext> = {
 
     const regimeParams = params as RegimeParams;
 
+    // Capture the fetch freshness so it can be surfaced on the result — the
+    // consumer (herobids) re-sources its provider/freshness telemetry from it
+    // (L3 Q2 regime re-point; parity). evaluateRegime's contract is unchanged
+    // (its callback still returns PriceCandle[]); freshness is threaded via closure.
+    let freshness: { provider: string; source: 'upstream' | 'cache'; ageMs: number; isStale: boolean } | null = null;
+
     try {
       const result = await evaluateRegime(regimeParams, async (symbol) => {
         ctx.recordMarketDataAttempt?.(regimeCandleProvider.id);
         try {
-          return await regimeCandleProvider.fetchCandles(ctx.marketDataRegistry!, symbol, {
+          const withMeta = await regimeCandleProvider.fetchCandlesWithMeta(ctx.marketDataRegistry!, symbol, {
             interval: '1h',
             limit: 200,
           });
+          if (withMeta.freshness) {
+            freshness = { provider: withMeta.freshness.provider, source: withMeta.freshness.source, ageMs: withMeta.freshness.ageMs, isStale: withMeta.freshness.isStale };
+          }
+          return withMeta.candles;
         } catch (fetchErr: unknown) {
           const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
           if (msg.includes('400') || msg.includes('status 400') || msg.includes('Bad Request')) {
@@ -293,14 +303,21 @@ const checkRegimeTool: AgentTool<TradingToolContext> = {
           throw fetchErr;
         }
       });
-      return { success: true, data: { ok: true, ...result } };
+      // `freshness` (provider/source/ageMs/isStale) lets the consumer re-source its
+      // regime telemetry without touching market data itself.
+      return { success: true, data: { ok: true, ...result, ...(freshness ? { freshness } : {}) } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown error';
       if (message.includes('Rate limit exceeded')) {
         ctx.recordMarketDataRejection?.(regimeCandleProvider.id, { priority: 'execution' });
+        // `errorCode: 'rate_limit'` makes the throttle distinguishable at the
+        // boundary (dispatcher maps it to `rate_limit.exceeded` BEFORE the generic
+        // retryable→upstream.transient mapping), so the consumer can tell a
+        // throttle from a generic failure for its telemetry split (parity).
         return {
           success: false,
           error: 'rate_limit',
+          errorCode: 'rate_limit',
           retryable: true,
         };
       }

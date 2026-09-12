@@ -632,3 +632,34 @@ carry `network` + `address` (canonical TOKEN address).
   and resolves pool-side?), and is that resolution trading-adjacent? To be briefed + routed via 008
   before swap scoring is re-pointed. The score_candidate slice covers orderbook/perp; swap is Deferred
   (required for cutover) with this reason.
+
+## Q2 regime re-point — telemetry re-source + a parity hole fix (2026-09-11, 008-routed)
+
+**Decision (decision agent; parity/contract-touching → pending human ratification):** to re-point
+herobids' regime telemetry over the boundary WITHOUT degrading it, make two minimal changes:
+
+1. **`check_regime` success result gains a `freshness` block** — `{ provider, source:'upstream'|'cache',
+   ageMs, isStale }` — copied from the provider result's existing `meta.freshness` (which traderton's
+   `candle-registry.ts` currently DISCARDS). herobids records provider-success + freshness-mode from it.
+2. **Make `rate_limit.exceeded` reachable across the boundary for regime.** Parity hole the agent found:
+   `check_regime`'s rate-limit branch sets `retryable:true`, and `dispatcher.ts mapToolResult` maps ANY
+   `retryable===true` → `upstream.transient` BEFORE any rate-limit check — so herobids could not tell a
+   throttle from a generic failure, silently degrading its `recordRateLimitThrottle` vs
+   `recordProviderFailure` split. Fix: `check_regime` sets `errorCode:'rate_limit'` on throttle; add a
+   rate-limit branch to `mapToolResult` (keyed on the tool's errorCode) BEFORE the retryable branch →
+   `rate_limit.exceeded` (existing closed-union member; no new surface).
+
+**herobids maps telemetry from the TradertonClientResult union** (no local throw anymore): success →
+recordProviderSuccess + recordFreshnessMode(source==='upstream'?'fresh':'cached') + snapshot fresh;
+failure code `rate_limit.exceeded` → recordRateLimitThrottle + snapshot unavailable; any other failure OR
+transport_error → recordProviderFailure + snapshot unavailable; in_progress → record nothing. BOTH regime
+call sites (`coordinator.ts refreshRegime` + `evidence-adapters.ts`) apply the identical mapping.
+
+**Ownership call (resolved, not escalated):** the seam that stops `candle-registry.ts` discarding `.meta`
+is authored in TRADERTON — it cuts a platform coupling (discarded freshness), not trading behaviour;
+copy-never-author permits thin-seam authoring for cutting couplings, and the values are copied from the
+existing `ProviderResult.meta.freshness`. Logged in [003](./003-anomalies-and-deviations.md).
+
+**Parity:** preserved exactly (Met), not degraded. The rate-limit-distinction fix actually RESTORES a
+parity split that was latently broken for any future regime consumer. Pending human ratification (parity +
+005-contract-visible).

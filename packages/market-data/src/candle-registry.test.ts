@@ -36,6 +36,27 @@ for (const [key, provider] of Object.entries(CANDLE_PROVIDERS)) {
       expect(provider.symbolFormatHint).toBeTruthy();
       expect(provider.resolveSymbol).toBeTypeOf('function');
       expect(provider.fetchCandles).toBeTypeOf('function');
+      expect(provider.fetchCandlesWithMeta).toBeTypeOf('function');
+    });
+
+    it('fetchCandlesWithMeta surfaces provider + freshness meta', async () => {
+      const registry = {
+        binance: {
+          candles: async () => ({
+            data: [{ t: 1 }],
+            meta: { freshness: { source: 'cache' as const, fetchedAt: '', ageMs: 5000, ttlMs: 0, isStale: true, expiresAt: '' } },
+          }),
+        },
+      };
+      const res = await provider.fetchCandlesWithMeta(registry, 'BTC');
+      expect(res.candles).toHaveLength(1);
+      expect(res.freshness).toEqual({ provider: key, source: 'cache', ageMs: 5000, isStale: true });
+    });
+
+    it('fetchCandlesWithMeta returns null freshness when meta is absent', async () => {
+      const registry = { binance: { candles: async () => ({ data: [] }) } };
+      const res = await provider.fetchCandlesWithMeta(registry, 'BTC');
+      expect(res.freshness).toBeNull();
     });
   });
 }

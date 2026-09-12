@@ -55,6 +55,19 @@ const flakyReadTool: AgentTool<TradingToolContext> = {
   },
 };
 
+/** A read-only tool that signals a rate-limit throttle (errorCode:'rate_limit',
+ *  retryable) — must map to `rate_limit.exceeded`, NOT `upstream.transient`. */
+const throttledReadTool: AgentTool<TradingToolContext> = {
+  name: 'throttled_read',
+  description: 'read-only, always rate-limited (test fixture)',
+  parametersSchema: z.object({}),
+  parameters: {},
+  category: 'read-market-data',
+  async execute(): Promise<ToolResult> {
+    return { success: false, error: 'rate_limit', errorCode: 'rate_limit', retryable: true };
+  },
+};
+
 /**
  * A side-effecting tool whose run-count is observable — F1 rejected it, F2b
  * dispatches it. `runs` lets tests assert the tool ran once (started), or NOT at
@@ -77,6 +90,7 @@ function buildRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(echoReadTool);
   registry.register(flakyReadTool);
+  registry.register(throttledReadTool);
   registry.register(writeTool);
   return registry;
 }
@@ -264,6 +278,18 @@ describe('valid signed read-only invocation', () => {
     const body = res.json();
     expect(body.outcome.kind).toBe('failure');
     expect(body.outcome.code).toBe('upstream.transient');
+    expect(body.outcome.retryable).toBe(true);
+    await app.close();
+  });
+
+  it('maps a rate-limit throttle to rate_limit.exceeded (NOT upstream.transient)', async () => {
+    // Parity: the consumer must distinguish a throttle from a generic transient
+    // fault to split its rate-limit-vs-failure telemetry (L3 Q2 regime re-point).
+    const app = makeApp();
+    const res = await invoke(app, validEnvelope({ toolName: 'throttled_read', payload: {} }));
+    const body = res.json();
+    expect(body.outcome.kind).toBe('failure');
+    expect(body.outcome.code).toBe('rate_limit.exceeded');
     expect(body.outcome.retryable).toBe(true);
     await app.close();
   });
