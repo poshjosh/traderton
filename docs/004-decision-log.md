@@ -663,3 +663,59 @@ existing `ProviderResult.meta.freshness`. Logged in [003](./003-anomalies-and-de
 **Parity:** preserved exactly (Met), not degraded. The rate-limit-distinction fix actually RESTORES a
 parity split that was latently broken for any future regime consumer. Pending human ratification (parity +
 005-contract-visible).
+
+## Q2 batch — herobids-side re-point decisions (2026-09-11, 008-routed, human-confirmed)
+
+**Q1 regime scope → A (re-point regime ONLY now).** herobids `coordinator.ts refreshRegime` +
+`evidence-adapters.ts` re-point to `check_regime`; telemetry re-sourced from the tool's `freshness`
+block + `rate_limit.exceeded` code (parity). The coordinator's OTHER in-process market-data loop
+(`providerRegistry.discovery.discover`) is NOT touched — so this does NOT clear `@herobids/market-data`;
+discovery is a separate larger slice (the Traderton `discover_tokens` tool is a single-network point
+query and does NOT carry the coordinator's multi-network snapshot/stale-state surface — re-pointing
+discovery needs new snapshot-parity boundary surface). Regime-alone is a safe incremental step (regime +
+discovery loops are independent). `check_regime` is `read-market-data` (resolver short-circuits — no owner
+scoping needed); the coordinator gets a boundary client from the worker composition root (index.ts already
+constructs `createTradertonClient`) with a SYSTEM subject (`actor.type:'system'`, e.g. id 'market-intel').
+
+**Q2 agent-tool write path → A (`tradertonWriteBoundary?` on ToolContext).** Add a second optional,
+subject-bound side-effecting boundary port to `TradingToolContext` (subject bound at the agent-container
+composition root, mirroring the read adapter — a subject-less `invokeAndAwait({toolName,payload,deadlineMs})`).
+Keeps the deliberate read/write adapter split (reads poll-never + domain-clean result; writes idempotent/
+deadline-bound + raw union). `adjust_risk_limits` routes through it; it is `ownerScopedNoVenue` so
+ownerId+actor suffices. Reject B (widen the read boundary — leaks write affordances into reads) and C
+(route via decision-handler — over-couples to submit_decision plumbing).
+
+**adjust_risk_limits boundary-absent → (a) HARD-FAIL `precondition.not_ready`, no in-process fallback
+(human-confirmed).** Forced by the existing L3c "Fallback posture" (side-effecting writes fail closed when
+the boundary is absent; do NOT fall back to in-process) + the unanimous write precedent (submit_decision,
+bot lifecycle, executeApproval all fail closed). Reads keep their direct-DB fallback (transitional); writes
+fail closed — `adjust_risk_limits` is on the write side. `ctx.riskContractOps` STAYS (the read
+`get_risk_limits` still uses it); only the WRITE path (`adjustOverrides`) re-points. Implication accepted:
+with no boundary, risk-limit adjustment is inert (same as submit_decision today) — capability relocated
+behind the boundary, not dropped (system-level parity). Swap scoring + discovery + get_risk_limits-read
+re-point remain separate slices.
+
+## T2 swap score_candidate — decided approach (B) + deferred build (2026-09-11, 008-routed)
+
+**Decision (decision agent): Option B** — `score_candidate` should accept a swap TOKEN
+(`network + address`) and resolve the pool BEHIND the boundary (reusing Traderton's
+`swap-candidate-discovery` selection + `geckoterminal.fetchPoolOhlcv`), so herobids passes the
+identity it already has and does NO pool resolution / candle fetch. Rejected A (carry poolAddress —
+entrenches herobids' in-process discovery as the pool source) and C (status quo).
+
+**Grounded finding that changes urgency (verified in code):** the herobids swap-scoring path is
+**effectively INERT today, and does NOT fetch swap candles in-process.** `evidence-adapters.ts`
+`identityToScannerTarget` returns `null` for swap → the evidence candle port ERRORS for swap
+("Candle evidence not supported") → `extractCandlesFromSnapshot` yields EMPTY candles for swap →
+`scoreSwapInProcess` scores empty candles (no fetch of its own) → typically no signal → 'stale'/
+'no_signal'. Also confirmed `scan-engine.ts` only CARRIES `venueType` onto the output, it does NOT
+branch scoring on it (so 'swap' vs undefined does not change the score — no parity break there).
+
+**Consequence:** T2 is NOT an urgent legal-isolation fix (no live in-process swap market-data fetch
+on this path — the earlier `scanner-candle-fetcher` concern is about a fetcher this path doesn't invoke
+for swap). Re-pointing swap to the boundary would make swap scoring ACTUALLY functional (real pool
+candles) — a parity IMPROVEMENT, not a like-for-like move. Because it requires non-trivial Traderton
+AUTHORING (extend `score_candidate` to accept a token + resolve pool behind the boundary) and its value
+is enhancement not isolation, its BUILD is **Deferred as its own slice** (approach B is decided; not
+urgent). Recorded so it is not lost. Coordinator sequencing call (not a parity/legal risk — deferring
+changes nothing live).
