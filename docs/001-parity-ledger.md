@@ -501,3 +501,13 @@ carve-out.
   `get_economic_calendar`, vs. a boundary-populated cache the consumer reads); the classification is settled.
 - Until built, this is an UNMOVED coupling counted against the "no market-data in the herobids process"
   cutover gate — NOT a silently-dropped feature and NOT platform.
+
+
+### Ratification (2026-09-12, human) — market-intel boundary group
+
+The human RATIFIED the pending-ratification rulings from this group:
+1. **Boundary registry wiring** (`acb706e`) — market-data registry/config/priceService injected into the boundary context. RATIFIED.
+2. **DEX venue-intel top-pick** = Traderton safety-aware `search_tokens` ranking (Intentional-divergence, display-only). RATIFIED.
+3. **Swap token→pool resolver** = GeckoTerminal token-pools point resolver (revising the T2/Q2 named primitive). RATIFIED (direction + mechanism), with two open items still to settle at build/staging time: (a) quote-asset constraint default (currently highest-liquidity, no constraint); (b) GeckoTerminal Pro `tokens/{address}/pools` endpoint availability.
+
+All "pending human ratification" flags on the above are CLEARED. **This ratifies the DECISIONS, NOT merge-to-`main`** — work stays on branches; the merge gate remains a separate, explicit, later human decision.
