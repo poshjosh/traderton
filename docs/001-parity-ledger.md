@@ -364,3 +364,37 @@ are routed over REST. Plan: [docs/features/L3-Rx-subject-resolver-venue-signal-p
   — full design (opt-out signal `ownerScopedNoVenue`, fail-closed default, the flagged tools, the
   `publishToInbound` ground-truth table, steps + tests). Transient working doc; THIS ledger entry is the
   durable record.
+
+### Q2 re-point + adjust_risk_limits — DONE (2026-09-11, autonomous to branch; nothing merged)
+
+Cross-repo slice, decided via the 008 process (see decision-log). Traderton on `l3-integration`,
+herobids on `consume-traderton`. Nothing pushed, nothing merged to `main`.
+
+- **Q2 regime re-point — Met.** herobids `coordinator.refreshRegime` + `evidence-adapters.ts` evaluate
+  regime via the boundary `check_regime` (candles fetched behind the boundary). Telemetry RE-SOURCED from
+  the tool result (parity, not degraded): `recordProviderSuccess` + `recordFreshnessMode` from
+  `data.freshness`; `rate_limit.exceeded` → `recordRateLimitThrottle`; else `recordProviderFailure`;
+  fail-closed (unavailable snapshot) when the boundary is absent. Traderton support: `check_regime` now
+  returns `data.freshness` + a reachable `rate_limit.exceeded` (see the "check_regime freshness" ledger
+  entry + 003). **Does NOT clear `@herobids/market-data`** — the coordinator's discovery loop
+  (`providerRegistry.discovery.discover`) is untouched (separate larger slice; `discover_tokens` is a
+  single-network point query lacking the coordinator's multi-network snapshot/stale surface).
+- **Q2 score_candidate re-point (ORDERBOOK/PERP only) — Met; swap Deferred.** `preset-scorecard-runner` +
+  `platform-assessor` are async/Result; orderbook/perp scored via `score_candidate` (providerSymbol =
+  identity.symbol reproduces old behaviour; `scanHealth` from `candlesEvaluated`; infra failure propagated
+  as a Result err, never synthesized `stale`). **Swap/dex CARVED OUT** (`Deferred (required for cutover)`):
+  the boundary needs a DEX pool address the assessment identity lacks (only a token address), and the old
+  path sidestepped it by passing candles — so swap scoring stays in-process for now; re-point deferred
+  pending a token→pool resolution decision (route via 008).
+- **adjust_risk_limits write re-point — Met.** The agent risk-limit WRITE routes through a new subject-bound
+  `tradertonWriteBoundary` on `ToolContext`; **fail-closed** (`precondition.not_ready`, no in-process
+  fallback) when the boundary is absent (per the confirmed L3c write posture). `get_risk_limits` (read)
+  still uses `ctx.riskContractOps` — only the write path moved.
+
+**Verification:** traderton build/lint green + 2418 tests; herobids build/lint green + 7746 tests
+(independently re-run). Traderton `check_regime` freshness/rate_limit + `count_venue_accounts` were proven
+end-to-end against the live docker boundary earlier; the herobids worker→boundary regime/score live run is
+verified by suites + the proven signed-invoke path (a full worker-process e2e is a staging-soak item).
+**Follow-on obligations opened:** swap `score_candidate` re-point (token→pool); coordinator discovery-loop
+re-point (needs snapshot-parity boundary surface); `get_risk_limits` read re-point (L3d); watch-tools
+state-move (own slice, carved earlier).
