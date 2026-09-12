@@ -1,7 +1,8 @@
 # L3-Rx — Subject-resolver: per-tool venue-resolution signal (plan, NOT yet scheduled)
 
-**Status:** DRAFT PLAN — not scheduled, not implemented. Drafted 2026-09-11 while the
-context was fresh (the `publishToInbound` ground truth + the default-framing decision).
+**Status:** IMPLEMENTED 2026-09-11 (on `l3-integration`). Flag swap done; the method
+split was deliberately NOT done (authored code, no oracle — kept the four resolution
+paths byte-identical; only the short-circuit entry changed). Drafted 2026-09-11.
 **Durable obligation lives in** [001-parity-ledger.md](../../001-parity-ledger.md) →
 "Subject-resolver: replace the provisioning name-set with a per-tool signal". If this
 transient plan is pruned, the ledger entry is authoritative.

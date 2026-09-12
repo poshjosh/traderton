@@ -71,6 +71,9 @@ const AdjustRiskLimitsParamsSchema = z.object({
 
 const adjustRiskLimitsTool: AgentTool<TradingToolContext> = {
   name: 'adjust_risk_limits',
+  // Owner/agent-scoped; mutates the risk contract via ctx.riskContractOps and
+  // drives no executor. Needs no venue resolution.
+  ownerScopedNoVenue: true,
   description: 'Adjust mutable risk limits for this agent. Only limits derived from operator defaults (not creator-configured) can be changed. Values cannot exceed operator ceilings. Set a field to null to reset it to the operator default. maxDrawdownPct controls peak-to-current equity drawdown (separate from dailyLossLimit which controls rolling 24h realized loss).',
   parametersSchema: AdjustRiskLimitsParamsSchema,
   parameters: convertZodToJsonSchema(AdjustRiskLimitsParamsSchema),

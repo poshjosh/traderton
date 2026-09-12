@@ -202,6 +202,8 @@ const WatchTokenParamsSchema = z.object({
 
 const watchTokenTool: AgentTool<TradingToolContext> = {
   name: 'watch_token',
+  // Owner/agent-scoped watch (Redis); drives no executor. No venue resolution.
+  ownerScopedNoVenue: true,
   description:
     'Register a price watch for a token. When chain is "any", the tool discovers the best-matching token and pins the watch to that concrete asset — future checks will always use the pinned identity. ' +
     'The watch fires when the token\'s price crosses the given threshold in the specified direction. ' +
@@ -603,6 +605,8 @@ const RemoveWatchParamsSchema = z.object({
 
 const removeWatchTool: AgentTool<TradingToolContext> = {
   name: 'remove_watch',
+  // Owner/agent-scoped watch (Redis); drives no executor. No venue resolution.
+  ownerScopedNoVenue: true,
   description: 'Remove a price watch by its ID. Use list_watches to find IDs.',
   parametersSchema: RemoveWatchParamsSchema,
   parameters: convertZodToJsonSchema(RemoveWatchParamsSchema),
@@ -643,6 +647,9 @@ const CheckWatchesParamsSchema = z.object({
 
 const checkWatchesTool: AgentTool<TradingToolContext> = {
   name: 'check_watches',
+  // Owner/agent-scoped watch eval (Redis + price reads); drives no executor. No
+  // venue resolution.
+  ownerScopedNoVenue: true,
   description:
     'Evaluate all active price watches against current market prices. Returns a list of watches that have triggered (threshold crossed). ' +
     'Set removeTriggered=true to automatically clear triggered watches after evaluation. ' +

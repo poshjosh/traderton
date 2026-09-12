@@ -340,15 +340,25 @@ with an explicit name-set (`OWNER_SCOPED_PROVISIONING_TOOLS`). `adjust_risk_limi
 are currently mishandled by the fall-through, but the boundary does not receive them from herobids yet
 → **latent, not a live bug.**
 
-**Decision.** Do NOT grow the name-set to silence this. Before the FIRST non-drive side-effecting tool
-(`adjust_risk_limits` or a watch tool) is routed over REST, replace the name-set with a per-tool signal
-(e.g. `drivesExecutor` / `needsVenueResolution` on the tool contract), **default chosen deliberately**
-(the safe default needs real thought: wrongly requiring an account → the correct tool refuses to run;
-wrongly skipping → a drive tool runs without venue coords, arguably worse). This is category-blind (both
-live in `write-database`), so it MUST be a per-tool property, not derivable from category. Its own small
-slice with tests; leave the code as-is until its trigger lands.
+**Decision.** Do NOT grow the name-set to silence this. Replace the name-set with a per-tool signal
+on the tool contract, **default chosen deliberately** (safe default: wrongly requiring an account →
+the correct tool refuses to run — visible/non-destructive; wrongly skipping → a drive tool runs without
+venue coords — silent/dangerous → so default = needs resolution). Category-blind (both live in
+`write-database`), so it MUST be a per-tool property, not derivable from category.
 
-  **Drafted plan (not scheduled):** [docs/features/future/L3-Rx-subject-resolver-venue-signal-plan.md](./features/future/L3-Rx-subject-resolver-venue-signal-plan.md)
-  — full design (opt-out signal `ownerScopedNoVenue`, fail-closed default, the 8 tools to flag, the
+**RESOLVED 2026-09-11 (L3-Rx, on `l3-integration`).** Added optional `ownerScopedNoVenue?: boolean` to
+`AgentTool` (absent/false = needs resolution — fail-closed). Set `true` on the 6 non-drive side-effecting
+tools (`provision_venue_account`, `deprovision_venue_account`, `adjust_risk_limits`, `watch_token`,
+`remove_watch`, `check_watches`; `list_watches`/`resolve_watch` are `read-memory`, already short-circuited).
+`resolveSubjectInjection` now takes a resolved `skipVenueResolution` boolean (dropped the name-set +
+`toolName` param, stays port-only); `bin.ts` computes `isReadOnlyCategory(category) ||
+tool?.ownerScopedNoVenue`. The four resolution paths are byte-identical — only the short-circuit entry
+changed; the method was NOT split (authored code, no oracle). Tests: reworked `subject-resolver.test.ts`
+(flag-driven) + new `owner-scoped-no-venue.test.ts` (guards the 6 flagged + 5 drive tools). Build/lint/test
+green (2410 passed). This pre-empts the latent mishandling of `adjust_risk_limits`/watch tools BEFORE they
+are routed over REST. Plan: [docs/features/L3-Rx-subject-resolver-venue-signal-plan.md](./features/L3-Rx-subject-resolver-venue-signal-plan.md).
+
+  **Plan (implemented):** [docs/features/L3-Rx-subject-resolver-venue-signal-plan.md](./features/L3-Rx-subject-resolver-venue-signal-plan.md)
+  — full design (opt-out signal `ownerScopedNoVenue`, fail-closed default, the flagged tools, the
   `publishToInbound` ground-truth table, steps + tests). Transient working doc; THIS ledger entry is the
-  durable obligation if the plan is pruned.
+  durable record.

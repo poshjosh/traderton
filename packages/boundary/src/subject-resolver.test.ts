@@ -1,7 +1,14 @@
-// AUTHORED (Phase 9b item F2b) — the D2 subject→injection resolver in isolation,
+// AUTHORED (F2b; updated L3-Rx) — the D2 subject→injection resolver in isolation,
 // with FAKE db lookups (no Postgres). The resolver's db path is exercised for
 // real against Postgres in F2c's integration test; here we prove the mapping
-// logic + the two failure modes (ownership mismatch, no venue account).
+// logic + the failure modes (ownership mismatch, no venue account) + the
+// venue-resolution short-circuit.
+//
+// L3-Rx: the resolver now takes a resolved `skipVenueResolution` boolean instead
+// of (category, toolName). The caller (bin.ts) computes it from
+// `isReadOnlyCategory(category) || tool.ownerScopedNoVenue`. So here:
+//   skipVenueResolution = false  → the tool NEEDS venue resolution (bot / default)
+//   skipVenueResolution = true   → short-circuit (read-only OR owner-scoped write)
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -27,12 +34,20 @@ const BOT: ResolverBotRecord = {
   config: { venue: 'hyperliquid', execution: { mode: 'shadow' } },
 };
 
-describe('resolveSubjectInjection — bot-scoped tool', () => {
+const MINIMAL_INJECTION = {
+  ownerId: 'owner-1',
+  actorId: 'actor-1',
+  ownerMode: 'paper',
+  venue: '',
+  venueType: 'orderbook',
+  venueAccountId: '',
+};
+
+describe('resolveSubjectInjection — needs venue resolution, bot-scoped tool', () => {
   it('derives venueAccountId + venue/venueType/ownerMode from the owned bot row', async () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
-      'write-database',
-      'adjust_bot_config',
+      false,
       { botId: 'bot-1' },
       ports({ getBotById: async () => BOT }),
     );
@@ -52,8 +67,7 @@ describe('resolveSubjectInjection — bot-scoped tool', () => {
   it('infers swap venueType for jupiter', async () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
-      'write-database',
-      'adjust_bot_config',
+      false,
       { botId: 'bot-1' },
       ports({ getBotById: async () => ({ ...BOT, config: { venue: 'jupiter' } }) }),
     );
@@ -64,8 +78,7 @@ describe('resolveSubjectInjection — bot-scoped tool', () => {
   it('rejects a bot owned by someone else with authorization.denied', async () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
-      'write-database',
-      'adjust_bot_config',
+      false,
       { botId: 'bot-1' },
       ports({ getBotById: async () => ({ ...BOT, ownerId: 'other-owner' }) }),
     );
@@ -73,20 +86,19 @@ describe('resolveSubjectInjection — bot-scoped tool', () => {
   });
 
   it('rejects a missing bot with precondition.not_ready', async () => {
-    const res = await resolveSubjectInjection(SUBJECT, 'write-database', 'adjust_bot_config', { botId: 'gone' }, ports());
+    const res = await resolveSubjectInjection(SUBJECT, false, { botId: 'gone' }, ports());
     expect(res.ok).toBe(false);
     expect(!res.ok && res.code).toBe('precondition.not_ready');
   });
 });
 
-describe('resolveSubjectInjection — no bot named (per-owner default)', () => {
+describe('resolveSubjectInjection — needs venue resolution, no bot named (per-owner default)', () => {
   const ACCOUNT: ResolverVenueAccountRecord = { id: 'va-default', venue: 'bybit' };
 
   it('uses the single venue account when exactly one exists', async () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
-      'execute-trade',
-      'submit_decision',
+      false,
       {},
       ports({ listVenueAccountsByOwner: async () => [ACCOUNT] }),
     );
@@ -104,15 +116,14 @@ describe('resolveSubjectInjection — no bot named (per-owner default)', () => {
   });
 
   it('refuses (precondition.not_ready) when the owner has no venue account', async () => {
-    const res = await resolveSubjectInjection(SUBJECT, 'execute-trade', 'submit_decision', {}, ports());
+    const res = await resolveSubjectInjection(SUBJECT, false, {}, ports());
     expect(res).toEqual({ ok: false, code: 'precondition.not_ready', message: 'no venue account for owner' });
   });
 
   it('refuses when multiple accounts exist and no operator default is configured', async () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
-      'execute-trade',
-      'submit_decision',
+      false,
       {},
       ports({
         listVenueAccountsByOwner: async () => [ACCOUNT, { id: 'va-2', venue: 'hyperliquid' }],
@@ -125,8 +136,7 @@ describe('resolveSubjectInjection — no bot named (per-owner default)', () => {
   it('uses the operator default when multiple accounts exist and a default is set', async () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
-      'execute-trade',
-      'submit_decision',
+      false,
       {},
       ports({
         listVenueAccountsByOwner: async () => [ACCOUNT, { id: 'va-2', venue: 'hyperliquid' }],
@@ -148,125 +158,47 @@ describe('resolveSubjectInjection — no bot named (per-owner default)', () => {
   });
 });
 
-describe('resolveSubjectInjection — read-only tools (the read-tool seam)', () => {
-  it('short-circuits a read-* category to a minimal injection (ownerId + actorId; empty venue coords)', async () => {
-    // A pure market read (e.g. score_candidate) names no bot and needs no venue
-    // account. The read-only short-circuit returns identity only; venue coords are
-    // empty because reads never invoke the drive target that would consume them.
-    const res = await resolveSubjectInjection(
-      SUBJECT,
-      'read-market-data',
-      'score_candidate',
-      { symbol: 'BTC' },
-      ports(),
-    );
-    expect(res).toEqual({
-      ok: true,
-      injection: {
-        ownerId: 'owner-1',
-        actorId: 'actor-1',
-        ownerMode: 'paper',
-        venue: '',
-        venueType: 'orderbook',
-        venueAccountId: '',
-      },
-    });
+describe('resolveSubjectInjection — skipVenueResolution short-circuit', () => {
+  it('short-circuits to a minimal injection (ownerId + actorId; empty venue coords)', async () => {
+    const res = await resolveSubjectInjection(SUBJECT, true, { symbol: 'BTC' }, ports());
+    expect(res).toEqual({ ok: true, injection: MINIMAL_INJECTION });
   });
 
-  it('succeeds for a read tool even when the owner has NO venue account (write tools fail here)', async () => {
-    // Ports return no venue accounts. A write/no-bot tool would fail
-    // precondition.not_ready; a read must NOT — it skips the venue-account gate.
-    const readRes = await resolveSubjectInjection(
+  it('short-circuits even when the owner has NO venue account (would fail if resolution ran)', async () => {
+    // The whole point: provision_venue_account / adjust_risk_limits / watch tools
+    // must succeed with zero venue accounts. Contrast a resolution-needing tool.
+    const skipRes = await resolveSubjectInjection(
       SUBJECT,
-      'read-market-data',
-      'score_candidate',
+      true,
+      { venue: 'hyperliquid', label: 'x', secrets: {} },
+      ports({ listVenueAccountsByOwner: async () => [] }),
+    );
+    expect(skipRes.ok).toBe(true);
+
+    const needRes = await resolveSubjectInjection(
+      SUBJECT,
+      false,
       {},
       ports({ listVenueAccountsByOwner: async () => [] }),
     );
-    expect(readRes.ok).toBe(true);
-
-    // Contrast: the same empty-accounts ports fail for a non-read, no-bot tool.
-    const writeRes = await resolveSubjectInjection(
-      SUBJECT,
-      'execute-trade',
-      'submit_decision',
-      {},
-      ports({ listVenueAccountsByOwner: async () => [] }),
-    );
-    expect(writeRes.ok).toBe(false);
-    if (!writeRes.ok) {
-      expect(writeRes.code).toBe('precondition.not_ready');
-    }
+    expect(needRes.ok).toBe(false);
+    if (!needRes.ok) expect(needRes.code).toBe('precondition.not_ready');
   });
 
-  it('does NOT consult the bot row for a read tool even if the payload names a botId', async () => {
-    // A read categorized read-* short-circuits before any bot lookup. Prove the
-    // bot port is never called (identity comes from the signed subject, and read
-    // tools enforce their own ownership by ctx.agentId downstream).
-    let botLookupCalls = 0;
+  it('does NOT consult the bot or venue-account ports when skipping (even if payload names a botId)', async () => {
+    let botCalls = 0;
+    let listCalls = 0;
     const res = await resolveSubjectInjection(
       SUBJECT,
-      'read-database',
-      'get_bot_status',
+      true,
       { botId: 'bot-1' },
       ports({
-        getBotById: async () => {
-          botLookupCalls += 1;
-          return BOT;
-        },
+        getBotById: async () => { botCalls += 1; return BOT; },
+        listVenueAccountsByOwner: async () => { listCalls += 1; return []; },
       }),
     );
     expect(res.ok).toBe(true);
-    expect(botLookupCalls).toBe(0);
-  });
-});
-
-describe('resolveSubjectInjection — owner-scoped provisioning tools (the provisioning seam)', () => {
-  // provision_venue_account / deprovision_venue_account are write-database tools
-  // that need only ownerId; they must NOT require a pre-existing venue account
-  // (provision creates the FIRST one — requiring one is a chicken-and-egg deadlock).
-  for (const toolName of ['provision_venue_account', 'deprovision_venue_account']) {
-    it(`short-circuits ${toolName} to a minimal injection even with NO venue account`, async () => {
-      let listCalls = 0;
-      let botCalls = 0;
-      const res = await resolveSubjectInjection(
-        SUBJECT,
-        'write-database',
-        toolName,
-        { venue: 'hyperliquid', label: 'x', secrets: {} },
-        ports({
-          listVenueAccountsByOwner: async () => { listCalls += 1; return []; },
-          getBotById: async () => { botCalls += 1; return null; },
-        }),
-      );
-      expect(res).toEqual({
-        ok: true,
-        injection: {
-          ownerId: 'owner-1',
-          actorId: 'actor-1',
-          ownerMode: 'paper',
-          venue: '',
-          venueType: 'orderbook',
-          venueAccountId: '',
-        },
-      });
-      // The short-circuit must not consult the venue-account or bot ports.
-      expect(listCalls).toBe(0);
-      expect(botCalls).toBe(0);
-    });
-  }
-
-  it('a NON-provisioning write-database tool still requires a venue account', async () => {
-    // Guard: the seam is name-scoped, not category-wide — other write-database
-    // tools (e.g. create_bot with no bot yet) still hit the default-account path.
-    const res = await resolveSubjectInjection(
-      SUBJECT,
-      'write-database',
-      'create_bot',
-      {},
-      ports({ listVenueAccountsByOwner: async () => [] }),
-    );
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.code).toBe('precondition.not_ready');
+    expect(botCalls).toBe(0);
+    expect(listCalls).toBe(0);
   });
 });

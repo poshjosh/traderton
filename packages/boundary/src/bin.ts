@@ -12,6 +12,7 @@
 import { Redis } from 'ioredis';
 import { and, eq } from 'drizzle-orm';
 import type { TradingToolContext, ToolCategory } from '@traderton/domain';
+import { isReadOnlyCategory } from '@traderton/domain';
 import {
   createDatabase,
   BotRepository,
@@ -108,10 +109,15 @@ async function main(): Promise<void> {
     const tool = registry.get(request.toolName);
     const category = (tool?.category ?? 'read-config') as ToolCategory;
 
+    // A tool needs no venue resolution when it is read-only (drive target never
+    // invoked) OR it declares `ownerScopedNoVenue` (owner-scoped write that drives
+    // no executor — provisioning, adjust_risk_limits, the watch tools). Computed
+    // here so the resolver stays port-only + registry-free.
+    const skipVenueResolution = isReadOnlyCategory(category) || tool?.ownerScopedNoVenue === true;
+
     const resolution = await resolveSubjectInjection(
       { ownerId: request.ownerId, actor: request.actor },
-      category,
-      request.toolName,
+      skipVenueResolution,
       request.payload,
       resolverPorts,
     );

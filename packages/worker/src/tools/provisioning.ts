@@ -104,6 +104,9 @@ function validationFailure(error: SecretValidationError): ToolResult {
 
 const provisionVenueAccountTool: AgentTool<TradingToolContext> = {
   name: 'provision_venue_account',
+  // Owner-scoped write; drives no executor. Needs no venue resolution — and
+  // CREATES the owner's first venue account, so requiring one would deadlock.
+  ownerScopedNoVenue: true,
   description:
     "Provision a venue account with its trading credential in one step: validate + encrypt the venue secrets, store them, and create the linked venue account. Returns the new venueAccountId (never the secrets). Use this to onboard an owner's exchange/wallet before creating bots or submitting decisions.",
   parametersSchema: ProvisionVenueAccountParamsSchema,
@@ -269,6 +272,9 @@ type DeprovisionVenueAccountParams = z.infer<typeof DeprovisionVenueAccountParam
 
 const deprovisionVenueAccountTool: AgentTool<TradingToolContext> = {
   name: 'deprovision_venue_account',
+  // Owner-scoped write (keyed by venueAccountId); drives no executor. No venue
+  // resolution needed.
+  ownerScopedNoVenue: true,
   description:
     "Delete a venue account and its trading credential in one step. Refuses (in_use) if any bot references the account. Returns the deleted venueAccountId. Use this to offboard an owner's exchange/wallet; the consumer must first clear its own platform dependents (connections/agent grants).",
   parametersSchema: DeprovisionVenueAccountParamsSchema,

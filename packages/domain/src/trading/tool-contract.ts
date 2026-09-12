@@ -294,6 +294,23 @@ export interface AgentTool<Ctx extends TradingToolContext = TradingToolContext> 
    * derived from the JSON schema alone.
    */
   promptGuidance?: string;
+  /**
+   * Owner-scoped, needs NO venue resolution. Set `true` for side-effecting tools
+   * that write tables directly (via `ctx.db`) or act on owner/agent-scoped state
+   * and NEVER drive the executor (never use `ctx.publishToInbound`) — e.g.
+   * `provision_venue_account`, `adjust_risk_limits`, the watch tools. The boundary
+   * subject-resolver uses this to skip the venue-account requirement (a pure
+   * owner-scoped write needs no venue coordinates; requiring one would wrongly
+   * fail `precondition.not_ready`, and would deadlock `provision_venue_account`
+   * which CREATES the owner's first venue account).
+   *
+   * DEFAULT (absent/`false`) = NEEDS venue resolution — the fail-closed default:
+   * a new non-drive tool that forgets to set this merely refuses to run
+   * (visible, non-destructive), whereas defaulting the other way could let a
+   * drive tool run without venue coordinates (silent + dangerous). Read-only
+   * tools are handled separately by their category and need not set this.
+   */
+  ownerScopedNoVenue?: boolean;
   execute(params: unknown, ctx: Ctx): Promise<ToolResult>;
 }
 
