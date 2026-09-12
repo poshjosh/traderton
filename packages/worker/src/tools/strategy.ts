@@ -23,6 +23,12 @@ const logger = createLogger('tools:strategy');
 // candle arrays. This is required by the legal-isolation objective — the consumer
 // must not fetch trading candle data. Supports BOTH orderbook and swap targets
 // (no downgrade vs the source preset-scorecard use).
+//
+// Swap targets accept EITHER a known `poolAddress` (Option A) OR a held token
+// (`network + tokenAddress`) whose canonical pool is resolved behind the boundary
+// via ctx.scannerPoolResolver (highest liquidity, tie-break volume then address),
+// then scored on that pool's candles. Resolving the pool behind the boundary keeps
+// the token→pool market-data lookup off the consumer (legal-isolation).
 
 // IndicatorConfig is a large optional-nested config; accept it as a passthrough
 // object validated structurally by scoreCandidate's own defaults. We validate the
@@ -40,8 +46,9 @@ const ScoreCandidateParamsSchema = z.object({
   // orderbook target
   providerSymbol: z.string().min(1).optional().describe('For venueType=orderbook: the provider symbol to fetch candles for (e.g. "BTCUSDT").'),
   // swap target
-  network: z.string().min(1).optional().describe('For venueType=swap: the chain/network of the pool.'),
-  poolAddress: z.string().min(1).optional().describe('For venueType=swap: the DEX pool address.'),
+  network: z.string().min(1).optional().describe('For venueType=swap: the chain/network of the pool (or token).'),
+  poolAddress: z.string().min(1).optional().describe('For venueType=swap: the DEX pool address (Option A — pool already known). When omitted, pass tokenAddress and the pool is resolved behind the boundary.'),
+  tokenAddress: z.string().min(1).optional().describe('For venueType=swap: the held token address. The highest-liquidity pool for network+tokenAddress is resolved behind the boundary, then scored.'),
   venue: z.string().optional().describe('Optional venue label carried onto the candidate/signal.'),
   interval: z.string().optional().describe('Candle interval (default "1h").'),
   candleLimit: z.coerce.number().int().positive().max(1000).optional().describe('Number of candles to fetch (default 200).'),
@@ -50,24 +57,65 @@ const ScoreCandidateParamsSchema = z.object({
 
 type ScoreCandidateParams = z.infer<typeof ScoreCandidateParamsSchema>;
 
-/** Build the ScannerCandleTarget from the validated params (venueType discriminated). */
-function buildTarget(p: ScoreCandidateParams): { ok: true; target: ScannerCandleTarget } | { ok: false; error: string } {
+/** A resolved swap pool candidate (structural subset of DiscoveredPool). */
+interface ResolvedPool {
+  poolAddress: string;
+  network: string;
+  liquidityUsd: number;
+  volume24hUsd: number;
+}
+
+/**
+ * Select the canonical pool for a resolved token per the ratified heuristic:
+ * filter to the target network (case-insensitive), then highest `liquidityUsd`
+ * desc, tie-break `volume24hUsd` desc, then `poolAddress` lexicographic. No
+ * quote-asset constraint (recorded decision). Returns null when no pool matches.
+ */
+function selectCanonicalPool(pools: ResolvedPool[], network: string): ResolvedPool | null {
+  const networkLc = network.toLowerCase();
+  const matching = pools.filter((pool) => pool.network.toLowerCase() === networkLc);
+  if (matching.length === 0) {
+    return null;
+  }
+  return [...matching].sort((a, b) => {
+    if (b.liquidityUsd !== a.liquidityUsd) return b.liquidityUsd - a.liquidityUsd;
+    if (b.volume24hUsd !== a.volume24hUsd) return b.volume24hUsd - a.volume24hUsd;
+    return a.poolAddress.localeCompare(b.poolAddress);
+  })[0]!;
+}
+
+/**
+ * Build the ScannerCandleTarget from the validated params (venueType discriminated).
+ *
+ * Orderbook requires `providerSymbol`. Swap accepts EITHER `network + poolAddress`
+ * (Option A — pool already known) OR `network + tokenAddress` (a held token whose
+ * pool must be resolved behind the boundary — signalled by `resolveToken`).
+ */
+function buildTarget(
+  p: ScoreCandidateParams,
+): { ok: true; target: ScannerCandleTarget } | { ok: true; resolveToken: { network: string; tokenAddress: string } } | { ok: false; error: string } {
   if (p.venueType === 'orderbook') {
     if (!p.providerSymbol) {
       return { ok: false, error: 'providerSymbol is required for venueType=orderbook' };
     }
     return { ok: true, target: { venueType: 'orderbook', providerSymbol: p.providerSymbol } };
   }
-  // swap
-  if (!p.network || !p.poolAddress) {
-    return { ok: false, error: 'network and poolAddress are required for venueType=swap' };
+  // swap — network is always required; then EITHER a known pool OR a token to resolve.
+  if (!p.network) {
+    return { ok: false, error: 'network is required for venueType=swap' };
   }
-  return { ok: true, target: { venueType: 'swap', network: p.network, poolAddress: p.poolAddress } };
+  if (p.poolAddress) {
+    return { ok: true, target: { venueType: 'swap', network: p.network, poolAddress: p.poolAddress } };
+  }
+  if (p.tokenAddress) {
+    return { ok: true, resolveToken: { network: p.network, tokenAddress: p.tokenAddress } };
+  }
+  return { ok: false, error: 'poolAddress or tokenAddress is required for venueType=swap' };
 }
 
 const scoreCandidateTool: AgentTool<TradingToolContext> = {
   name: 'score_candidate',
-  description: 'Score a single candidate symbol against a strategy indicator/scoring config and return a trading signal (confidence + go_long/go_short) or null if no signal. Candles are fetched behind the boundary; pass only identifiers. Supports orderbook and swap targets.',
+  description: 'Score a single candidate symbol against a strategy indicator/scoring config and return a trading signal (confidence + go_long/go_short) or null if no signal. Candles are fetched behind the boundary; pass only identifiers. Supports orderbook targets and swap targets (either a known poolAddress, or a network+tokenAddress whose pool is resolved behind the boundary).',
   parametersSchema: ScoreCandidateParamsSchema,
   parameters: convertZodToJsonSchema(ScoreCandidateParamsSchema),
   category: 'read-market-data',
@@ -90,7 +138,26 @@ const scoreCandidateTool: AgentTool<TradingToolContext> = {
     const limit = p.candleLimit ?? 200;
 
     try {
-      const candles = await ctx.scannerCandleFetcher(targetResult.target, interval, limit);
+      // Swap-token arm: resolve the held token → its pools behind the boundary,
+      // pick the canonical (highest-liquidity) pool, then score its candles via
+      // the SAME swap candle path Option A uses.
+      let target: ScannerCandleTarget;
+      if ('resolveToken' in targetResult) {
+        if (!ctx.scannerPoolResolver) {
+          return { success: false, error: 'market_data_not_configured', retryable: false };
+        }
+        const { network, tokenAddress } = targetResult.resolveToken;
+        const pools = await ctx.scannerPoolResolver(network, tokenAddress);
+        const pool = selectCanonicalPool(pools, network);
+        if (!pool) {
+          return { success: false, error: 'swap_pool_unresolved', retryable: false, fault: false };
+        }
+        target = { venueType: 'swap', network, poolAddress: pool.poolAddress };
+      } else {
+        target = targetResult.target;
+      }
+
+      const candles = await ctx.scannerCandleFetcher(target, interval, limit);
 
       const candidate: CandidateContext = {
         symbol: p.symbol,

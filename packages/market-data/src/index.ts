@@ -70,6 +70,7 @@ export { CANDLE_PROVIDERS, type CandleProviderKey, type CandleProviderDescriptor
 export {
 	fetchGeckoTerminalCandles,
 	fetchGeckoTerminalNewPools,
+	fetchGeckoTerminalPoolsForToken,
 	fetchGeckoTerminalTopPools,
 	fetchGeckoTerminalTrendingPools,
 	validateApiKey as validateGeckoTerminalApiKey,

@@ -1,6 +1,6 @@
 import { VenueCandleFetcher } from '@traderton/venues';
-import { TokenBucketRateLimiter } from '@traderton/market-data';
-import type { BinanceCandlesConfig, PriceCandle, GeckoTerminalConfig, MarketDataConfig } from '@traderton/market-data';
+import { TokenBucketRateLimiter, fetchGeckoTerminalPoolsForToken } from '@traderton/market-data';
+import type { BinanceCandlesConfig, PriceCandle, GeckoTerminalConfig, MarketDataConfig, DiscoveredPool } from '@traderton/market-data';
 import type { ScannerCandleTarget } from '@traderton/domain';
 
 /**
@@ -94,4 +94,33 @@ export function createScannerCandleFetcherFromConfig(
       maxWaitMs: marketData.geckoterminal.candles.maxWaitMs,
     }),
   });
+}
+
+/**
+ * Build a swap token→pools resolver directly from the resolved `marketData`
+ * config. Companion to {@link createScannerCandleFetcherFromConfig}: it threads
+ * the SAME GeckoTerminal config (network + token address → its DEX pools) so the
+ * `score_candidate` swap arm can resolve a held token to a pool BEHIND the
+ * boundary, then hand the pool to the candle fetcher. Composition roots (the
+ * boundary) guard on `marketData` themselves.
+ *
+ * Kept a separate limiter from the candle fetcher's — the token-pools point
+ * lookup and the candle fetch are distinct GeckoTerminal calls (same double-
+ * acquire caveat noted on {@link createScannerCandleFetcherFromConfig}).
+ */
+export function createScannerPoolResolverFromConfig(
+  marketData: MarketDataConfig,
+): (network: string, tokenAddress: string) => Promise<DiscoveredPool[]> {
+  const geckoTerminalConfig: GeckoTerminalConfig = {
+    baseUrl: marketData.geckoterminal.baseUrl,
+    proBaseUrl: marketData.geckoterminal.proBaseUrl,
+    apiKey: marketData.geckoterminal.apiKey,
+    rateLimiter: new TokenBucketRateLimiter({
+      requestsPerMinute: marketData.geckoterminal.candles.requestsPerMinute,
+      maxWaitMs: marketData.geckoterminal.candles.maxWaitMs,
+    }),
+    timeoutMs: marketData.geckoterminal.candles.maxWaitMs ?? 10_000,
+  };
+  return (network: string, tokenAddress: string) =>
+    fetchGeckoTerminalPoolsForToken(network, tokenAddress, geckoTerminalConfig);
 }

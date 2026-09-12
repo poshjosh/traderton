@@ -20,7 +20,7 @@ import {
   computeRequestFingerprint,
   venueAccounts,
 } from '@traderton/db';
-import { createTradingRuntime, loadConfig, createScannerCandleFetcherFromConfig } from '@traderton/worker';
+import { createTradingRuntime, loadConfig, createScannerCandleFetcherFromConfig, createScannerPoolResolverFromConfig } from '@traderton/worker';
 import { createProviderRegistry, createPriceService } from '@traderton/market-data';
 import type { RedisEvalClient } from '@traderton/market-data';
 import { createBoundaryApp } from './app.js';
@@ -82,6 +82,15 @@ async function main(): Promise<void> {
   //    from config — the tool then degrades to `market_data_not_configured`.
   const scannerCandleFetcher = appConfig.marketData
     ? createScannerCandleFetcherFromConfig(appConfig.marketData)
+    : undefined;
+
+  // ── Swap token→pools resolver for score_candidate's swap arm. Threaded the
+  //    SAME way (and from the same GeckoTerminal config) as scannerCandleFetcher:
+  //    the consumer passes a held token (network + tokenAddress) and the boundary
+  //    resolves the pool, then scores its candles. Undefined-when-absent mirrors
+  //    the fetcher's `market_data_not_configured` degrade.
+  const scannerPoolResolver = appConfig.marketData
+    ? createScannerPoolResolverFromConfig(appConfig.marketData)
     : undefined;
 
   // ── Market-data provider registry for the market-intelligence read tools
@@ -179,6 +188,8 @@ async function main(): Promise<void> {
       botRepo: botRepo as unknown as TradingToolContext['botRepo'],
       // Venue-aware candle fetcher for read-only scoring tools (score_candidate).
       scannerCandleFetcher,
+      // Swap token→pools resolver for score_candidate's swap-token arm.
+      scannerPoolResolver,
       // Market-intelligence read tools fetch behind the boundary via the shared
       // provider registry (check_regime / get_market_overview / discover_tokens /
       // search_tokens / get_funding_rates). Undefined-when-absent preserves the

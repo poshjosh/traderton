@@ -258,6 +258,20 @@ export interface TradingToolContext {
     limit: number,
   ) => Promise<import('../ports/candle-fetcher.js').PriceCandle[]>;
   /**
+   * Swap token→pools resolver for the `score_candidate` swap arm. Resolves a
+   * held token (network + token address) to its DEX pools BEHIND the boundary —
+   * threaded the same way as `scannerCandleFetcher` (from the same GeckoTerminal
+   * config), so the consumer passes only the token identity and never fetches
+   * pool data itself (legal-isolation). `score_candidate` ranks the pools
+   * (highest liquidity, tie-break volume then address) and scores the winner's
+   * candles via `scannerCandleFetcher`. Optional — swap-token resolution
+   * degrades to `market_data_not_configured` when absent, mirroring the fetcher.
+   */
+  scannerPoolResolver?: (
+    network: string,
+    tokenAddress: string,
+  ) => Promise<Array<{ poolAddress: string; network: string; liquidityUsd: number; volume24hUsd: number }>>;
+  /**
    * Raw Drizzle database instance for direct table access.
    * Used by tools that need to query tables without a dedicated repository
    * (e.g., market assessment artifacts, preset transitions).

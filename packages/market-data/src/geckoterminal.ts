@@ -138,6 +138,35 @@ async function fetchPools(
 }
 
 /**
+ * Resolve a known swap TOKEN (network + token address) to its DEX pools.
+ * Hits `/api/v2/networks/{network}/tokens/{tokenAddress}/pools` (rewritten to the
+ * Pro on-chain path by {@link buildGeckoUrl} when an apiKey is configured).
+ *
+ * Mirrors the private `fetchPools` helper (rate-limit → fetch → map) but returns
+ * the raw {@link DiscoveredPool}[] — the point-resolver consumer ranks by
+ * `liquidityUsd`/`volume24hUsd` and needs the `poolAddress` directly. Reuses the
+ * existing `mapPoolResource` mapper; no new parsing.
+ */
+export async function fetchGeckoTerminalPoolsForToken(
+  network: string,
+  tokenAddress: string,
+  config: GeckoTerminalConfig,
+): Promise<DiscoveredPool[]> {
+  await config.rateLimiter.acquire();
+
+  const path = `/api/v2/networks/${encodeURIComponent(network)}/tokens/${encodeURIComponent(tokenAddress)}/pools`;
+
+  const response = await fetchJson<GeckoTerminalPoolResponse>({
+    url: buildGeckoUrl(config, path),
+    timeoutMs: config.timeoutMs,
+    headers: buildGeckoHeaders(config),
+    fetchFn: config.fetchFn,
+  });
+
+  return (response.data ?? []).map((resource) => mapPoolResource(network, resource, response.included));
+}
+
+/**
  * Fetch OHLCV candles from GeckoTerminal for a DEX pool.
  * Timeframes: 'minute', 'hour', 'day'
  */

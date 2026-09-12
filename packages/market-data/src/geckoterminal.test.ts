@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fetchGeckoTerminalTrendingPools, fetchGeckoTerminalTopPools, fetchGeckoTerminalCandles, fetchGeckoTerminalNewPools, validateApiKey } from './geckoterminal.js';
+import { fetchGeckoTerminalTrendingPools, fetchGeckoTerminalTopPools, fetchGeckoTerminalCandles, fetchGeckoTerminalNewPools, fetchGeckoTerminalPoolsForToken, validateApiKey } from './geckoterminal.js';
 import { TokenBucketRateLimiter } from './rate-limiter.js';
 
 function makePoolResponse() {
@@ -169,6 +169,97 @@ describe('fetchGeckoTerminalTopPools', () => {
 
     expect(capturedUrl).toBe('https://api.geckoterminal.com/api/v2/networks/solana/pools?sort=h24_volume_usd_desc&page=2');
     expect(result[0]?.discoveryVectors).toEqual(['top_pools_p2']);
+  });
+});
+
+describe('fetchGeckoTerminalPoolsForToken', () => {
+  function makeMultiPoolResponse() {
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({
+        data: [
+          {
+            id: 'pool-low',
+            attributes: { address: 'pool-low', reserve_in_usd: '5000', volume_usd: { h24: '9000' } },
+            relationships: { base_token: { data: { id: 'bt-1' } }, quote_token: { data: { id: 'qt-1' } } },
+          },
+          {
+            id: 'pool-high',
+            attributes: { address: 'pool-high', reserve_in_usd: '50000', volume_usd: { h24: '1000' } },
+            relationships: { base_token: { data: { id: 'bt-1' } }, quote_token: { data: { id: 'qt-1' } } },
+          },
+        ],
+        included: [
+          { id: 'bt-1', attributes: { address: 'token-1', symbol: 'TK1', name: 'Token1' } },
+          { id: 'qt-1', attributes: { address: 'usdc', symbol: 'USDC', name: 'USD Coin' } },
+        ],
+      }),
+    } as Response;
+  }
+
+  it('hits the token pools path and maps DiscoveredPool[] via mapPoolResource', async () => {
+    let capturedUrl = '';
+    const config = {
+      baseUrl: 'https://api.geckoterminal.com',
+      timeoutMs: 5_000,
+      rateLimiter: new TokenBucketRateLimiter({ requestsPerMinute: 1_000 }),
+      fetchFn: async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
+        capturedUrl = String(input);
+        return makeMultiPoolResponse();
+      },
+    };
+
+    const pools = await fetchGeckoTerminalPoolsForToken('solana', '0xToken', config);
+
+    expect(capturedUrl).toBe('https://api.geckoterminal.com/api/v2/networks/solana/tokens/0xToken/pools');
+    expect(pools).toHaveLength(2);
+    // The highest-liquidity pool carries the parsed fields the resolver ranks on.
+    const high = pools.find((p) => p.poolAddress === 'pool-high');
+    expect(high?.liquidityUsd).toBe(50000);
+    expect(high?.volume24hUsd).toBe(1000);
+    expect(high?.network).toBe('solana');
+  });
+
+  it('rewrites to the Pro on-chain path and sends the api-key header when apiKey is set', async () => {
+    let capturedUrl = '';
+    let capturedHeaders: Record<string, string> = {};
+    const config = {
+      baseUrl: 'https://api.geckoterminal.com',
+      apiKey: 'test-api-key',
+      timeoutMs: 5_000,
+      rateLimiter: new TokenBucketRateLimiter({ requestsPerMinute: 1_000 }),
+      fetchFn: async (input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
+        capturedUrl = String(input);
+        if (init?.headers) {
+          capturedHeaders = Object.fromEntries(new Headers(init.headers).entries());
+        }
+        return makeMultiPoolResponse();
+      },
+    };
+
+    await fetchGeckoTerminalPoolsForToken('ethereum', '0xAbc', config);
+
+    expect(capturedUrl).toBe('https://pro-api.coingecko.com/api/v3/onchain/networks/ethereum/tokens/0xAbc/pools');
+    expect(capturedHeaders['x-cg-pro-api-key']).toBe('test-api-key');
+  });
+
+  it('returns an empty array when the token has no pools', async () => {
+    const config = {
+      baseUrl: 'https://api.geckoterminal.com',
+      timeoutMs: 5_000,
+      rateLimiter: new TokenBucketRateLimiter({ requestsPerMinute: 1_000 }),
+      fetchFn: async (): Promise<Response> => ({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ data: [] }),
+      } as Response),
+    };
+
+    const pools = await fetchGeckoTerminalPoolsForToken('solana', '0xNoPools', config);
+    expect(pools).toEqual([]);
   });
 });
 

@@ -24,8 +24,14 @@ function makeCandles(n: number): PriceCandle[] {
   return out;
 }
 
+type PoolResolver = (
+  network: string,
+  tokenAddress: string,
+) => Promise<Array<{ poolAddress: string; network: string; liquidityUsd: number; volume24hUsd: number }>>;
+
 function makeContext(
   fetcher?: (target: ScannerCandleTarget, interval: string, limit: number) => Promise<PriceCandle[]>,
+  poolResolver?: PoolResolver,
 ): TradingToolContext {
   return {
     agentId: 'agent-strategy-test',
@@ -35,6 +41,7 @@ function makeContext(
     redis: {} as TradingToolContext['redis'],
     publishToInbound: async () => undefined,
     scannerCandleFetcher: fetcher,
+    scannerPoolResolver: poolResolver,
   } as TradingToolContext;
 }
 
@@ -124,14 +131,25 @@ describe('score_candidate tool', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('rejects a swap request missing network/poolAddress', async () => {
+  it('rejects a swap request missing network', async () => {
     const fetcher = vi.fn(async () => makeCandles(120));
     const result = await scoreCandidateTool!.execute(
       { symbol: 'x', venueType: 'swap', config: baseConfig },
       makeContext(fetcher),
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain('network and poolAddress are required');
+    expect(result.error).toContain('network is required');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('rejects a swap request with network but neither poolAddress nor tokenAddress', async () => {
+    const fetcher = vi.fn(async () => makeCandles(120));
+    const result = await scoreCandidateTool!.execute(
+      { symbol: 'x', venueType: 'swap', network: 'solana', config: baseConfig },
+      makeContext(fetcher),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('poolAddress or tokenAddress is required');
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -144,5 +162,115 @@ describe('score_candidate tool', () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe('rate_limit');
     expect(result.retryable).toBe(true);
+  });
+
+  // ── swap-token resolution (network + tokenAddress, no pool) ──────────────────
+
+  it('resolves a swap token to its top-liquidity pool, then fetches candles for that pool and scores', async () => {
+    const fetcher = vi.fn(async () => makeCandles(120));
+    const poolResolver = vi.fn(async () => [
+      { poolAddress: 'pool-low', network: 'solana', liquidityUsd: 5_000, volume24hUsd: 90_000 },
+      { poolAddress: 'pool-high', network: 'solana', liquidityUsd: 50_000, volume24hUsd: 1_000 },
+    ]);
+
+    const result = await scoreCandidateTool!.execute(
+      {
+        symbol: 'solana:0xToken',
+        venueType: 'swap',
+        network: 'solana',
+        tokenAddress: '0xToken',
+        config: baseConfig,
+      },
+      makeContext(fetcher, poolResolver),
+    );
+
+    // Pool resolution happened behind the boundary with the token identity.
+    expect(poolResolver).toHaveBeenCalledTimes(1);
+    expect(poolResolver.mock.calls[0]![0]).toBe('solana');
+    expect(poolResolver.mock.calls[0]![1]).toBe('0xToken');
+
+    // The highest-liquidity pool was selected and its candles fetched via the swap target.
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]![0]).toEqual({ venueType: 'swap', network: 'solana', poolAddress: 'pool-high' });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toHaveProperty('signal');
+    expect(result.data).toHaveProperty('candlesEvaluated', 120);
+  });
+
+  it('tie-breaks equal liquidity by volume24h desc, then poolAddress lexicographic', async () => {
+    const fetcher = vi.fn(async () => makeCandles(80));
+    // Two pools tie on liquidity; higher volume wins. A third with same liquidity+volume
+    // would tie-break lexicographically — covered by ordering pool-b before pool-a.
+    const poolResolver = vi.fn(async () => [
+      { poolAddress: 'pool-b', network: 'solana', liquidityUsd: 10_000, volume24hUsd: 500 },
+      { poolAddress: 'pool-a', network: 'solana', liquidityUsd: 10_000, volume24hUsd: 500 },
+      { poolAddress: 'pool-vol', network: 'solana', liquidityUsd: 10_000, volume24hUsd: 999 },
+    ]);
+
+    await scoreCandidateTool!.execute(
+      { symbol: 'solana:0xT', venueType: 'swap', network: 'solana', tokenAddress: '0xT', config: baseConfig },
+      makeContext(fetcher, poolResolver),
+    );
+
+    // Highest volume among the liquidity-tie wins.
+    expect(fetcher.mock.calls[0]![0]).toEqual({ venueType: 'swap', network: 'solana', poolAddress: 'pool-vol' });
+  });
+
+  it('filters resolved pools to the target network case-insensitively before selecting', async () => {
+    const fetcher = vi.fn(async () => makeCandles(80));
+    const poolResolver = vi.fn(async () => [
+      // Higher liquidity but wrong network — must be excluded.
+      { poolAddress: 'pool-eth', network: 'ethereum', liquidityUsd: 999_999, volume24hUsd: 1 },
+      { poolAddress: 'pool-sol', network: 'SOLANA', liquidityUsd: 10_000, volume24hUsd: 1 },
+    ]);
+
+    await scoreCandidateTool!.execute(
+      { symbol: 'solana:0xT', venueType: 'swap', network: 'solana', tokenAddress: '0xT', config: baseConfig },
+      makeContext(fetcher, poolResolver),
+    );
+
+    expect(fetcher.mock.calls[0]![0]).toEqual({ venueType: 'swap', network: 'solana', poolAddress: 'pool-sol' });
+  });
+
+  it('returns swap_pool_unresolved (clean, non-retryable, non-fault) when no pool resolves', async () => {
+    const fetcher = vi.fn(async () => makeCandles(80));
+    const poolResolver = vi.fn(async () => []);
+
+    const result = await scoreCandidateTool!.execute(
+      { symbol: 'solana:0xT', venueType: 'swap', network: 'solana', tokenAddress: '0xT', config: baseConfig },
+      makeContext(fetcher, poolResolver),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('swap_pool_unresolved');
+    expect(result.retryable).toBe(false);
+    expect(result.fault).toBe(false);
+    // No candle fetch when the pool cannot be resolved.
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('degrades to market_data_not_configured for a swap token when the pool resolver is not wired', async () => {
+    const fetcher = vi.fn(async () => makeCandles(80));
+    const result = await scoreCandidateTool!.execute(
+      { symbol: 'solana:0xT', venueType: 'swap', network: 'solana', tokenAddress: '0xT', config: baseConfig },
+      makeContext(fetcher, undefined),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('market_data_not_configured');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('still supports the Option-A swap poolAddress path (no resolver needed)', async () => {
+    const fetcher = vi.fn(async () => makeCandles(80));
+    const poolResolver = vi.fn(async () => []);
+    const result = await scoreCandidateTool!.execute(
+      { symbol: 'ethereum:0xpool', venueType: 'swap', network: 'ethereum', poolAddress: '0xpool', config: baseConfig },
+      makeContext(fetcher, poolResolver),
+    );
+    expect(result.success).toBe(true);
+    // Direct pool path does not consult the resolver.
+    expect(poolResolver).not.toHaveBeenCalled();
+    expect(fetcher.mock.calls[0]![0]).toEqual({ venueType: 'swap', network: 'ethereum', poolAddress: '0xpool' });
   });
 });
