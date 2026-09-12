@@ -427,3 +427,12 @@ boundary; the herobids worker→boundary discovery/regime live run is a staging-
 telemetry re-source; T2 approach B; T3 discovery snapshot re-source.
 **Open follow-ons:** T2 swap score build (token→pool, Traderton authoring); `@herobids/market-data` still
 held by the scan pipeline + scanner-candle-fetcher (separate extract); watch-tools state-move.
+
+### Ratification (2026-09-12, human)
+
+The human RATIFIED the parity-touching decisions from the market-intelligence + risk-limits-read group
+(the ratify-list): (1) regime + discovery telemetry re-source (Intentional-divergence/improvement);
+(2) T2 swap `score_candidate` Option B (approach; build deferred); (3) T3 discovery multi-network
+re-source + `discover_tokens` widening. All "pending human ratification" flags on these are now CLEARED.
+**This is a ratification of the decisions, NOT a merge-to-`main` approval** — the work remains on branches
+(`l3-integration` / `consume-traderton`); the merge gate is a separate, explicit, later human decision.
