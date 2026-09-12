@@ -764,10 +764,12 @@ signature; bybit longShortRatio is ALREADY behind the boundary via get_market_ov
   to the LLM ("Mark/oracle spread"). Resolution (coordinator, copy-faithful/not four-risk): ADD `markOracleSpreadPct`
   to the traderton `get_market_overview` projection (the source `HyperliquidAssetContext` already has it) — restores
   parity, no field dropped. Also verify search_tokens/discover_tokens field-shape parity before re-point.
-- **Q-D economic calendar → RECLASSIFY AS PLATFORM (D2).** Macro/economic data (not venue/trading market-data), zero
-  traderton presence, and the tick read is `getUpcomingEvents({cacheOnly:true})` — a cache-only read of
-  herobids-owned Redis (a herobids loop populates it). NOT a trading-boundary coupling. Stays in herobids;
-  recorded as explicitly-platform (NOT a Gap) so it isn't mistaken for an unmoved coupling.
+- **~~Q-D economic calendar → RECLASSIFY AS PLATFORM (D2).~~ RETRACTED — see the 2026-09-12 human ruling below.**
+  ~~Macro/economic data (not venue/trading market-data), zero traderton presence, and the tick read is
+  `getUpcomingEvents({cacheOnly:true})` — a cache-only read of herobids-owned Redis (a herobids loop populates it).
+  NOT a trading-boundary coupling. Stays in herobids; recorded as explicitly-platform (NOT a Gap).~~
+  **This classification was WRONG.** It tested "where the data comes from" (macro/forex source, cache transport)
+  instead of "does a trading decision consume it." The economic calendar IS trading-adjacent (see the human ruling).
 
 **B2-now = Q-C only** (+ regime, the known coordinator pattern). A/B deferred to the read-tools slice; D out.
 
@@ -798,3 +800,36 @@ signature; bybit longShortRatio is ALREADY behind the boundary via get_market_ov
 **Copy-never-author check:** the pool-SELECTION behaviour (liquidity-ranked canonical pool) is copied from existing discovery selection; only a thin HTTP wrapper (new seam behind the boundary) + a param-guard loosening are authored. Consumer is display/assessment (preset scorecard → scanHealth), not execution, and the current in-process swap path is effectively inert (empty candles) — so real pool candles are a strict IMPROVEMENT, no specific-pool parity obligation.
 
 **Classification: parity/legal-touching → PENDING HUMAN RATIFICATION.** It revises the LETTER of the human-ratified T2/Q2 decision (named primitive swap-candidate-discovery → GeckoTerminal point resolver); the DIRECTION (token in → pool behind the boundary) stays ratified. Two open questions for the ratification pass: (1) quote-asset constraint on the resolved pool — default taken: highest-liquidity, NO quote constraint (behaviour-affecting; confirm); (2) GeckoTerminal Pro-tier availability of the tokens/{address}/pools endpoint (operational; verify at e2e/config).
+
+
+## 2026-09-12 — Economic calendar IS trading-adjacent (HUMAN RULING — FINAL, legal-based)
+
+**Ruling (human, final):** the economic calendar is **trading-adjacent**. This is a legal-based
+determination and is FINAL — it supersedes and RETRACTS the earlier Q-D "reclassify as platform / not a
+Gap" call.
+
+**Grounded facts that support it (verified in code):**
+- The `macro-economic` context block (`herobids/apps/worker/src/runtime-composition.ts` ~1240) is
+  `requiredFamilies: ['trading']` — it renders ONLY for trading agents.
+- Its data (`runtimeState.metrics.macroEvents`, set in `agent.ts` ~3453 from
+  `getUpcomingEvents({cacheOnly:true})`) is injected into the agent's DECISION prompt as
+  "Upcoming Economic Events" (impact/forecast/previous) — market context the trading agent reasons over.
+- The `EconomicCalendarProvider` port lives in the domain market-data ports layer
+  (`packages/domain/src/ports/economic-calendar.ts`), alongside candle-fetcher.
+- Under our own definition (AGENTS.md "Data": price, P&L, **market context** — always provided; the agent
+  reasons over it), trading-gated market context consumed by a trading decision IS trading-adjacent. The
+  source being macro/forex and the transport being a cache-only Redis read do NOT make it platform.
+
+**Why the earlier ruling was wrong (recorded so the failure mode isn't repeated):** it conflated
+data-provenance/transport with consumption. The correct test for trading-adjacency is "does a trading
+decision consume it," not "where does the data originate." (This is the same drop/defer-leaning judgment
+weakness 008 exists to catch — noted.)
+
+**Consequence for the ledger:** economic calendar is NO LONGER "explicitly-platform / not-a-coupling." It
+is a **trading-adjacent coupling** and therefore a cutover obligation: the acquisition (the ForexFactory/
+Scrapfly scrape loop + parser + the `CompositeEconomicCalendarProvider`) and the read must move behind the
+Traderton boundary so no trading market-context acquisition runs in the herobids process. Recorded in
+001-parity-ledger as **Deferred (required for cutover)** — its own slice. The exact boundary shape
+(acquisition-behind-boundary + a read tool, e.g. `get_economic_calendar`, vs. a boundary-populated cache
+the consumer reads) is a build-time design for that slice; the classification (trading-adjacent, must not
+stay a herobids-owned in-process coupling) is settled by this ruling.

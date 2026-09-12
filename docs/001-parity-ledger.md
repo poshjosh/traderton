@@ -483,3 +483,21 @@ CodeReviewer pass on the swap token→pool re-point. No CRITICAL/HIGH — implem
 - **[swap score_candidate] M2:** `selectCanonicalPool`'s pure lexicographic tie-break (equal liquidity AND equal volume → poolAddress localeCompare) is not asserted on its own. Add a dedicated unit test.
 - **[swap score_candidate] L1/L2/L3:** non-null `[0]!` in selectCanonicalPool (prefer destructuring); dual-rate-limiter double-acquire on the resolver+fetch path (documented; ledger note only); buildTarget three-arm union readability. Cosmetic.
 - **Note (adjacent):** traderton already has a `swap-token-resolver.ts` (liquidity-ranked token→pool). The GeckoTerminal point resolver was chosen per the 008 ruling (guaranteed candle-fetchable by the same provider). If a future consolidation is wanted, evaluate whether the two resolvers should converge — follow-on, not this slice.
+
+
+### Economic calendar — trading-adjacent coupling, Deferred (required for cutover) (2026-09-12, HUMAN RULING — FINAL)
+
+RETRACTS the earlier "explicitly-platform / not-a-Gap" classification. Human ruled (final, legal-based): the
+economic calendar is **trading-adjacent** — it is trading-capability-gated and feeds the agent's decision
+prompt as market context (see 004-decision-log 2026-09-12). Therefore it is a coupling, not a platform
+carve-out.
+
+- **Status: Deferred (required for cutover).** The economic-calendar ACQUISITION (ForexFactory/Scrapfly
+  scrape loop + parser + `CompositeEconomicCalendarProvider`) and the tick read
+  (`getUpcomingEvents({cacheOnly:true})`) must move behind the Traderton boundary so no trading
+  market-context acquisition runs in the herobids process. No trading market-data acquisition may remain
+  in-process at cutover.
+- **Own slice.** Boundary shape TBD at build time (acquisition-behind-boundary + a read tool e.g.
+  `get_economic_calendar`, vs. a boundary-populated cache the consumer reads); the classification is settled.
+- Until built, this is an UNMOVED coupling counted against the "no market-data in the herobids process"
+  cutover gate — NOT a silently-dropped feature and NOT platform.
