@@ -347,3 +347,8 @@ are currently mishandled by the fall-through, but the boundary does not receive 
 wrongly skipping → a drive tool runs without venue coords, arguably worse). This is category-blind (both
 live in `write-database`), so it MUST be a per-tool property, not derivable from category. Its own small
 slice with tests; leave the code as-is until its trigger lands.
+
+  **Drafted plan (not scheduled):** [docs/features/future/L3-Rx-subject-resolver-venue-signal-plan.md](./features/future/L3-Rx-subject-resolver-venue-signal-plan.md)
+  — full design (opt-out signal `ownerScopedNoVenue`, fail-closed default, the 8 tools to flag, the
+  `publishToInbound` ground-truth table, steps + tests). Transient working doc; THIS ledger entry is the
+  durable obligation if the plan is pruned.
