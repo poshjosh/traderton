@@ -10,9 +10,18 @@ export async function executeDiscoverTokensTool(
   hooks?: IntelligenceToolHooks,
 ): Promise<Record<string, unknown>> {
   hooks?.onAttempt?.('aggregated-discovery');
+  // Accept a multi-network `networks: string[]` (the consumer coordinator's aggregated
+  // need) OR a single agent-facing `network` (back-compat). The underlying engine is
+  // multi-network; passing the array preserves its cross-network dedupe/rank/global-cap.
+  const networks = Array.isArray(args['networks'])
+    ? (args['networks'] as unknown[]).filter((n): n is string => typeof n === 'string')
+    : typeof args['network'] === 'string'
+      ? [args['network'] as string]
+      : undefined;
   const discoveryResult = await marketDataRegistry.discovery.discover({
-    networks: typeof args['network'] === 'string' ? [args['network'] as string] : undefined,
-    maxResults: typeof args['limit'] === 'number' ? args['limit'] : undefined,
+    networks: networks && networks.length > 0 ? networks : undefined,
+    maxResults: typeof args['maxResults'] === 'number' ? args['maxResults']
+      : typeof args['limit'] === 'number' ? args['limit'] : undefined,
     minLiquidityUsd: typeof args['minLiquidityUsd'] === 'number' ? args['minLiquidityUsd'] : undefined,
   });
   return { ok: true, tokens: discoveryResult.data, freshness: discoveryResult.meta.freshness };

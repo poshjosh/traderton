@@ -193,8 +193,12 @@ const searchTokensTool: AgentTool<TradingToolContext> = {
 
 const DiscoverTokensParamsSchema = z.object({
   network: z.string().optional().describe('Filter discovery to a specific network (e.g. "solana")'),
+  /** Multi-network aggregated discovery (consumer coordinator use). Preferred over `network`
+   *  for cross-network dedupe/rank in one call; when both are absent the engine defaults apply. */
+  networks: z.array(z.string()).optional().describe('Networks to aggregate discovery across (e.g. ["solana","base"])'),
   // coerce: LLMs may send numbers as strings
   limit: z.coerce.number().int().positive().max(100).optional().describe('Maximum number of tokens to return (1-100)'),
+  maxResults: z.coerce.number().int().positive().max(100).optional().describe('Alias of limit — max tokens to return (aggregated cap)'),
   minLiquidityUsd: z.coerce.number().positive().optional().describe('Minimum liquidity in USD'),
 });
 
@@ -228,9 +232,13 @@ const discoverTokensTool: AgentTool<TradingToolContext> = {
       const message = err instanceof Error ? err.message : 'unknown error';
       if (message.includes('Rate limit exceeded')) {
         ctx.recordMarketDataRejection?.('aggregated-discovery', { priority: 'discovery' });
+        // errorCode:'rate_limit' → dispatcher maps to rate_limit.exceeded (before the
+        // generic retryable→upstream.transient), so the consumer can split throttle-vs-
+        // failure telemetry (parity with check_regime; L3 discovery re-point).
         return {
           success: false,
           error: 'rate_limit',
+          errorCode: 'rate_limit',
           retryable: true,
         };
       }
