@@ -719,3 +719,25 @@ AUTHORING (extend `score_candidate` to accept a token + resolve pool behind the 
 is enhancement not isolation, its BUILD is **Deferred as its own slice** (approach B is decided; not
 urgent). Recorded so it is not lost. Coordinator sequencing call (not a parity/legal risk — deferring
 changes nothing live).
+
+## B2 investigation — agent.ts live market-data couplings (2026-09-12, terrain map)
+
+Investigation (delegated) found B2 is larger than "a handful of agent.ts couplings" — it is a
+multi-decision track. Six live in-process market-data couplings in `apps/worker/src/agent.ts`
+(4022 lines): (1) regime eval tick-gate 2733-2740 → COVERED by `check_regime`; (2) volatility
+candles 2743-2746 (binance.candles BTC 24x1h → ATR/adaptive interval) → GAP, no candle-series tool;
+(3) hybrid sizing 3072-3084 → `priceService.resolvePriceTarget` (NOT getPrice) → get_price contract
+MISMATCH (resolvePriceTarget resolves chain/address + returns resolvedChain/resolvedAddress); (4)
+venue-intelligence refreshVenueIntelligence 1058-1230 (assetContexts/longShortRatio/discover/dexscreener)
+→ maps to get_funding_rates/get_market_overview/discover_tokens/search_tokens but field-shape parity
+unverified + bybit longShortRatio possibly a partial gap; (5) construction createProviderRegistry+
+createPriceService 913-927; (6) NEW: economic calendar CompositeEconomicCalendarProvider 934-968 (cache-read
+only) — no boundary tool.
+**Separate BLOCKING surface:** the agent-container READ TOOLS consume ctx.marketDataRegistry/priceService
+directly (tools/price.ts, tools/market-data.ts, tools/watch.ts) → removing createProviderRegistry from the
+container is BLOCKED by those tools = a separate re-pointing slice.
+**5 decisions to route (008):** volatility-candle gap (new surface vs extend check_regime w/ ATR vs
+static-fallback); hybrid get_price-vs-resolvePriceTarget contract; venue-intel field-shape coverage;
+whether registry removal / read-tool re-pointing is in B2 scope; economic-calendar scope.
+Consequence: B2 = a track (several slices), not one slice. Surfaced to human for scope steer before routing
+all 5 + building.
