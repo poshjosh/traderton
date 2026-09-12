@@ -21,6 +21,8 @@ import {
   venueAccounts,
 } from '@traderton/db';
 import { createTradingRuntime, loadConfig, createScannerCandleFetcherFromConfig } from '@traderton/worker';
+import { createProviderRegistry, createPriceService } from '@traderton/market-data';
+import type { RedisEvalClient } from '@traderton/market-data';
 import { createBoundaryApp } from './app.js';
 import { BoundaryConfigSchema, type BoundaryConfig } from './config.js';
 import type {
@@ -80,6 +82,34 @@ async function main(): Promise<void> {
   //    from config — the tool then degrades to `market_data_not_configured`.
   const scannerCandleFetcher = appConfig.marketData
     ? createScannerCandleFetcherFromConfig(appConfig.marketData)
+    : undefined;
+
+  // ── Market-data provider registry for the market-intelligence read tools
+  //    (check_regime / get_market_overview / discover_tokens / search_tokens /
+  //    get_funding_rates). Those tools fetch BEHIND the boundary (legal-isolation:
+  //    the consumer must not fetch trading market data directly) and guard on
+  //    `ctx.marketDataRegistry` — returning `market_data_not_configured` when it is
+  //    absent. Built ONCE per process (mirrors the in-process runtime's
+  //    `start()` in create-trading-runtime.ts). Undefined when marketData is absent
+  //    from config — the tools then keep their `market_data_not_configured` degrade.
+  const marketDataRegistry = appConfig.marketData
+    ? await createProviderRegistry(appConfig.marketData, {
+        redisClient: redis as unknown as RedisEvalClient,
+        discoverySeenClient: redis,
+      })
+    : undefined;
+
+  // `marketDataConfig` enables the shared token-safety policy in the search tools
+  // (the tools cast it to MarketDataConfig internally). Mirrors the registry's
+  // undefined-when-absent degrade.
+  const marketDataConfig = appConfig.marketData;
+
+  // Price service for discover_tokens' OPTIONAL price enrichment. Built from the
+  // registry via the existing `createPriceService` factory (@traderton/market-data)
+  // — no authoring. Undefined when the registry is absent; discover_tokens degrades
+  // gracefully without it (enrichment is skipped, not an error).
+  const priceService = marketDataRegistry
+    ? createPriceService(marketDataRegistry)
     : undefined;
 
   // ── The idempotency store (F2a repo) injected via the thin dispatcher port ──
@@ -149,6 +179,13 @@ async function main(): Promise<void> {
       botRepo: botRepo as unknown as TradingToolContext['botRepo'],
       // Venue-aware candle fetcher for read-only scoring tools (score_candidate).
       scannerCandleFetcher,
+      // Market-intelligence read tools fetch behind the boundary via the shared
+      // provider registry (check_regime / get_market_overview / discover_tokens /
+      // search_tokens / get_funding_rates). Undefined-when-absent preserves the
+      // `market_data_not_configured` degrade.
+      marketDataRegistry: marketDataRegistry as unknown as TradingToolContext['marketDataRegistry'],
+      marketDataConfig: marketDataConfig as unknown as TradingToolContext['marketDataConfig'],
+      priceService: priceService as unknown as TradingToolContext['priceService'],
       // Raw Drizzle handle for tools that write tables directly (provisioning).
       db,
     };

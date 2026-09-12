@@ -8,6 +8,7 @@
   "exclude": ["src/**/*.test.ts"],
   "references": [
     { "path": "../domain" },
+    { "path": "../market-data" },
     { "path": "../worker" }
   ]
 }

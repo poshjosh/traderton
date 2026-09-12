@@ -87,6 +87,10 @@ export async function executeMarketOverviewTool(
       volume24hUsd: asset.volume24hUsd,
       fundingRate: asset.fundingRate,
       openInterest: asset.openInterest,
+      // Carried for parity with the herobids venue-intelligence signal ("Mark/oracle
+      // spread"), which the consumer surfaces to the agent (B2 Q-C). Source field
+      // already present on HyperliquidAssetContext — no new fetch/behaviour.
+      markOracleSpreadPct: asset.markOracleSpreadPct,
       longShortRatio: ratioMap.get(asset.asset.toUpperCase())?.longShortRatio ?? null,
     }));
 

@@ -19,6 +19,7 @@
   "dependencies": {
     "@traderton/db": "workspace:*",
     "@traderton/domain": "workspace:*",
+    "@traderton/market-data": "workspace:*",
     "@traderton/worker": "workspace:*",
     "drizzle-orm": "^0.44.0",
     "fastify": "^5.12.0",
