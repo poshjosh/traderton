@@ -48,6 +48,41 @@ authenticated `ownerId` + `actor`. Repos: `traderton` = `/Users/chinomso.ikwuagw
   verification scaffolding live on branches, per `main`-branch discipline (§4). **Nothing is merged to
   `main` for F**, and the merge gate is unmet (§4).
 
+### 2.1 L3 consumption progress (2026-09-12 — supersedes the older §3.1 D4 sub-phasing for CURRENT STATE)
+
+The §3.1 "L3a/b/c/d/e" sub-phasing was the original plan; the actual work has run as a series of
+per-capability re-point slices on herobids `consume-traderton` + traderton `l3-integration` (both
+branches, NOTHING merged to `main`; the merge gate remains the one hard stop — see §4 + the autonomy
+contract in [008 §6](./008-decision-process.md)). Decisions are made via the [008](./008-decision-process.md)
+process. **What is DONE (re-pointed to the boundary, on branches):** REST boundary consumption (L3a/b/c),
+write/read adapters; **provisioning** (L3-P1b: `provision_venue_account`/`deprovision_venue_account`);
+**venue-account plan-limit** via `count_venue_accounts`; **regime** (market-intelligence coordinator +
+evidence → `check_regime`, telemetry re-sourced); **orderbook `score_candidate`**; **discovery**
+(coordinator → `discover_tokens`, widened multi-network); **risk-limits** read (`get_risk_limits`, read-
+fallback) + write (`adjust_risk_limits`, fail-closed); **bots** (submit_decision + lifecycle). The
+market-intelligence coordinator no longer imports `@herobids/market-data`.
+
+**CORRECTION (important — the old "extract the in-process scan pipeline" framing is now STALE):** the
+classic in-process scan pipeline (`technical-phase`/`complete-technical-scan`/scanners/swap-discovery/
+swap-token-resolver/token-safety) was already deleted from the live runtime with the "L3d-5 actor slice";
+**B1 (2026-09-12) deleted the dead files.** It was NOT a live surface. `@herobids/engine` is **type-only**
+everywhere (all importers) — no engine value runs in-process. `TechnicalScanState` + its consumers are
+LIVE and KEPT (herobids consumes `agent.technical.scan_completed` messages Traderton now produces).
+
+**What REMAINS (the real surviving in-process market-data surface):**
+- **B2 — agent-container tick-loop couplings** (`apps/worker/src/agent.ts`): regime eval (→`check_regime`),
+  volatility candles for ATR/adaptive-interval (GAP — no candle-series tool), hybrid sizing
+  (`priceService.resolvePriceTarget` — get_price contract mismatch), venue-intelligence reads (assetContexts/
+  longShortRatio/discover/dexscreener), economic-calendar cache-read. **Scope decided (human, option 1):**
+  re-point the tick-loop couplings now; **DEFER full registry removal.**
+- **The agent-container READ TOOLS surface (its own slice, NOT B2):** `tools/price.ts`, `tools/market-data.ts`,
+  `tools/watch.ts` consume `ctx.marketDataRegistry`/`ctx.priceService` in-process. Until these re-point,
+  `createProviderRegistry`/`createPriceService` **cannot** be removed from the agent container — so "no
+  market-data in the agent process" is NOT achieved by B2 alone. Tracked as a cutover obligation in
+  [001](./001-parity-ledger.md).
+- **B3 = the deferred swap `score_candidate` build** (token→pool behind the boundary; approach ratified).
+- Then package/table deletions (LAST) + L3e differential/soak + the merge gate.
+
 ## 3. Target state & what's next
 
 **End state:** herobids consumes `@traderton/*` and its own trading code is retired; Traderton runs as

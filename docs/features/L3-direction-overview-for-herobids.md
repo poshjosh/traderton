@@ -1,5 +1,11 @@
 # L3 direction overview (for the herobids agent — info only)
 
+> **PARTIALLY SUPERSEDED (2026-09-12).** The current state + remaining map now live in
+> [CANONICAL-STATE §2.1](../CANONICAL-STATE.md) — read that first. In particular, this doc's
+> "in-process scan-pipeline extract" framing is STALE: that pipeline was already dead and was
+> deleted (B1). The real remaining in-process surface is the agent-container market-data couplings
+> (B2) + the agent read-tools slice. This doc is retained for its 2026-09-08 importer analysis only.
+
 **Status:** Informational. No action from this doc. It gives the herobids `consume-traderton`
 agent the shape of where we are and where we're heading, so per-slice briefs land in context.
 Authored on the Traderton side; grounded in a scan of the current herobids `consume-traderton`

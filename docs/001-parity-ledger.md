@@ -436,3 +436,24 @@ The human RATIFIED the parity-touching decisions from the market-intelligence + 
 re-source + `discover_tokens` widening. All "pending human ratification" flags on these are now CLEARED.
 **This is a ratification of the decisions, NOT a merge-to-`main` approval** — the work remains on branches
 (`l3-integration` / `consume-traderton`); the merge gate is a separate, explicit, later human decision.
+
+### B1 dead-scan-pipeline deletion + B2 scope + newly-found read-tools obligation (2026-09-12)
+
+- **B1 — dead in-process scan pipeline DELETED (herobids `consume-traderton`).** 7 producer files
+  (technical-phase, complete-technical-scan, scanner-candidate-discovery, scanner-pre-filter,
+  swap-candidate-discovery, swap-token-resolver, token-safety-adapter) + their tests removed — no
+  production callers (already dead since the L3d-5 actor slice; verified). `TechnicalScanState` + its
+  consumers KEPT (LIVE — fed by `agent.technical.scan_completed` from Traderton); two DTO types relocated
+  to `apps/worker/src/scan-types.ts`. `@herobids/engine` confirmed TYPE-ONLY everywhere. Build/lint/test
+  green (378 files / 7574 passed). Not a parity concern (dead code).
+- **B2 — agent.ts tick-loop couplings (scope = option 1, human-decided):** re-point regime / volatility /
+  hybrid-sizing / venue-intelligence now; DEFER full market-data-registry removal. In progress.
+- **NEW cutover obligation — agent-container READ TOOLS still consume in-process market-data.
+  `Deferred (required for cutover)`.** `tools/price.ts`, `tools/market-data.ts`, `tools/watch.ts` use
+  `ctx.marketDataRegistry`/`ctx.priceService` directly in the agent container. Until they re-point to the
+  boundary, `createProviderRegistry`/`createPriceService` cannot be removed and "no market-data in the
+  herobids agent process" is NOT fully met. Its own slice, after B2. This is the honest gap B2 alone does
+  not close.
+- **B2 open decisions (to route via 008 as B2 builds):** volatility-candle-series gap (no boundary tool);
+  hybrid `get_price` vs `resolvePriceTarget` contract; venue-intelligence field-shape coverage;
+  economic-calendar scope.
