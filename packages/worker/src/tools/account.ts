@@ -1,5 +1,8 @@
 import { z } from 'zod';
+import { count, eq } from 'drizzle-orm';
 import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domain';
+import type { Database } from '@traderton/db';
+import { venueAccounts } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
 import { createLogger } from '../logger.js';
 
@@ -139,4 +142,57 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
   },
 };
 
-export const accountTools: AgentTool<TradingToolContext>[] = [getAccountSummaryTool];
+// --- count_venue_accounts ---
+//
+// AUTHORED SEAM (L3-P1b obligation-1 fix) — a boundary READ tool returning the
+// owner's venue-account count from Traderton's DB (the system of record). The
+// consumer (herobids) enforces its OWN plan limit against this count — policy
+// stays consumer-owned; Traderton owns only the data + answers "how many".
+// read-database → the resolver short-circuits it (no venue account required).
+
+const CountVenueAccountsParamsSchema = z.object({});
+
+const countVenueAccountsTool: AgentTool<TradingToolContext> = {
+  name: 'count_venue_accounts',
+  description: "Count the venue accounts owned by the caller. Returns { count }. Use this to check a per-plan venue-account entitlement before provisioning a new one; enforcement (the limit) is the consumer's own concern.",
+  parametersSchema: CountVenueAccountsParamsSchema,
+  parameters: convertZodToJsonSchema(CountVenueAccountsParamsSchema),
+  category: 'read-database',
+  async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    if (!ctx.db) {
+      return {
+        success: false,
+        fault: true,
+        error: 'Database access not available in this context',
+        errorCode: 'account.db_unavailable',
+      };
+    }
+    if (!ctx.ownerId || !ctx.ownerId.trim()) {
+      return {
+        success: false,
+        fault: true,
+        error: 'Owner identity not available in this context',
+        errorCode: 'account.owner_unavailable',
+      };
+    }
+    const db = ctx.db as Database;
+    try {
+      const [row] = await db
+        .select({ value: count() })
+        .from(venueAccounts)
+        .where(eq(venueAccounts.ownerId, ctx.ownerId));
+      return { success: true, data: { count: row?.value ?? 0 } };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown error';
+      logger.error({ ownerId: ctx.ownerId, err }, 'count_venue_accounts failed');
+      return {
+        success: false,
+        fault: true,
+        error: `Failed to count venue accounts: ${message}`,
+        errorCode: 'account.count_failed',
+      };
+    }
+  },
+};
+
+export const accountTools: AgentTool<TradingToolContext>[] = [getAccountSummaryTool, countVenueAccountsTool];

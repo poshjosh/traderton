@@ -207,3 +207,52 @@ describe('get_account_summary', () => {
     expect(data.guidance).toEqual(expect.stringContaining('Capital information unavailable'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// count_venue_accounts (L3-P1b obligation-1 fix)
+// ---------------------------------------------------------------------------
+
+const countVenueAccounts = accountTools.find((t) => t.name === 'count_venue_accounts')!;
+
+/** Build a ctx whose db.select().from().where() resolves to [{ value }]. */
+function makeCountCtx(value: number, overrides: Partial<ToolContext> = {}): ToolContext {
+  const db = {
+    select: vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([{ value }]),
+      }),
+    }),
+  };
+  return makeCtx({ ownerId: 'owner-1', db: db as unknown as ToolContext['db'], ...overrides });
+}
+
+describe('count_venue_accounts', () => {
+  it('is a read-database tool', () => {
+    expect(countVenueAccounts).toBeDefined();
+    expect(countVenueAccounts.category).toBe('read-database');
+  });
+
+  it('returns the owner-scoped venue-account count', async () => {
+    const result = await countVenueAccounts.execute({}, makeCountCtx(3));
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ count: 3 });
+  });
+
+  it('returns 0 when the owner has no venue accounts', async () => {
+    const result = await countVenueAccounts.execute({}, makeCountCtx(0));
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ count: 0 });
+  });
+
+  it('fails closed when db is unavailable', async () => {
+    const result = await countVenueAccounts.execute({}, makeCtx({ ownerId: 'owner-1', db: undefined }));
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('account.db_unavailable');
+  });
+
+  it('fails closed when owner identity is missing', async () => {
+    const result = await countVenueAccounts.execute({}, makeCountCtx(1, { ownerId: '' }));
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('account.owner_unavailable');
+  });
+});
