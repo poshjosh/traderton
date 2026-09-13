@@ -13,7 +13,7 @@ Legend: [ ] open · [~] in progress · [x] done (→ ledger row). "4-risk" = mus
 
 ## Wave B — agent-container market-data read-tools (long pole; gates registry removal)
 - [x] **B1. Hybrid sizing + `get_price`/`resolvePriceTarget` contract.** DONE (traderton `resolve_price_target` tool + herobids boundary adapter; settled by parity; HIGH parity-break fixed in review). Provides the `resolve_price_target` shared surface for B3.
-- [ ] **B2. `tools/price.ts` → boundary `get_price`.** Depends on B1. (herobids agent `get_price` tool → boundary get_price.)
+- [x] **B2. `tools/price.ts` → boundary `get_price`.** DONE (herobids agent `get_price` tool → boundary get_price; boundary-first branch mirroring risk-limits.ts, in-process fallback preserved; settled by parity — byte-identical boundary tool). Lint clean; 18/18 price tool tests pass. No CRITICAL/HIGH in review.
 - [ ] **B3. Watch tools → boundary** (`watch_token`/`remove_watch`/`check_watches`/`list_watches`/`resolve_watch`). herobids `tools/watch.ts`. Pull-based. Uses `resolve_price_target` (built in B1) for pinning.
 - [ ] **B4. `tools/market-data.ts` → boundary.** Re-point the tool surface (regime/overview/discovery/search tools already exist).
 - [ ] **B5. Volatility-candle series behind the boundary.** herobids `agent.ts:~2958` `fetchVolatilityCandles` → no boundary tool exists. New Traderton tool. 4-risk (new surface/contract) → route.
@@ -40,5 +40,12 @@ Legend: [ ] open · [~] in progress · [x] done (→ ledger row). "4-risk" = mus
 ## §3 — Undetermined (resolve at slice time)
 - **C2 blocking-vs-optional:** confirm swap evidence path still returns null candles (inert) → optional for gate.
 - **`generateWallet` (from @herobids/venues) in api routes** (setup.ts/chat.ts/index.ts/accounts.ts): trading-owned (must move) or platform-side key-gen herobids keeps? Route classification via 008 if trading-adjacent.
+
+## Outstanding Issues (non-blocking review findings; MEDIUM/LOW only — no CRITICAL/HIGH)
+Accumulated from per-slice CodeReviewer passes. Grouped by item. None gate the merge.
+
+- **[B2]** MEDIUM — boundary success payload is `data: unknown` (`TradertonReadResult.success`); success-shape parity (`priceUsd`/`source`/`fetchedAt`/`stale`) is guaranteed only by the external Traderton `get_price` tool, invisible to the herobids type system. Inherent to the transitional boundary design (same as all read re-points, incl. `get_risk_limits`). Mitigation lives at D3 (cross-stack E2E pins the real wire shapes). Not a code defect.
+- **[B2]** LOW — no per-tool test for boundary `transport_error` / `in_progress` on `get_price` (mapper handles both and is separately tested). Optional: add a `transport_error → { retryable:true, fault:true, errorCode:'boundary.transport_error' }` case to fully pin the tool's unhappy-infra contract.
+- **[B2]** LOW — `fault` intentionally absent on the pre-existing in-process `price_service_not_configured` branch while other branches set it explicitly. Pre-existing, harmless minor inconsistency.
 
 ## Hard stops (008 §8.2) — the loop halts ONLY for: merge-to-main; a decision-agent-escalated product/policy call; an on-branch-unresolvable blocker; backlog exhausted.
