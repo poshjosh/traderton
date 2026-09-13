@@ -471,6 +471,93 @@ const adjustBotConfigTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- delete_bot ---
+//
+// AUTHORED SEAM (Wave A1, 004 2026-09-12 S1/S2/S3) — the `delete_bot` boundary
+// tool. The terminal-delete counterpart of the owner-scoped bot tools. It mirrors
+// `deprovision_venue_account`'s shape (ownerScopedNoVenue + write-database, owner
+// guards → fault:true, owner-scoped existence → not_found.resource, metadata-only
+// success) and authors NO deletion policy: the hard row delete is the copied
+// herobids DELETE-path semantics (a hard row delete; no archival concept), driven
+// through the owner-scoped `deleteBotByIdForOwner` repo method.
+//
+// The one behavioural difference from deprovision (S3): the refuse guard is a
+// STATUS guard on the bot's OWN status (`running` → refuse "stop it first"), NOT
+// deprovision's any-referencing-bot guard. It carries a DEDICATED errorCode
+// (`bot.running`) so the boundary consumer maps it to a 409 — the closed boundary
+// failure union (005) cannot carry a dedicated code, so the code rides in the
+// failure `details.errorCode` (fault:false), exactly as create_bot threads the
+// paper+swap code. See docs/004 "Wave A1".
+
+const DeleteBotParamsSchema = z.object({
+  botId: z.string().min(1).describe('ID of the bot to delete'),
+});
+
+const deleteBotTool: AgentTool<TradingToolContext> = {
+  name: 'delete_bot',
+  // Owner-scoped write (keyed by botId); drives no executor. No venue resolution.
+  ownerScopedNoVenue: true,
+  description:
+    'Permanently delete a bot owned by this owner. Refuses (bot.running) if the bot is still running — stop it first. Returns the deleted botId. Irreversible.',
+  parametersSchema: DeleteBotParamsSchema,
+  parameters: convertZodToJsonSchema(DeleteBotParamsSchema),
+  category: 'write-database',
+  promptGuidance:
+    'Provide the botId to remove. Fails with bot.running if the bot is running — stop it first. The delete is a hard, irreversible row removal.',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botId } = params as z.infer<typeof DeleteBotParamsSchema>;
+
+    // (a) Context guards — owner/repo unavailable is an internal readiness fault
+    //     (fault:true), mirroring provision's owner_unavailable/db_unavailable.
+    if (!ctx.botRepo) {
+      return {
+        success: false,
+        fault: true,
+        error: 'Database access not available in this context',
+        errorCode: 'bot.db_unavailable',
+      };
+    }
+    if (!ctx.ownerId || !ctx.ownerId.trim()) {
+      return {
+        success: false,
+        fault: true,
+        error: 'Owner identity not available in this context',
+        errorCode: 'bot.owner_unavailable',
+      };
+    }
+    const ownerId = ctx.ownerId;
+
+    // (b) Owner-scoped existence/ownership check — absent/unowned → not_found
+    //     (fault:false), identical to get_owner_bot_status.
+    const bot = await ctx.botRepo.getBotByIdForOwner(botId, ownerId);
+    if (!bot) {
+      return {
+        success: false,
+        fault: false,
+        error: `bot ${botId} not found or not owned by this owner`,
+        errorCode: 'not_found.resource',
+      };
+    }
+
+    // (c) STATUS guard (S3) — refuse to delete a running bot (copied herobids 409
+    //     "stop it first"). Dedicated errorCode so the boundary maps it to 409.
+    if (bot.status === 'running') {
+      return {
+        success: false,
+        fault: false,
+        error: 'Cannot delete a running bot. Stop it first.',
+        errorCode: 'bot.running',
+      };
+    }
+
+    // Hard-delete the row, owner-scoped. No FK points to bots, so nothing is
+    // orphaned (004 "Wave A1").
+    await ctx.botRepo.deleteBotByIdForOwner(botId, ownerId);
+
+    return { success: true, data: { ok: true, botId, deleted: true } };
+  },
+};
+
 export const botManagementTools: AgentTool[] = [
   createBotTool,
   listBotsTool,
@@ -480,4 +567,5 @@ export const botManagementTools: AgentTool[] = [
   stopBotTool,
   startBotTool,
   adjustBotConfigTool,
+  deleteBotTool,
 ];

@@ -834,6 +834,23 @@ export class BotRepository {
     return row ?? null;
   }
 
+  /**
+   * Hard-delete a bot by ID scoped to an owner — the terminal delete the
+   * `delete_bot` boundary tool drives (004 "Wave A1", S1/S2). Returns whether a
+   * row was actually deleted (`true` when the bot existed AND belonged to the
+   * owner). Owner-scoped like `getBotByIdForOwner` so a caller can never delete a
+   * bot it does not own. No FK points to `bots` (fills/orders/positions/journal
+   * are actor-scoped by string `actorId`; `token_safety_overrides.botId` is a
+   * soft nullable text ref), so the hard delete orphans nothing (004 "Wave A1").
+   */
+  async deleteBotByIdForOwner(botId: string, ownerId: string): Promise<boolean> {
+    const deleted = await this.db
+      .delete(bots)
+      .where(and(eq(bots.id, botId), eq(bots.ownerId, ownerId)))
+      .returning({ id: bots.id });
+    return deleted.length > 0;
+  }
+
   // getResolvedVenueAccount + createBot REMOVED (Phase 2):
   //  - getResolvedVenueAccount read the platform `connections` table (the connection
   //    indirection dropped by decision 13); only the platform agent-broker called it.

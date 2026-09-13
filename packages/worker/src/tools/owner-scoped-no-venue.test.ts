@@ -29,6 +29,9 @@ describe('ownerScopedNoVenue flag', () => {
     [watchTools, 'watch_token'],
     [watchTools, 'remove_watch'],
     [watchTools, 'check_watches'],
+    // delete_bot is an owner-scoped write that drives no executor (deletes the row
+    // directly via botRepo) — it skips venue resolution like deprovision (Wave A1).
+    [botManagementTools, 'delete_bot'],
   ];
 
   for (const [tools, name] of flagged) {

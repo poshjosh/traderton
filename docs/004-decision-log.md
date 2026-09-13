@@ -879,3 +879,18 @@ The human ratified the corrected bot-consumer contract. All flags cleared; these
 - **C (RATIFIED, refined): owner read view = ALL bots whose `ownerId` matches, STRUCTURED so creator is visible** — surface `creatorType`/`creatorId` in the owner-scoped read payloads (`list_owner_bots`/`get_owner_bot_status`) so a user can tell "I made this" from "an agent made this for me." This is an intentional ADDITIVE divergence from the agent-scoped `list_bots`/`get_bot_status` shape (which omit creator) — logged as such, not a byte-parity match.
 
 Rulings 1 (reads over boundary), 4 (owner-scoped read surface — built), 5 (interim keep local reads) stand. The bot re-point slice proceeds on these.
+
+
+## 2026-09-12 — Wave A1: bot deletion over the boundary (008-routed; decision agent)
+
+Pivotal verified fact: **NO FK points to `bots`** (fills/orders/positions/journal are actor-scoped by string `actorId`; `token_safety_overrides.botId` is a soft nullable text ref). So a hard bot-row delete orphans nothing and the forensic trail survives — hard-delete is safe AND copy-faithful (herobids' pre-migration DELETE was a hard row delete; no archival concept exists → soft-delete would be authoring).
+
+**SETTLED (rule-forced):**
+- **S1:** a `delete_bot` boundary tool MUST exist (leaving the Traderton-owned bot orphaned on a herobids-local delete is a silent divergence). 
+- **S2:** `delete_bot` mirrors the `deprovision_venue_account` shape — `ownerScopedNoVenue`, `write-database`, owner-scoped existence via `getBotByIdForOwner` (→ `not_found.resource`), db/owner-unavailable → `fault:true`, hard-delete the row in a tx, metadata-only success `{botId, deleted:true}`.
+- **S3:** refuse to delete a `running` bot (copied herobids 409 "stop it first") — a STATUS guard on the bot's own status (NOT deprovision's any-referencing-bot guard); dedicated errorCode mapped to 409.
+- **S4:** herobids DELETE routes over `delete_bot` as authoritative, fail-closed (503 when boundary absent) — same posture as create/stop/start. Reject H-b (local-authoritative) + H-c (skip local mirror).
+- **S5:** interim local-mirror delete stays but runs **boundary-first** (invoke delete_bot; only on success delete the local row, owner-scoped). Prevents split-brain/orphan. The local delete line is removed at D1 with the table.
+
+**FOR THE HUMAN (pending ratification, safe default — proceeding per 008 §8.2):**
+- **H-1:** confirm hard-delete is the intended terminal semantics (no forensic-retention policy requiring bot-config rows to persist). Default (proceeding): hard-delete — copy-faithful; forensic trail is FK-independent and survives. Retention, if ever wanted, is a POST-migration 010 item (would author new behaviour; must not ride this wave).

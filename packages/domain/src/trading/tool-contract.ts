@@ -176,6 +176,8 @@ export interface TradingToolContext {
     getBotsByOwner: (ownerId: string, since?: Date) => Promise<ToolBotRecord[]>;
     /** Owner-scoped existence/ownership check — null when not owned by ownerId. */
     getBotByIdForOwner: (botId: string, ownerId: string) => Promise<ToolBotRecord | null>;
+    /** Owner-scoped hard delete — returns whether a row was deleted (false when absent/unowned). */
+    deleteBotByIdForOwner: (botId: string, ownerId: string) => Promise<boolean>;
     markBotStopped: (botId: string) => Promise<void>;
     markBotRunning: (botId: string) => Promise<void>;
     restoreBotRuntimeState: (state: { botId: string; status: string; startedAt: Date | null; stoppedAt: Date | null }) => Promise<void>;

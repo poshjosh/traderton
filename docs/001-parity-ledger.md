@@ -592,3 +592,12 @@ Implemented the ratified bot-consumer contract across both repos. The 7 skipped 
 - **herobids reads re-pointed (ruling 1) with local fallback (ruling 5):** `GET /bots`→`list_owner_bots`; `GET /bots/:id`→`get_owner_bot_status`; DELETE/stop/start existence+ownership+status gate→`get_owner_bot_status`. The read boundary is derived from the existing write `tradertonClient` (same HMAC transport; read-database tools dispatch read-only). Lifecycle ACTIONS still route over the write boundary. Local-table fallback when the boundary is absent.
 - **DELETE parity GAP (tracked — follow-on):** no boundary `delete_bot` tool exists yet, so herobids DELETE removes only the LOCAL mirror row (now owner-scoped); the boundary-owned bot persists in Traderton. Acceptable interim ONLY because the mirror is the pre-existing trading DB (L3d deletes it) and a stopped bot is inert. FOLLOW-ON: add a boundary delete tool + route DELETE over it (or refuse when the boundary is present). Do NOT treat the local delete as authoritative removal.
 - **Still deferred (follow-on wave):** owner/bot-scoped costs/journal/sessions/events reads stay on the local mirror.
+
+
+### Wave A1 — `delete_bot` boundary tool + herobids DELETE re-point — DONE (2026-09-12)
+
+Closes the DELETE parity gap (herobids previously deleted only the local mirror; the Traderton-owned bot orphaned). Per 004 2026-09-12 "Wave A1" (S1–S5).
+- **traderton:** `delete_bot` (`ownerScopedNoVenue`, write-database) mirrors `deprovision_venue_account`: owner-scoped existence (`getBotByIdForOwner` → `not_found.resource`), STATUS guard (`running` → dedicated `bot.running`, fault:false → boundary maps → 409), hard-delete via new `deleteBotByIdForOwner` repo method. Hard-delete verified safe (NO FK points to `bots`; fills/journal actor-scoped, survive).
+- **herobids:** DELETE routes over `delete_bot` as authoritative, fail-closed (503 when boundary absent); boundary-FIRST then local-mirror delete (S5); 409 via `details.errorCode`. Pre-guard 409 + backstop cleanly layered.
+- **Verified:** traderton build/lint/test 2448 passed / 0 failed; herobids lint clean + functional 172 passed / 0 failed. CodeReviewer PASS (no critical/high). 1 MEDIUM = backstop-409 test deferred to D1 (untested-today because the pre-guard fires first; tracked in 011 D1 sub-obligation).
+- **H-1 pending ratification (safe default proceeding):** hard-delete is the terminal semantics (copy-faithful; forensic trail FK-independent). Retention, if ever wanted, is a post-migration 010 item.

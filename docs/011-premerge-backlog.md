@@ -26,6 +26,7 @@ Legend: [ ] open · [~] in progress · [x] done (→ ledger row). "4-risk" = mus
 
 ## Wave D — teardown, data migration, proofs (LAST)
 - [ ] **D1. Delete herobids in-tree trading packages + tables + remaining value imports.** After A–C: remove `@herobids/{engine,venues,market-data,strategy,backtesting}` value imports (index.ts PublicStreamPool + registry + economic-calendar; scanner-candle-fetcher; public-stream-routing); drop local bots/fills/journalEvents/venue_accounts/user_credentials tables + trading-provisioner.ts. Defines "trading retired." Depends A–C.
+  - **D1 sub-obligation (from A1 review, MEDIUM):** when the DELETE pre-guard + local `bots` mirror are removed at D1, the route's `delete_bot` 409 BACKSTOP (`details.errorCode==='bot.running'` → 409) becomes the SOLE 409 defense. It is untested today (the pre-guard fires first; a divergent stub would test an impossible-today state). ADD a functional test isolating the backstop (read reports stopped / delete returns bot.running → assert 409) AS PART OF D1, when the pre-guard is removed.
 - [ ] **D2. Pre-existing trading-credential + venue-account row migration** (DATA step, not code). Migrate/re-provision pre-cutover rows into Traderton. Depends on provision_venue_account (done).
 - [ ] **D3. herobids functional/E2E boundary-aware + true cross-stack E2E** (herobids stack + live Traderton boundary, matching signing creds). Gate criterion #3. Some sub-parts 4-risk.
 - [ ] **D4. Operational-readiness + rollback proof (007) + staging soak** → then the HUMAN MERGE APPROVAL (the hard stop).

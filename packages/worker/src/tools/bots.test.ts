@@ -7,6 +7,7 @@ const createBotTool = botManagementTools.find((t) => t.name === 'create_bot')!;
 const adjustBotConfigTool = botManagementTools.find((t) => t.name === 'adjust_bot_config')!;
 const listOwnerBotsTool = botManagementTools.find((t) => t.name === 'list_owner_bots')!;
 const getOwnerBotStatusTool = botManagementTools.find((t) => t.name === 'get_owner_bot_status')!;
+const deleteBotTool = botManagementTools.find((t) => t.name === 'delete_bot')!;
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -436,5 +437,94 @@ describe('get_owner_bot_status — owner-scoped status', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('direct db access');
+  });
+});
+
+// ── delete_bot — owner-scoped terminal delete (Wave A1, S1/S2/S3) ───────────
+//
+// Mirrors the owner-tool + deprovision patterns: owner-scoped existence via
+// getBotByIdForOwner (→ not_found.resource), STATUS guard refusing a running bot
+// (→ bot.running, mapped to 409 at the boundary), hard delete via
+// deleteBotByIdForOwner, metadata-only success, and the owner/db guards
+// (fault:true).
+
+describe('delete_bot — owner-scoped hard delete', () => {
+  it('is registered write-database and ownerScopedNoVenue (side-effecting, no venue)', () => {
+    expect(deleteBotTool).toBeDefined();
+    expect(deleteBotTool.category).toBe('write-database');
+    expect(deleteBotTool.ownerScopedNoVenue).toBe(true);
+  });
+
+  it('deletes a stopped owned bot and returns metadata-only success', async () => {
+    const getBotByIdForOwner = vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1', status: 'stopped' }));
+    const deleteBotByIdForOwner = vi.fn(async () => true);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner, deleteBotByIdForOwner } as unknown as ToolContext['botRepo'],
+    });
+
+    const result = await deleteBotTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(getBotByIdForOwner).toHaveBeenCalledWith('bot-1', 'owner-1');
+    expect(deleteBotByIdForOwner).toHaveBeenCalledWith('bot-1', 'owner-1');
+    expect(result.data).toEqual({ ok: true, botId: 'bot-1', deleted: true });
+  });
+
+  it('returns not_found.resource for an absent/unowned bot (never deletes)', async () => {
+    const getBotByIdForOwner = vi.fn(async () => null);
+    const deleteBotByIdForOwner = vi.fn(async () => false);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner, deleteBotByIdForOwner } as unknown as ToolContext['botRepo'],
+    });
+
+    const result = await deleteBotTool.execute({ botId: 'bot-x' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('not_found.resource');
+    expect(result.error).toContain('not found or not owned');
+    expect(deleteBotByIdForOwner).not.toHaveBeenCalled();
+  });
+
+  it('refuses to delete a running bot with the dedicated bot.running code (→ 409)', async () => {
+    const getBotByIdForOwner = vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1', status: 'running' }));
+    const deleteBotByIdForOwner = vi.fn(async () => true);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner, deleteBotByIdForOwner } as unknown as ToolContext['botRepo'],
+    });
+
+    const result = await deleteBotTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('bot.running');
+    expect(result.error).toMatch(/stop it first/i);
+    // A running bot is never deleted.
+    expect(deleteBotByIdForOwner).not.toHaveBeenCalled();
+  });
+
+  it('fails closed (fault:true) when the owner scope is unavailable', async () => {
+    const ctx = makeCtx({
+      botRepo: { getBotByIdForOwner: vi.fn(), deleteBotByIdForOwner: vi.fn() } as unknown as ToolContext['botRepo'],
+    });
+
+    const result = await deleteBotTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(true);
+    expect(result.errorCode).toBe('bot.owner_unavailable');
+  });
+
+  it('fails closed (fault:true) when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ ownerId: 'owner-1' });
+
+    const result = await deleteBotTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(true);
+    expect(result.errorCode).toBe('bot.db_unavailable');
   });
 });
