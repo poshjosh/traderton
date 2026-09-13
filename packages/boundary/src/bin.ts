@@ -16,6 +16,7 @@ import { isReadOnlyCategory } from '@traderton/domain';
 import {
   createDatabase,
   BotRepository,
+  InstrumentRepository,
   BoundaryInvocationRepository,
   computeRequestFingerprint,
   venueAccounts,
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
   });
   const db = createDatabase(appConfig.database.url);
   const botRepo = new BotRepository(db);
+  const instrumentRepo = new InstrumentRepository(db);
   const runtime = createTradingRuntime({
     config: appConfig,
     redis,
@@ -186,6 +188,8 @@ async function main(): Promise<void> {
       redis: redis as unknown as TradingToolContext['redis'],
       publishToInbound,
       botRepo: botRepo as unknown as TradingToolContext['botRepo'],
+      // Enables find_instrument + watch_token instrument-identity resolution over the boundary.
+      instrumentRepo: instrumentRepo as unknown as TradingToolContext['instrumentRepo'],
       // Venue-aware candle fetcher for read-only scoring tools (score_candidate).
       scannerCandleFetcher,
       // Swap token→pools resolver for score_candidate's swap-token arm.
