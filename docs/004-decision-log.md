@@ -850,3 +850,32 @@ Routed the §009 brief to a fresh decision agent. It VERIFIED all load-bearing f
 - **A. 202 create-response correlation shape.** Default: keep `{ok, note}` + ADD a structured `requestId`/correlation token so a client can locate the bot via the (forthcoming owner-scoped) read without polling. (id-later itself is forced; only the token detail is a call.)
 - **B. Accept the lost synchronous paper+swap 400 (async-only) vs fund a sync `preview_bot_capability` boundary tool.** Default: accept async-only now, ledger as Intentional-divergence; the sync-preview tool (validation COPIED from `validateExecutionCapability`) is a clean later-option → 010 backlog.
 - **C. Owner read-scoping semantics.** Default: owner view = ALL bots whose `ownerId` matches, regardless of `creatorType` (owner = tenancy boundary, decision 10). If product wants agent-created bots hidden from a user's list, that's a genuine segregation decision. Confirm in the ratification batch; slice builds on the default (008 §6.3), cheap veto.
+
+
+## 2026-09-12 — CORRECTION to the bot-consumer contract rulings (false premise found; A + B RE-OPENED)
+
+The 2026-09-12 "Bot-consumer contract" rulings for `POST /bots` (ruling 2: 202/id-later) and capability validation (ruling 3: async) rested on a **FALSE PREMISE** — that Traderton's `create_bot` writes the bot row asynchronously "on the next tick." Verified in code, that is WRONG:
+
+- **The bot row is written SYNCHRONOUSLY** during the `create_bot` boundary call. `create_bot` (`packages/worker/src/tools/bots.ts`) does `await ctx.publishToInbound('MANAGE_BOT', {create_and_start})`; in the boundary composition `publishToInbound` is the IN-PROCESS `createDriveTarget` (`packages/worker/src/composition/drive-target.ts`), whose `createAndStart` runs `await deps.botLimit.tryCreateBotWithLimit(...)` — an atomic count+insert that PERSISTS the row and returns `{created, botId}` — then enqueues the START job. **Only the actor START is deferred**, not the row.
+- **`create_bot` DISCARDS the synchronously-available id**: `createAndStart` returns `void`; the tool returns a hardcoded `{ok, note:'…next tick'}`. The "next tick" note is MISLEADING — only the start is deferred.
+- **Config + mode validation are SYNCHRONOUS** (`BotConfigSchema.safeParse` + `checkModeEscalation` throw before persist).
+- **The paper+swap capability check (`validateExecutionCapability`) is NOT WIRED into the live boundary create path at all** — it exists only in `packages/worker/src/_deferred-authoring/api-routes/` (quarantined, excluded from build/tests). So over the boundary today paper+swap is neither a sync 400 nor an async rejection — it is an ABSENT check (a parity GAP vs herobids, which validated it synchronously).
+
+**Consequence:**
+- **Ruling 2 (202/id-later) is RETRACTED.** A synchronous **201 + id** IS achievable without polling or re-coupling — the `botId` is already produced synchronously and merely dropped. The question re-opens as: plumb the id through `create_bot`'s return (→ herobids 201+id, parity-preserving) vs keep the void/202 fire-and-forget shape. Contract + copy-vs-author call → RE-ROUTE.
+- **Ruling 3 (async capability) is RETRACTED / re-framed.** paper+swap is currently a GAP in the live path, not "async." Restoring parity = wire `validateExecutionCapability` into `createAndStart` (un-quarantine copied logic; copy/adapt, not authoring), which would make it a SYNCHRONOUS rejection again. Question: restore it (sync) vs leave the gap. Parity-restoration + copy-vs-author call → RE-ROUTE.
+- **Ruling 1 (reads over boundary), 4 (owner-scoped read surface — BUILT), 5 (interim keep local reads) STAND** — unaffected by this premise.
+- **C (owner read view) STANDS** with the human's refinement: owner sees all bots by `ownerId`, STRUCTURED so creator (`creatorType`/`creatorId`) is visible.
+
+A + B re-routed to the decision agent with these corrected facts (next). Nothing was committed on the wrong premise beyond docs; the owner-scoped read slice (ruling 4) is correct and unaffected.
+
+
+## 2026-09-12 — Bot-consumer contract: HUMAN RATIFICATION (A/B/C final)
+
+The human ratified the corrected bot-consumer contract. All flags cleared; these are the FINAL settled positions for the bot re-point slice:
+
+- **A1 (RATIFIED): `POST /bots` returns 201 + botId.** Plumb `{ok, botId}` through `createAndStart` → `create_bot`'s return (the id is synchronously available from `tryCreateBotWithLimit`); herobids returns 201 + id (parity with the pre-migration contract). Correct the misleading "next tick" note (only the actor START is deferred; the row + id are synchronous). Supersedes the retracted 202/id-later ruling.
+- **B1 (RATIFIED): wire `validateExecutionCapability` into the live `createAndStart` path** (un-quarantine the copied `@traderton/domain` check; copy/adapt) so paper+swap is rejected SYNCHRONOUSLY → boundary failure → herobids 400. Restores the pre-migration parity gap. **Error-code (human choice): a DEDICATED capability code** (e.g. `execution_capability.paper_swap_not_supported` mapped to 400), preserving the pre-migration error identity/message — NOT the generic `validation.invalid_payload`. Supersedes the retracted async ruling.
+- **C (RATIFIED, refined): owner read view = ALL bots whose `ownerId` matches, STRUCTURED so creator is visible** — surface `creatorType`/`creatorId` in the owner-scoped read payloads (`list_owner_bots`/`get_owner_bot_status`) so a user can tell "I made this" from "an agent made this for me." This is an intentional ADDITIVE divergence from the agent-scoped `list_bots`/`get_bot_status` shape (which omit creator) — logged as such, not a byte-parity match.
+
+Rulings 1 (reads over boundary), 4 (owner-scoped read surface — built), 5 (interim keep local reads) stand. The bot re-point slice proceeds on these.
