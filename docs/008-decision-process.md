@@ -183,3 +183,50 @@ violating copy-never-author" is. Absent such a reason, the agent has no grounds 
 
 This tightens §6 (autonomy contract): §6 said proceed to the branch; §7 says the *decision to
 proceed* is also the agent's by default, gated only by the four conflicts above.
+
+
+## 8. Continuous slice execution to the merge gate (adopted 2026-09-12)
+
+The human authorized running the loop CONTINUOUSLY across slices — no "shall I proceed?"
+between them — stopping ONLY at the enumerated hard stops below. This section makes that
+durable (survives context compaction) and keeps the safeguards intact.
+
+### 8.1 The driver loop
+Maintain a sequenced **pre-merge backlog** (docs/010-improvement-backlog.md holds later-options;
+the CUTOVER-blocking backlog lives in 001's Deferred-required rows + a working checklist). Run:
+
+  pick next UNBLOCKED backlog item → investigate → **decision checkpoint (route four-risk via §3)**
+  → implement (both repo sides) → CodeReviewer → verify with REAL build/lint/test (+ boundary e2e
+  where behaviour warrants) → commit focused → update durable docs/journal → **immediately pick the
+  next unblocked item and begin it.**
+
+The final step of every slice is "select + start the next slice." That IS the continuity
+mechanism — the loop does not return to the human between slices. Do not ask "want me to take the
+next one?" — take it.
+
+### 8.2 The ONLY hard stops (enumerated — not discretionary)
+Halt and hand back to the human ONLY when one of these is hit:
+1. **Merge to `main`** (008 §6.1) — the mandated cutover gate. Stop with a merge-ready handback.
+2. **A four-risk choice the DECISION AGENT escalates as a genuine product/policy call** (§6.4) —
+   like the A/B/C calls. Route every four-risk choice to the decision agent AUTONOMOUSLY; stop for
+   the human ONLY if the agent itself says it needs the human's judgment. Four-risk choices the
+   agent can settle do NOT stop the loop (proceed, mark pending-ratification).
+3. **A blocker unresolvable on a branch** — a missing external dependency / credential / access the
+   loop cannot obtain. State it precisely and stop.
+4. **Backlog exhausted** — no unblocked cutover-blocking work remains before the merge gate.
+
+Nothing else stops the loop. Routing to the decision agent, recording pending-ratification rulings,
+fixing review findings, standing up local infra, and re-running tests are all in-loop.
+
+### 8.3 The safeguards do NOT relax between slices
+Continuous cadence speeds the gaps BETWEEN slices; it never lowers the bar WITHIN one. Every slice
+still: routes its four-risk choices through §3; gets a CodeReviewer pass; verifies with real
+build/lint/test (not trusted-green); and records parity/legal-touching rulings as **pending human
+ratification** in the ledger. (Rationale: unsupervised momentum is exactly when the implementer's
+judgment has slipped before — the structural safeguards are what make continuous autonomy safe.)
+
+### 8.4 The audit trail (review-after-the-fact, not live)
+Keep the running autonomy journal (§6.5) in 001 + 004 so the human reviews the BATCH after the fact:
+per slice — decisions made + agent rulings (which are pending ratification), what was built, what was
+verified (with counts), commit SHAs/branches, and any surfaced item. The human vetoes cheaply (branch
+work). At a hard stop, present the collected pending-ratification list + the state reached.
