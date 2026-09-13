@@ -511,3 +511,27 @@ The human RATIFIED the pending-ratification rulings from this group:
 3. **Swap token→pool resolver** = GeckoTerminal token-pools point resolver (revising the T2/Q2 named primitive). RATIFIED (direction + mechanism), with two open items still to settle at build/staging time: (a) quote-asset constraint default (currently highest-liquidity, no constraint); (b) GeckoTerminal Pro `tokens/{address}/pools` endpoint availability.
 
 All "pending human ratification" flags on the above are CLEARED. **This ratifies the DECISIONS, NOT merge-to-`main`** — work stays on branches; the merge gate remains a separate, explicit, later human decision.
+
+
+### herobids functional/E2E suites are boundary-unaware — Deferred (own slice) (2026-09-12)
+
+Running herobids `run-all-tests.sh --e2e` on `consume-traderton` surfaced 45 functional-tier assertion
+failures + 1 Playwright journey (Journey 14), ALL one root cause: `POST /connections` / trading-link +
+bot-lifecycle endpoints now provision the venue account **over the Traderton boundary** (herobids no
+longer writes trading credentials locally — the legal-isolation objective). When no boundary client is
+configured (`TRADERTON_BOUNDARY_HMAC_SECRET` unset → `tradertonClient` undefined), the route fails closed
+with `precondition.not_ready` → **503**. The functional suites (`bots-lifecycle`, `capability-model`,
+`go-live`, `trading-positions`, `agents.functional`) + Journey 14 were written for the PRE-boundary
+local-write path and have NOT been updated — they call `setupTradingLink`/`createBot` expecting 201.
+
+- **Not a regression, not caused by the market-intel work** (verified: the market-intel commits touch only
+  worker files `agent.ts`/`agent-capabilities.ts`/`venue-intelligence.ts`/`preset-scorecard-runner.ts`;
+  the 503 is the connection-provisioning path). The 503 is the fail-closed objective working correctly.
+- **Deferred — own slice (required for cutover):** update the herobids connection/bot functional + E2E
+  suites to the boundary world — either inject a stubbed `tradertonClient` (unit/functional) or stand up a
+  cross-stack harness (herobids API/worker + a running Traderton boundary with matching
+  `allowedConsumers`/signing creds) for a true integration/E2E run. This belongs to the
+  connection/bot-creation re-point slice, NOT the market-intelligence extraction group.
+- **Tiers that DO exercise the market-intel work all passed:** unit (3091/0), integration, all 4 API
+  smokes, 22/26 Playwright journeys (3 skipped, 1 = Journey 14 boundary-gated). Plus the Traderton
+  live-boundary e2e (6/6, `run-all-tests.sh --e2e`).
