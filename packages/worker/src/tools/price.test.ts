@@ -3,6 +3,7 @@ import type { ToolContext } from '@traderton/domain';
 import { priceTools, validateSymbolForChain, isOnChainAddress } from './price.js';
 
 const getPriceTool = priceTools.find((tool) => tool.name === 'get_price');
+const resolvePriceTargetTool = priceTools.find((tool) => tool.name === 'resolve_price_target');
 
 function makeContext(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -132,6 +133,199 @@ describe('get_price tool', () => {
     );
 
     expect(getPrice).toHaveBeenCalledWith('BTC', 'hyperliquid', undefined);
+  });
+});
+
+describe('resolve_price_target tool', () => {
+  it('rejects invalid symbol formats before calling the price service', async () => {
+    const resolvePriceTarget = vi.fn();
+    const result = await resolvePriceTargetTool!.execute(
+      { symbol: 'So11111111111111111111111111111111111111112', chain: 'ethereum' },
+      makeContext({ priceService: { resolvePriceTarget } }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('ethereum');
+    expect(resolvePriceTarget).not.toHaveBeenCalled();
+  });
+
+  it('fails when the price service is not configured', async () => {
+    const result = await resolvePriceTargetTool!.execute(
+      { symbol: 'SOL', chain: 'solana' },
+      makeContext(),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('price_service_not_configured');
+  });
+
+  it('calls resolvePriceTarget and surfaces the RESOLVED identity, not the input echo', async () => {
+    const resolvePriceTarget = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        symbol: 'PEPE',
+        chain: 'ethereum',
+        address: '0x6982508145454Ce325dDbE47a25d4ec3d2311933',
+        name: 'Pepe',
+        priceUsd: 0.00001,
+        source: 'oracle',
+        fetchedAt: '2026-06-09T00:00:00.000Z',
+        stale: false,
+      },
+    });
+
+    const result = await resolvePriceTargetTool!.execute(
+      { symbol: 'PEPE', chain: 'any' },
+      makeContext({ priceService: { resolvePriceTarget } }),
+    );
+
+    expect(resolvePriceTarget).toHaveBeenCalledWith('PEPE', 'any', undefined);
+    expect(result.success).toBe(true);
+    // Resolved fields come from result.data, not the requested symbol/chain.
+    expect(result.data).toMatchObject({
+      ok: true,
+      symbol: 'PEPE',
+      chain: 'ethereum',
+      address: '0x6982508145454Ce325dDbE47a25d4ec3d2311933',
+      name: 'Pepe',
+      priceUsd: 0.00001,
+      source: 'oracle',
+      stale: false,
+    });
+  });
+
+  it('passes address-shaped symbol as address argument for identity-aware lookup', async () => {
+    const evmAddress = '0x6982508145454Ce325dDbE47a25d4ec3d2311933';
+    const resolvePriceTarget = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        symbol: 'PEPE',
+        chain: 'ethereum',
+        address: evmAddress,
+        priceUsd: 0.00001,
+        source: 'oracle',
+        fetchedAt: '2026-06-09T00:00:00.000Z',
+        stale: false,
+      },
+    });
+
+    const result = await resolvePriceTargetTool!.execute(
+      { symbol: evmAddress, chain: 'ethereum' },
+      makeContext({ priceService: { resolvePriceTarget } }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(resolvePriceTarget).toHaveBeenCalledWith(evmAddress, 'ethereum', evmAddress);
+  });
+
+  it('passes Solana mint as address argument for identity-aware lookup', async () => {
+    const mint = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263';
+    const resolvePriceTarget = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        symbol: 'BONK',
+        chain: 'solana',
+        address: mint,
+        priceUsd: 0.00002,
+        source: 'oracle',
+        fetchedAt: '2026-06-09T00:00:00.000Z',
+        stale: false,
+      },
+    });
+
+    const result = await resolvePriceTargetTool!.execute(
+      { symbol: mint, chain: 'solana' },
+      makeContext({ priceService: { resolvePriceTarget } }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(resolvePriceTarget).toHaveBeenCalledWith(mint, 'solana', mint);
+  });
+
+  it('does not pass address for plain ticker symbols', async () => {
+    const resolvePriceTarget = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        symbol: 'BTC',
+        chain: 'hyperliquid',
+        priceUsd: 67000,
+        source: 'execution',
+        fetchedAt: '2026-06-09T00:00:00.000Z',
+        stale: false,
+      },
+    });
+
+    await resolvePriceTargetTool!.execute(
+      { symbol: 'BTC', chain: 'hyperliquid' },
+      makeContext({ priceService: { resolvePriceTarget } }),
+    );
+
+    expect(resolvePriceTarget).toHaveBeenCalledWith('BTC', 'hyperliquid', undefined);
+  });
+
+  it('forwards an EXPLICIT pinned address alongside the ticker symbol (exact-identity pin)', async () => {
+    const mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+    const resolvePriceTarget = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { symbol: 'USDC', chain: 'solana', address: mint, name: 'USD Coin', priceUsd: 1, source: 'oracle', fetchedAt: '2026-09-12T00:00:00Z', stale: false },
+    });
+
+    // Caller pins the exact asset: ticker 'USDC' + explicit address. Both must
+    // reach the resolver (search by ticker, prefer the address match) — NOT
+    // collapsed to address-as-symbol.
+    await resolvePriceTargetTool!.execute(
+      { symbol: 'USDC', chain: 'solana', address: mint },
+      makeContext({ priceService: { resolvePriceTarget } }),
+    );
+
+    expect(resolvePriceTarget).toHaveBeenCalledWith('USDC', 'solana', mint);
+  });
+
+  it('maps a source failure to a retryable error without faulting', async () => {
+    const resolvePriceTarget = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { code: 'price.source_failed', message: 'oracle unavailable' },
+    });
+
+    const result = await resolvePriceTargetTool!.execute(
+      { symbol: 'SOL', chain: 'solana' },
+      makeContext({ priceService: { resolvePriceTarget } }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('oracle unavailable');
+    expect(result.retryable).toBe(true);
+    expect(result.fault).toBe(false);
+  });
+
+  it('maps a non-retryable lookup failure', async () => {
+    const resolvePriceTarget = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { code: 'price.not_found', message: 'not found' },
+    });
+
+    const result = await resolvePriceTargetTool!.execute(
+      { symbol: 'SOL', chain: 'solana' },
+      makeContext({ priceService: { resolvePriceTarget } }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('not found');
+    expect(result.retryable).toBe(false);
+    expect(result.fault).toBe(false);
+  });
+
+  it('handles malformed price-service responses', async () => {
+    const resolvePriceTarget = vi.fn().mockResolvedValue(null);
+
+    const result = await resolvePriceTargetTool!.execute(
+      { symbol: 'SOL', chain: 'solana' },
+      makeContext({ priceService: { resolvePriceTarget } }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('price lookup failed');
+    expect(result.fault).toBe(false);
   });
 });
 

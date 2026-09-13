@@ -630,3 +630,13 @@ The human corrected a drift: ratification is required ONLY when a ruling **VIOLA
 - **Owner-view shows creator (creatorType/creatorId):** an intentional ADDITIVE divergence from the agent-scoped tool shape — human-directed refinement; treated as ratified-by-direction, logged as Intentional-divergence.
 
 Net: the standing ratification queue is effectively just H-1 (a product-call default), not the earlier inflated list.
+
+
+### Wave B1 — hybrid-sizing price re-point — DONE (2026-09-12)
+
+Per 004 2026-09-12 "Wave B1" (P-A, settled by parity). herobids hybrid sizing now resolves prices over the boundary; the in-process priceService is the fallback (ruling 5) — a step toward removing the agent-container registry (B7).
+- **traderton:** new `resolve_price_target` read-market-data tool (mirrors get_price but calls `resolvePriceTarget`, surfaces the RESOLVED identity `{symbol,chain,address,name,priceUsd,source,fetchedAt,stale}`). get_price unchanged (P-C rejected).
+- **herobids:** `createBoundaryPriceService(boundary)` adapter (PriceService-shaped, strict payload narrowing → fail-closed price.malformed) passed to `resolveHybridTargetSize` when the boundary is present; hybrid go_long guard now boundary-OR-priceService. resolvedChain/resolvedAddress/source metadata preserved.
+- **CodeReviewer caught + FIXED a HIGH parity break:** the adapter initially collapsed (ticker + pinned address) into `address ?? symbol` (address-as-symbol), but the resolver SEARCHES DexScreener by the ticker `symbol` then PREFERS the exact-address match — so collapsing changed the search input = a silent DEX repricing divergence. FIX: `resolve_price_target` tool gained an optional `address` param; the adapter forwards ticker `symbol` AND `address` separately, reproducing the in-process `resolvePriceTarget(symbol, chain, address)` exactly. Tests corrected to assert both-args (were a false green).
+- **Verified:** traderton build/lint clean + price tests 24/0 (full suite 2472/0 pre-fix); herobids lint clean + adapter/sizing 26/0.
+- Shared surface: `resolve_price_target` also serves B3 (watch tools). No ratification (settled by parity).

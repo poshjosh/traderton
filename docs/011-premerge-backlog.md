@@ -12,9 +12,9 @@ Legend: [ ] open · [~] in progress · [x] done (→ ledger row). "4-risk" = mus
 - [ ] **A2. Owner/bot-scoped read wave: costs / journal / journal-summary / sessions / events.** Both repos. Add owner-scoped read tools + repo methods (copy/adapt agent-scoped, re-key to ownerId); herobids `bots.ts:418–550` re-points off local fills/journalEvents. Prereq for retiring local trading tables. Mostly clean copy/adapt (ownerId semantics = ratified default C).
 
 ## Wave B — agent-container market-data read-tools (long pole; gates registry removal)
-- [ ] **B1. Hybrid sizing + `get_price`/`resolvePriceTarget` contract.** herobids `agent.ts:~3297` + basis for price/watch. 4-risk (behaviour-contract) → route FIRST (B3/B4 depend on it).
-- [ ] **B2. `tools/price.ts` → boundary `get_price`.** Depends on B1.
-- [ ] **B3. Watch tools → boundary** (`watch_token`/`remove_watch`/`check_watches`/`list_watches`/`resolve_watch`). herobids `tools/watch.ts`. Pull-based. Depends on B1.
+- [x] **B1. Hybrid sizing + `get_price`/`resolvePriceTarget` contract.** DONE (traderton `resolve_price_target` tool + herobids boundary adapter; settled by parity; HIGH parity-break fixed in review). Provides the `resolve_price_target` shared surface for B3.
+- [ ] **B2. `tools/price.ts` → boundary `get_price`.** Depends on B1. (herobids agent `get_price` tool → boundary get_price.)
+- [ ] **B3. Watch tools → boundary** (`watch_token`/`remove_watch`/`check_watches`/`list_watches`/`resolve_watch`). herobids `tools/watch.ts`. Pull-based. Uses `resolve_price_target` (built in B1) for pinning.
 - [ ] **B4. `tools/market-data.ts` → boundary.** Re-point the tool surface (regime/overview/discovery/search tools already exist).
 - [ ] **B5. Volatility-candle series behind the boundary.** herobids `agent.ts:~2958` `fetchVolatilityCandles` → no boundary tool exists. New Traderton tool. 4-risk (new surface/contract) → route.
 - [ ] **B6. Economic-calendar acquisition behind the boundary.** herobids `agent.ts:~1011`. Human-ruled trading-adjacent → Deferred-required. Boundary shape TBD (read tool vs boundary-populated cache). 4-risk → route.

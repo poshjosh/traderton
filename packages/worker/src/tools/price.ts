@@ -156,4 +156,93 @@ const getPriceTool: AgentTool<TradingToolContext> = {
   },
 };
 
-export const priceTools: AgentTool<TradingToolContext>[] = [getPriceTool];
+const ResolvePriceTargetParamsSchema = z.object({
+  symbol: z.string().min(1).describe('Token symbol or ticker (e.g. BTC, SOL, WIF)'),
+  chain: z.enum(SUPPORTED_CHAINS).describe(
+    'Chain context for the lookup. Use "hyperliquid" for perps mark price. Use "solana", "ethereum", etc. for DEX spot tokens. Use "any" when chain is unknown.',
+  ),
+  // Optional pinned token address for exact-identity resolution. The resolver
+  // searches by `symbol` (ticker) then PREFERS the exact-address match — so a
+  // caller with a pinned identity (hybrid sizing, watch pinning) must pass BOTH
+  // the ticker `symbol` AND `address` to reproduce the in-process
+  // resolvePriceTarget(symbol, chain, address) behaviour. An address-shaped
+  // `symbol` with no explicit `address` is still auto-detected (get_price path).
+  address: z.string().min(1).optional().describe(
+    'Optional pinned token address for exact-identity DEX resolution. Pass alongside the ticker symbol to pin the exact asset.',
+  ),
+});
+
+const resolvePriceTargetTool: AgentTool<TradingToolContext> = {
+  name: 'resolve_price_target',
+  description:
+    'Resolve the concrete identity of a token and its current price in one call. Unlike get_price, this returns the RESOLVED identity the resolver selected — symbol, chain, address, and name — alongside the USD price. ' +
+    'Use it for identity-aware sizing and pinning: the returned symbol/chain/address are stable references to reprice against, not an echo of the input. ' +
+    'Chain is required — "hyperliquid" for perps mark price, the token\'s native chain for DEX spot tokens, or "any" when the chain is unknown.',
+  parametersSchema: ResolvePriceTargetParamsSchema,
+  parameters: convertZodToJsonSchema(ResolvePriceTargetParamsSchema),
+  category: 'read-market-data',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { symbol, chain, address: pinnedAddress } = params as z.infer<typeof ResolvePriceTargetParamsSchema>;
+    const trimmedSymbol = symbol.trim();
+
+    const validationError = validateSymbolForChain(trimmedSymbol, chain);
+    if (validationError) {
+      return {
+        success: false,
+        error: validationError,
+        retryable: false,
+        fault: false,
+      };
+    }
+
+    if (!ctx.priceService) {
+      return {
+        success: false,
+        error: 'price_service_not_configured',
+        retryable: false,
+      };
+    }
+
+    // Prefer an EXPLICIT pinned address (exact-identity pin from the caller);
+    // otherwise auto-detect an address-shaped symbol (get_price parity). The
+    // resolver searches by ticker `symbol` and prefers the address match.
+    const address = pinnedAddress?.trim() || (isOnChainAddress(trimmedSymbol, chain) ? trimmedSymbol : undefined);
+    const result = await ctx.priceService.resolvePriceTarget(trimmedSymbol, chain as SupportedChain, address);
+
+    if (!result || typeof result !== 'object' || !('ok' in result)) {
+      return {
+        success: false,
+        error: 'price lookup failed',
+        fault: false,
+      };
+    }
+
+    if (!result.ok) {
+      return {
+        success: false,
+        error: result.error?.message ?? 'price lookup failed',
+        retryable: result.error?.code === 'price.source_failed',
+        fault: false,
+      };
+    }
+
+    // Surface the RESOLVED identity (symbol/chain/address/name) from the
+    // resolver, NOT the input echo — that is the whole point vs get_price.
+    return {
+      success: true,
+      data: {
+        ok: true,
+        symbol: result.data?.symbol,
+        chain: result.data?.chain,
+        address: result.data?.address,
+        name: result.data?.name,
+        priceUsd: result.data?.priceUsd,
+        source: result.data?.source,
+        fetchedAt: result.data?.fetchedAt,
+        stale: result.data?.stale,
+      },
+    };
+  },
+};
+
+export const priceTools: AgentTool<TradingToolContext>[] = [getPriceTool, resolvePriceTargetTool];

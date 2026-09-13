@@ -918,3 +918,16 @@ Verified against herobids `main` (pre-migration production): the original `DELET
 So Traderton's `delete_bot` hard-delete is **copy-faithful** — it reproduces exactly what herobids did. It HONOURS copy-never-author; it does not violate/contradict/undermine anything. The earlier decision-agent escalation of H-1 as a "product call (retain config for audit?)" was an OVER-ESCALATION: retention is a capability herobids never had, so adding it would be authoring a new feature (forbidden mid-migration), and NOT adding it is not a degrade — it's parity.
 
 **H-1 is SETTLED by parity — NOT pending ratification.** The standing ratification queue is now EMPTY. (Lesson: the ratification test is "does it go AGAINST a rule?", not "does it touch deletion semantics?" — a copy-faithful behaviour needs no sign-off even when the topic sounds consequential.)
+
+
+## 2026-09-12 — Wave B1: hybrid-sizing price re-point (008-routed; §9 gate = SETTLED BY PARITY, no ratification)
+
+herobids `resolveHybridTargetSize` (hybrid-decision-sizing.ts) uses `priceService.resolvePriceTarget` and flows `resolvedChain`/`resolvedAddress`/`resolvedSymbol`/`source` into go_long decision metadata (agent.ts ~3320). The boundary `get_price` tool calls `getPrice` and does NOT surface the resolved identity → re-pointing to it would DROP those fields (feature-drop). Traderton's context priceService already exposes `resolvePriceTarget` — so a boundary tool surfacing it is copy-faithful.
+
+**§9 gate:** step 1 parity — preserving the resolved shape REPRODUCES herobids → settled by parity; step 2 — the copy-faithful option violates nothing.
+
+**RULING (rule-forced, P-A): add a distinct boundary read tool `resolve_price_target`** (thin wrapper over `ctx.priceService.resolvePriceTarget`; shape `{ok, symbol, chain, address, name, priceUsd, source, fetchedAt, stale}`, mirroring get_price's structure). Re-point B1 `resolveHybridTargetSize` to it.
+- Rejected P-B (re-point to get_price) = silent feature-drop → violates parity-not-liveness.
+- Rejected P-C (extend get_price to also resolve) = authors a getPrice/resolvePriceTarget merge herobids does NOT have + mutates a shared tool's contract for unrelated callers. P-A reproduces herobids' two-surface split faithfully.
+- **Shared surface B1+B3:** ONE tool serves hybrid sizing (B1) AND the watch tools (B3, which also use resolvePriceTarget for pinning). B1 builds it; B3 re-points to it. B2 (plain price) stays on get_price.
+- No ratification (settled by parity); one new 005 read-tool surface (expected, parity-justified).
