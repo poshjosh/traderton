@@ -80,16 +80,22 @@ Copy this per question. The implementer fills it; it must be neutral (no ranking
    the explicit instruction: *decide, do not defer to the requester; rank the options against
    the rules; flag any rule that makes an option unacceptable; if a fact is missing, name the
    path to check rather than assume.* The agent may resolve codebase-answerable unknowns itself.
-3. **Human ratifies** decisions that touched **parity or the legal isolation** (the highest-
-   stakes classes). The decision agent may settle purely-mechanical or clearly-rule-forced
-   choices without ratification, but must say which it settled and why.
+3. **Human ratifies ONLY a ruling that VIOLATES a rule, CONTRADICTS a recorded decision, or
+   UNDERMINES an objective** (or one the decision agent says it cannot ground in the rules and
+   needs a human product/policy call). The bar is *violate/contradict/undermine* — NOT merely
+   *touch/relate to*. A ruling that HONOURS the rules — even one squarely about parity or legal
+   isolation (e.g. "reads go over the boundary" ENFORCES isolation) — is SETTLED by the agent and
+   proceeds; it is recorded in the log but does NOT go in a ratification queue. Only a ruling that
+   deliberately accepts going AGAINST a rule (an Intentional-divergence / a Gap / a
+   behaviour-degrade) needs the human. The decision agent must state which it settled and why.
 4. **Record** the outcome: the DECISION + its reasoning into 004-decision-log.md (the why) and
    any parity impact into 001-parity-ledger.md (Gap/Deferred/Intentional-divergence). The brief
    is transient; the log/ledger are durable.
 
 This flow is near-automatable: §2 is a fixed template; step 2 is a fixed agent invocation with a
-fixed instruction; steps 3–4 are gates + doc appends. The only human input is ratifying the
-parity/legal-touching decisions.
+fixed instruction; steps 3–4 are gates + doc appends. The only human input is ratifying the rulings
+that VIOLATE a rule / CONTRADICT a decision / UNDERMINE an objective (Intentional-divergence,
+Gap, or behaviour-degrade) — NOT rulings that merely relate to parity/isolation while honouring them.
 
 ## 4. Worked example (the first run — score_candidate re-point, 2026-09-11)
 
@@ -136,9 +142,12 @@ pausing between them:
 ### 6.3 Route to the decision agent (do not self-rank)
 Any choice hitting the four risks (§1: parity / legal-isolation / feature-drop / behaviour-or-
 contract change). The decision agent's ruling is **authoritative and the agent proceeds on it
-immediately** — it is NOT a stop. Parity/legal-touching rulings are marked *pending human
-ratification* in the journal (§6.5) and the agent keeps going; the human reviews the batch
-after the fact and vetoes if needed (a veto is cheap — the work is on a branch).
+immediately** — it is NOT a stop. A ruling is marked *pending human ratification* ONLY when it
+**violates a rule, contradicts a recorded decision, or undermines an objective** — i.e. an
+Intentional-divergence, a Gap, or an accepted behaviour-degrade. A ruling that HONOURS the rules
+(the common case — even when it is about parity or isolation) is SETTLED, recorded in the log, and
+needs NO ratification. The human reviews the (small) pending-ratification set after the fact and
+vetoes if needed (a veto is cheap — the work is on a branch).
 
 ### 6.4 Surface to the human (rare, soft)
 Only when: the merge gate is reached; OR the decision agent itself says a choice cannot be
@@ -221,9 +230,11 @@ fixing review findings, standing up local infra, and re-running tests are all in
 ### 8.3 The safeguards do NOT relax between slices
 Continuous cadence speeds the gaps BETWEEN slices; it never lowers the bar WITHIN one. Every slice
 still: routes its four-risk choices through §3; gets a CodeReviewer pass; verifies with real
-build/lint/test (not trusted-green); and records parity/legal-touching rulings as **pending human
-ratification** in the ledger. (Rationale: unsupervised momentum is exactly when the implementer's
-judgment has slipped before — the structural safeguards are what make continuous autonomy safe.)
+build/lint/test (not trusted-green); and marks as **pending human ratification** ONLY the rulings
+that VIOLATE a rule / CONTRADICT a decision / UNDERMINE an objective (Intentional-divergence / Gap /
+accepted degrade) — rule-honouring rulings are settled and just logged. (Rationale: unsupervised
+momentum is exactly when the implementer's judgment has slipped before — the structural safeguards
+are what make continuous autonomy safe.)
 
 ### 8.4 The audit trail (review-after-the-fact, not live)
 Keep the running autonomy journal (§6.5) in 001 + 004 so the human reviews the BATCH after the fact:

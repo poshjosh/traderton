@@ -612,3 +612,21 @@ Per 004 2026-09-12 "Wave A2" (S-C). Un-quarantine + adapt (agent→owner) — ag
 - **CodeReviewer found + FIXED a HIGH (was a false green):** the read handlers checked top-level `code === 'not_found.resource'`, but the dispatcher remaps a tool's fault:false errorCode to the wire `validation.invalid_payload` (real code in `details.errorCode`) → absent/unowned bot returned 502 not 404. FIX: `readBoundary` now UNWRAPS `details.errorCode` when the wire code is `validation.invalid_payload`, surfacing the tool code so the 404 mapping fires (mirrors accounts.ts/delete precedent); the functional stub's `notFound()` now reproduces the real dispatcher mapping so the 404 tests genuinely gate it.
 - Local aggregation reads removed at D1 (with the tables).
 - **Human item (pending ratification, safe default proceeding):** journal tool granularity — 1 shared `get_owner_bot_journal` (chosen) vs 5 tools 1:1. Naming only.
+
+
+### Ratification-scope correction (2026-09-12, human) — "violate", not "touch"
+
+The human corrected a drift: ratification is required ONLY when a ruling **VIOLATES a rule, CONTRADICTS a recorded decision, or UNDERMINES an objective** (Intentional-divergence / Gap / accepted behaviour-degrade), OR when the decision agent says it cannot ground the choice and needs a product/policy call. A ruling that HONOURS the rules — even one squarely about parity or legal isolation — is SETTLED and just logged; it needs NO ratification. 008 §3/§6/§8 corrected to match §7's violate/contradict/undermine test (was loosely "parity/legal-touching").
+
+**Re-classification of items I had marked "pending ratification" — most were OVER-FLAGGED (rule-honouring → NO ratification needed):**
+- Reads-over-boundary → ENFORCES isolation. NOT ratification.
+- POST /bots 201+id → RESTORES the pre-migration contract (parity). NOT ratification.
+- sync paper+swap 400 → RESTORES a parity gap. NOT ratification.
+- owner-scoped read tools built as copy/adapt → within copy-never-author. NOT ratification.
+- A2 journal-tool granularity → naming/ergonomics. NOT ratification.
+
+**GENUINELY needing the human (small):**
+- **H-1 (hard-delete terminal semantics):** flagged by the decision agent as an ungroundable product call ("should a deleted bot's config be retained for audit?"). Accepts NOT building retention (a post-migration option). Stays pending — but note the human may simply confirm the copy-faithful default (hard-delete) or defer to the gate.
+- **Owner-view shows creator (creatorType/creatorId):** an intentional ADDITIVE divergence from the agent-scoped tool shape — human-directed refinement; treated as ratified-by-direction, logged as Intentional-divergence.
+
+Net: the standing ratification queue is effectively just H-1 (a product-call default), not the earlier inflated list.
