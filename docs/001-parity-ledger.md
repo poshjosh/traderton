@@ -535,3 +535,25 @@ local-write path and have NOT been updated — they call `setupTradingLink`/`cre
 - **Tiers that DO exercise the market-intel work all passed:** unit (3091/0), integration, all 4 API
   smokes, 22/26 Playwright journeys (3 skipped, 1 = Journey 14 boundary-gated). Plus the Traderton
   live-boundary e2e (6/6, `run-all-tests.sh --e2e`).
+
+
+### Update (2026-09-12) — functional suites made boundary-aware; bot-lifecycle sub-item still deferred
+
+Progress on the "herobids functional/E2E suites are boundary-unaware" item above.
+
+- **DONE:** the connection-dependent functional suites (agents.functional, capability-model, go-live,
+  trading-positions) now pass by injecting a stubbed `tradertonClient` into the functional harness
+  (`apps/api/src/__tests__/functional/helpers.ts`) — they exercise the real post-provision local write
+  instead of stalling at 503. Also fixed a pre-existing harness 500 (`CREDENTIAL_ENCRYPTION_KEY` was
+  restored/deleted before request time). herobids `dbf0c4f1`. Functional tier: 164 passed / 0 failed /
+  7 skipped; full `run-all-tests.sh` green.
+- **STILL DEFERRED (own slice — bot-ownership / create-contract decision):** 7 bots-lifecycle cases are
+  `it.skip` with documented reasons. Root: `create_bot` is now an ASYNC boundary submit that writes NO
+  local `bots` row (Traderton owns bots; the row lands on the next worker tick), while herobids'
+  DELETE/stop/start read the LOCAL bots table. Also, the paper+swap execution-capability validation MOVED
+  behind the boundary (herobids dropped its local pre-check). Re-enabling needs the decision: does herobids
+  keep a local bots mirror? is create sync-or-async over the boundary? where do lifecycle reads resolve?
+  These are behaviour/contract four-risk questions — route via 008 when the bot-lifecycle re-point slice is
+  taken up. The tests are preserved (skipped, not deleted) as the parity harness for that slice.
+- **STILL DEFERRED:** the true cross-stack E2E (herobids stack + live Traderton boundary, matching signing
+  creds) — merge-gate-prep, as before.
