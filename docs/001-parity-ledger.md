@@ -557,3 +557,15 @@ Progress on the "herobids functional/E2E suites are boundary-unaware" item above
   taken up. The tests are preserved (skipped, not deleted) as the parity harness for that slice.
 - **STILL DEFERRED:** the true cross-stack E2E (herobids stack + live Traderton boundary, matching signing
   creds) — merge-gate-prep, as before.
+
+
+### Bot-consumer contract — decision-agent rulings (2026-09-12); read re-point still gated
+
+The 008 decision agent settled the bot-consumer contract (see 004 2026-09-12 + docs/009 brief). Consequences for the ledger:
+
+- **Bot reads over the boundary (1b) — Deferred (required for cutover).** Blocked on the owner-scoped Traderton read surface (below). Until it lands, herobids bot reads stay on the local mirror.
+- **New owner-scoped Traderton read surface — Deferred (required for cutover), COPY/ADAPT.** Owner-keyed `list_bots`/`get_bot_status` + owner/bot-scoped costs/journal/journal-summary/sessions/events + a `getBotsByOwner`-family repo method — re-key the existing agent-scoped queries to the soft `ownerId` column (decision 13). Built as an adapt, not authored; proceeds as an `l3-integration` slice under the autonomy contract. This is the gating prerequisite for the entire bot read re-point.
+- **`POST /bots` 201→202 contract change — Intentional-divergence.** id-later (no local row); rule-forced by async ownership. Consistent with start/stop (already 202). Client/UI correlation-token shape pending human item A.
+- **Lost synchronous paper+swap 400 at create — Intentional-divergence / transitional Gap.** Capability validation is now async (rejected at Traderton publish); the immediate 400 herobids gave is gone until the bot read path (1b) can surface the async failure. Pending human item B (accept async-only vs fund a sync `preview_bot_capability` tool).
+- **Interim local-mirror staleness — transitional Gap (closes on 1b).** Between the write re-point (done) and the read re-point (1b), a bot created over the boundary writes NO local row, so herobids' local-mirror read endpoints are stale/incomplete for boundary-created bots. Accepted transitional inconsistency, confined to the branch, resolved when 1b lands. NOT a silent drop (recorded here).
+- **7 skipped bots-lifecycle functional tests** (herobids `dbf0c4f1`) are the parity harness for this slice — re-enable when 1b + the contract changes land.

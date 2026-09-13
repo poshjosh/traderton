@@ -833,3 +833,20 @@ Traderton boundary so no trading market-context acquisition runs in the herobids
 (acquisition-behind-boundary + a read tool, e.g. `get_economic_calendar`, vs. a boundary-populated cache
 the consumer reads) is a build-time design for that slice; the classification (trading-adjacent, must not
 stay a herobids-owned in-process coupling) is settled by this ruling.
+
+
+## 2026-09-12 — Bot-consumer contract (008-routed; decision agent) — SETTLED rulings + human residue
+
+Routed the §009 brief to a fresh decision agent. It VERIFIED all load-bearing facts (agent-scoped read tools + no `getBotsByOwner` repo method at TWO layers; boundary serves read-database; fills/journal Traderton-owned; create_bot dryRun schema-only; create_bot payload carries NO id) and tightened the brief (two items I'd over-escalated are actually rule-forced).
+
+**SETTLED (rule-forced) — recorded here + 001:**
+1. **Bot reads target = OVER THE BOUNDARY (1b). Local read-model (1a) UNACCEPTABLE.** Invariant 1 — a durable local bots/fills/journal projection re-homes trading-state authority in herobids. 1b tracked Deferred-required-for-cutover, gated on ruling 4.
+2. **`POST /bots` = 202 Accepted, id-later, no local row. Polling (2b) REJECTED.** The boundary create payload carries no id and writes no local row; 201+id would require a fabricated id or a local write (invariant 1). Honest 202 = preservation-of-correctness; consistent with start/stop (already 202). Polling re-adds the tick-liveness coupling the async decision removed (invariant 7).
+3. **Capability validation = async-by-default; the herobids local pre-check STAYS removed (3-local UNACCEPTABLE).** Re-adding it reverses settled decision #4 + re-homes a trading-config rule (invariant 1). The lost synchronous paper+swap 400 MUST be ledgered as Intentional-divergence/Gap (invariant 7) regardless of human item B.
+4. **The owner-scoped Traderton read surface is a HARD, TOTAL prerequisite for 1b, built as a COPY/ADAPT (re-key existing `getBotsByCreator`-family queries agent→owner over the soft `ownerId` column, decision 13), NOT authored.** Permitted thin seam (invariant 1); precedent = L3-P1 `provision_venue_account`. Proceeds as an `l3-integration` slice under the autonomy contract — NO human sign-off before starting. New read-tool surface recorded in 005 when built.
+5. **Interim posture = herobids local bot read endpoints STAY on the local mirror until 1b lands; do NOT 503/disable them.** Disabling working endpoints mid-migration is a feature-drop (invariant 7 / 008 §1). The interim mirror is the pre-existing trading DB (L3d deletes it later), not a new durable authority. Transitional staleness for boundary-created bots (no local row) logged in 001 as a Gap closing on 1b.
+
+**FOR THE HUMAN (product/policy) — 3 genuine calls, recommended defaults:**
+- **A. 202 create-response correlation shape.** Default: keep `{ok, note}` + ADD a structured `requestId`/correlation token so a client can locate the bot via the (forthcoming owner-scoped) read without polling. (id-later itself is forced; only the token detail is a call.)
+- **B. Accept the lost synchronous paper+swap 400 (async-only) vs fund a sync `preview_bot_capability` boundary tool.** Default: accept async-only now, ledger as Intentional-divergence; the sync-preview tool (validation COPIED from `validateExecutionCapability`) is a clean later-option → 010 backlog.
+- **C. Owner read-scoping semantics.** Default: owner view = ALL bots whose `ownerId` matches, regardless of `creatorType` (owner = tenancy boundary, decision 10). If product wants agent-created bots hidden from a user's list, that's a genuine segregation decision. Confirm in the ratification batch; slice builds on the default (008 §6.3), cheap veto.

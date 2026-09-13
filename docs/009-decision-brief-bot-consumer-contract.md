@@ -1,6 +1,6 @@
 # Decision brief: the herobids bot-consumer contract (reads, create-response, capability-validation)
 
-**Status:** OPEN — awaiting routing to a fresh decision agent (008 §3) + human ratification.
+**Status:** ROUTED + RULED (2026-09-12) — the decision agent settled rulings 1–5 (recorded in 004 + 001); 3 product/policy calls (A/B/C) await human ratification. See 004-decision-log 2026-09-12 "Bot-consumer contract".
 **Prepared:** 2026-09-12. **Author:** coordinating agent (facts grounded in code). **Contemplator** consulted — its recommendations + reasoning are incorporated below (§7–§8), NOT ranked by me.
 
 This brief follows `docs/008-decision-process.md §2`. It is neutral; the options carry consequences traced to the rules, and the Contemplator's recommendation is recorded per option (clearly labelled as a recommendation, not a ruling).
