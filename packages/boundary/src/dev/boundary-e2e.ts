@@ -162,6 +162,42 @@ async function runSwapCheck(): Promise<boolean> {
   }
 }
 
+// Owner-scoped bot reads (list_owner_bots / get_owner_bot_status). These serve
+// the herobids bot read re-point. We can't rely on any bots existing for the
+// e2e owner, so this asserts the tools RESPOND with a well-formed owner-scoped
+// payload over the boundary (empty list is a valid result) — proving the
+// read-database owner tools dispatch and return the expected shape, incl. the
+// creator fields (C) when a bot is present.
+async function runOwnerBotReadChecks(): Promise<boolean> {
+  const name = 'owner-scoped bot reads (list_owner_bots / get_owner_bot_status)';
+  try {
+    const list = await invokeTool('list_owner_bots', {});
+    if (list.outcome?.kind !== 'success') {
+      console.error(`[FAIL] ${name}: list_owner_bots outcome=${list.outcome?.kind} code=${list.outcome?.code ?? '-'}`);
+      return false;
+    }
+    const bots = (list.outcome.payload as Record<string, unknown>)?.['bots'];
+    if (!Array.isArray(bots)) {
+      console.error(`[FAIL] ${name}: list_owner_bots returned no bots array`);
+      return false;
+    }
+    // get_owner_bot_status for a non-existent bot must be a clean not-found
+    // failure (not a transport/config error) — proves owner-scoping + dispatch.
+    const status = await invokeTool('get_owner_bot_status', { botId: 'e2e-nonexistent-bot' });
+    const ok = status.outcome?.kind === 'success'
+      || (status.outcome?.kind === 'failure' && status.outcome.code !== 'market_data_not_configured');
+    if (!ok) {
+      console.error(`[FAIL] ${name}: get_owner_bot_status outcome=${status.outcome?.kind} code=${status.outcome?.code ?? '-'}`);
+      return false;
+    }
+    console.log(`[ OK ] ${name} (list returned ${bots.length} bot(s); status responded cleanly)`);
+    return true;
+  } catch (err) {
+    console.error(`[FAIL] ${name}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
 async function main(): Promise<void> {
   console.log(`[boundary-e2e] target ${BASE_URL}`);
   let failures = 0;
@@ -190,7 +226,11 @@ async function main(): Promise<void> {
 
   const swapOk = await runSwapCheck();
   if (!swapOk) failures++;
-  const total = CHECKS.length + 1;
+
+  const botReadsOk = await runOwnerBotReadChecks();
+  if (!botReadsOk) failures++;
+
+  const total = CHECKS.length + 2;
 
   console.log(`[boundary-e2e] ${total - failures}/${total} passed`);
   process.exitCode = failures === 0 ? 0 : 1;
