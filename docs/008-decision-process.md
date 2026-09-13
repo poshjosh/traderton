@@ -80,6 +80,12 @@ Copy this per question. The implementer fills it; it must be neutral (no ranking
    the explicit instruction: *decide, do not defer to the requester; rank the options against
    the rules; flag any rule that makes an option unacceptable; if a fact is missing, name the
    path to check rather than assume.* The agent may resolve codebase-answerable unknowns itself.
+   **As the mandatory FINAL step (the §9.3 escalation gate), before using the word "human", run
+   the §9.1 parity-first gate and state the result explicitly — "settled by parity" / "settled
+   within the rules" / "escalate — violates/contradicts/undermines <name it>" / "escalate —
+   ungroundable + irreversible". Do NOT escalate a choice merely because it is product-flavoured
+   or consequential-sounding; check the source (herobids `main`) FIRST — a copy-faithful behaviour
+   is settled by parity, full stop.**
 3. **Human ratifies ONLY a ruling that VIOLATES a rule, CONTRADICTS a recorded decision, or
    UNDERMINES an objective** (or one the decision agent says it cannot ground in the rules and
    needs a human product/policy call). The bar is *violate/contradict/undermine* — NOT merely
@@ -180,6 +186,8 @@ the exception, and it must be *justified* — not a reflex.
 3. **undermine a strategic objective** (e.g. legal isolation — no trading/market-data in the herobids agent process), OR
 4. be a **four-risk** choice per §1 (parity / legal-isolation / feature-drop / behaviour-or-contract) that is not already settled — which routes to the DECISION AGENT (§3), not the human, unless the decision agent itself says it needs a genuine product/policy call.
 
+**PRE-ROUTING gate (§9.2):** before routing even to the decision agent, run the §9.1 parity check FIRST — *is this just reproducing what herobids does?* If yes, it is settled by parity: implement + log it, do NOT route and do NOT escalate. Only genuine four-risk DIVERGENCES the rules don't obviously settle reach the decision agent. A "product-flavoured" choice that stays within the rules is settled directly, never sent to the human.
+
 **If none of the above is at stake, DO NOT ask — decide and proceed.** Offering the human an
 "option" for a call the agent is equipped to make is a failure mode (it offloads work and slows
 autonomy). Verification runs, local env/infra wiring, test-harness fixes, and reversible
@@ -241,3 +249,42 @@ Keep the running autonomy journal (§6.5) in 001 + 004 so the human reviews the 
 per slice — decisions made + agent rulings (which are pending ratification), what was built, what was
 verified (with counts), commit SHAs/branches, and any surfaced item. The human vetoes cheaply (branch
 work). At a hard stop, present the collected pending-ratification list + the state reached.
+
+
+## 9. The parity-first escalation gate (adopted 2026-09-12)
+
+A deterministic test that governs BOTH what the coordinator routes and what the decision agent
+escalates. It exists because escalation was too eager: a "product-flavoured" choice was being sent
+up even when it merely reproduced herobids (H-1: bot hard-delete — herobids `main` already
+hard-deletes, so there was nothing to decide or ratify). "Product-based" is NOT a trigger. The
+trigger is **going AGAINST a rule** — nothing less. There is NO special escalation agent; this gate
+is embedded in the two prompts below.
+
+### 9.1 The gate (apply in order; stop at the first that resolves)
+1. **Parity check — is this reproducing what herobids does?** Look at the source (herobids `main`
+   / the pre-migration handler). If the behaviour is copy-faithful → **settled by parity.** Not a
+   decision, not an escalation, no ratification — regardless of how consequential the topic sounds.
+   *(This is the step that was skipped for H-1. Do it FIRST, always.)*
+2. **Violation check — does the chosen option VIOLATE a rule, CONTRADICT a recorded decision, or
+   UNDERMINE an objective** (i.e. it is an Intentional-divergence, a Gap, or an accepted
+   behaviour-degrade)? If NO → **settle it, log it, done.** A choice that is "product-flavoured" but
+   stays within the rules is the agent's to settle; it does NOT go to the human.
+3. **Escalate ONLY if:** (2) is yes (a genuine going-against) — mark pending human ratification; OR
+   the rules genuinely do NOT determine the answer AND the choice commits us to something not
+   cheaply reversible on a branch — surface to the human, NAMING the specific rule/decision/
+   objective at stake and why the rules don't settle it. "It feels like a product decision" is not
+   grounds. Ground it in the rules or reproduce the source; escalate only a genuine going-against.
+
+### 9.2 Coordinator PRE-ROUTING gate (before invoking the decision agent at all)
+Before routing ANY choice to the decision agent, the coordinator runs §9.1 step 1: **is this just
+copying herobids?** If yes, do NOT route — it is settled by parity; implement it and log it. Only
+route to the decision agent a choice that (after the parity check) is a genuine four-risk divergence
+the rules do not obviously settle. This kills over-escalation one level before the agent is even
+invoked.
+
+### 9.3 Decision-agent ESCALATION gate (mandatory final step of every routed decision)
+The decision agent, as the LAST step before it uses the word "human", MUST run §9.1 and state the
+result explicitly: "settled by parity" / "settled within the rules" / "escalate — violates <X>" /
+"escalate — ungroundable + irreversible". It may NOT escalate a choice merely because it is
+product-flavoured or consequential-sounding. If it escalates, it names the exact rule/decision/
+objective at stake. Add this instruction verbatim to the fixed §3 decision-agent invocation.
