@@ -146,10 +146,15 @@ describe('drive target — MANAGE_BOT create_and_start', () => {
     const { deps, stubs } = makeDeps();
     const publishToInbound = createDriveTarget(deps);
 
-    await publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
+    const result = await publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
       action: 'create_and_start',
       config: validBotConfig(),
     });
+
+    // A1: the synchronously-persisted botId is surfaced OUT of the create branch
+    // (the row + id are created synchronously by tryCreateBotWithLimit; only the
+    // actor START is deferred). `create_bot` reads this to return data.botId.
+    expect(result).toEqual({ botId: 'bot-new' });
 
     // The atomic create+limit seam (item E) was called with the injected owner /
     // venue-account values and the agent creator scope.
@@ -233,6 +238,38 @@ describe('drive target — MANAGE_BOT create_and_start', () => {
       }),
     ).rejects.toThrow(/execution mode "live"/);
 
+    expect(stubs.botLimit.tryCreateBotWithLimit).not.toHaveBeenCalled();
+    expect(stubs.enqueueLifecycle).not.toHaveBeenCalled();
+  });
+
+  // B1: execution-capability guard — paper + swap venue is rejected SYNCHRONOUSLY
+  // with the DEDICATED namespaced code before the create-limit seam is touched.
+  // Restores the pre-migration API-route parity gap (herobids rejected paper+swap
+  // with a 400 at write time). Adapts the execution-capability parity oracle
+  // (packages/domain/src/trading/execution-capability.test.ts) into the live create
+  // path. Note the guard runs BEFORE the schema (which ALSO rejects paper+swap) so
+  // the dedicated code — not the generic schema-refine failure — surfaces.
+  it('rejects paper+swap with the dedicated execution_capability code before the create seam', async () => {
+    const { deps, stubs } = makeDeps({ venue: 'jupiter', venueType: 'swap', ownerMode: 'paper' });
+    const publishToInbound = createDriveTarget(deps);
+
+    let thrown: (Error & { code?: string }) | undefined;
+    try {
+      await publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
+        action: 'create_and_start',
+        config: validBotConfig({ execution: { mode: 'paper' } }),
+      });
+    } catch (err) {
+      thrown = err as Error & { code?: string };
+    }
+
+    expect(thrown).toBeDefined();
+    // The DEDICATED namespaced code the boundary surfaces (NOT a generic schema
+    // failure). The paper_swap identity also rides in the message.
+    expect(thrown!.code).toBe('execution_capability.paper_swap_not_supported');
+    expect(thrown!.message).toMatch(/paper mode is not supported for swap venues/i);
+
+    // Rejected before the create-limit seam + the runtime.
     expect(stubs.botLimit.tryCreateBotWithLimit).not.toHaveBeenCalled();
     expect(stubs.enqueueLifecycle).not.toHaveBeenCalled();
   });

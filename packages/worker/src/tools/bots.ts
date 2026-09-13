@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domain';
+import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig } from '@traderton/domain';
 import { convertZodToJsonSchema } from './registry.js';
 import { createLogger } from '../logger.js';
@@ -75,16 +75,44 @@ const createBotTool: AgentTool<TradingToolContext> = {
       };
     }
 
-    await ctx.publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
-      action: 'create_and_start',
-      connectionId,
-      config,
-      rationale,
-    });
+    let result: void | ManageBotResult;
+    try {
+      result = await ctx.publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
+        action: 'create_and_start',
+        connectionId,
+        config,
+        rationale,
+      });
+    } catch (err) {
+      // The execution-capability guard (B1) rejects paper+swap synchronously with
+      // a DEDICATED namespaced code (`execution_capability.paper_swap_not_supported`).
+      // Surface it as a content-level failure (fault:false) so the boundary maps it
+      // to a 400 (validation.invalid_payload) — the closed boundary failure union
+      // (005) cannot carry a dedicated code, so the dedicated identity rides in the
+      // errorCode (threaded into the boundary failure `details`) AND the message.
+      // Any other thrown error propagates unchanged (→ internal.non_retryable).
+      const code = (err as { code?: unknown }).code;
+      if (typeof code === 'string' && code.startsWith('execution_capability.')) {
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+          errorCode: code,
+          fault: false,
+        };
+      }
+      throw err;
+    }
 
+    // The bot row + its id are persisted SYNCHRONOUSLY by the drive path (A1); only
+    // the actor START is deferred. Surface the id so the consumer sees it in
+    // data.botId without waiting for the next tick.
     return {
       success: true,
-      data: { ok: true, note: 'bot creation submitted — you will see it in the bot list on the next tick' },
+      data: {
+        ok: true,
+        botId: result?.botId,
+        note: 'bot created — the row and id are available now; the bot actor starts on the next tick',
+      },
     };
   },
 };
@@ -210,6 +238,10 @@ const listOwnerBotsTool: AgentTool<TradingToolContext> = {
           strategyPreset: deriveStrategyPreset(extractStrategyFromConfig(b.config)?.type),
           symbol: b.config['symbol'] ?? null,
           createdAt: b.createdAt.toISOString(),
+          // Owner-scoped ADDITIVE divergence (004 ruling 4): surface who created
+          // each bot. The agent-scoped list_bots stays UNCHANGED.
+          creatorType: b.creatorType,
+          creatorId: b.creatorId,
         })),
       },
     };
@@ -258,6 +290,10 @@ const getOwnerBotStatusTool: AgentTool<TradingToolContext> = {
         config: bot.config,
         startedAt: bot.startedAt?.toISOString() ?? null,
         stoppedAt: bot.stoppedAt?.toISOString() ?? null,
+        // Owner-scoped ADDITIVE divergence (004 ruling 4): surface who created
+        // the bot. The agent-scoped get_bot_status stays UNCHANGED.
+        creatorType: bot.creatorType,
+        creatorId: bot.creatorId,
       },
     };
   },

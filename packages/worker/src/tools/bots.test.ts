@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ToolContext } from '@traderton/domain';
+import { AGENT_MESSAGE_TYPES } from '@traderton/domain';
 import { botManagementTools } from './bots.js';
 
+const createBotTool = botManagementTools.find((t) => t.name === 'create_bot')!;
 const adjustBotConfigTool = botManagementTools.find((t) => t.name === 'adjust_bot_config')!;
 const listOwnerBotsTool = botManagementTools.find((t) => t.name === 'list_owner_bots')!;
 const getOwnerBotStatusTool = botManagementTools.find((t) => t.name === 'get_owner_bot_status')!;
@@ -48,6 +50,74 @@ function makeBotRecord(overrides: Partial<{
     ...overrides,
   };
 }
+
+// ── create_bot — synchronous botId + capability rejection (A1 / B1) ─────────
+
+describe('create_bot — returns the synchronous botId (A1)', () => {
+  const validConfig = {
+    symbol: 'BTC-USDC',
+    strategy: { type: 'momentum', decisionMode: 'mechanical' },
+    execution: { mode: 'paper' },
+  };
+
+  it('surfaces data.botId from the publishToInbound create result', async () => {
+    const publishToInbound = vi.fn(async () => ({ botId: 'bot-created-1' }));
+    const ctx = makeCtx({ publishToInbound });
+
+    const result = await createBotTool.execute({ config: validConfig }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(publishToInbound).toHaveBeenCalledTimes(1);
+    const [type, payload] = publishToInbound.mock.calls[0];
+    expect(type).toBe(AGENT_MESSAGE_TYPES.MANAGE_BOT);
+    expect((payload as Record<string, unknown>).action).toBe('create_and_start');
+    const data = result.data as { ok: boolean; botId?: string; note: string };
+    expect(data.ok).toBe(true);
+    expect(data.botId).toBe('bot-created-1');
+    // The corrected note reflects that the row + id are synchronous — only the
+    // actor start is deferred. It must NOT repeat the old misleading claim that
+    // the bot only shows up (with no id) on the next tick.
+    expect(data.note).not.toMatch(/see it in the bot list on the next tick/);
+    expect(data.note).toMatch(/available now/i);
+  });
+
+  it('dryRun previews without creating (unchanged) — no publishToInbound', async () => {
+    const publishToInbound = vi.fn(async () => ({ botId: 'should-not-happen' }));
+    const ctx = makeCtx({ publishToInbound });
+
+    const result = await createBotTool.execute({ config: validConfig, dryRun: true }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(publishToInbound).not.toHaveBeenCalled();
+    const data = result.data as { dryRun: boolean };
+    expect(data.dryRun).toBe(true);
+  });
+
+  // B1: the drive path throws a dedicated `execution_capability.*` error for
+  // paper+swap; create_bot surfaces it as a content-level failure (fault:false)
+  // carrying the dedicated errorCode, so the boundary maps it to a 400
+  // (validation.invalid_payload) with the paper_swap identity in details.errorCode.
+  it('maps a paper+swap capability rejection to a fault:false failure with the dedicated code', async () => {
+    const capError = new Error('Paper mode is not supported for swap venues — use shadow or live') as Error & { code?: string };
+    capError.code = 'execution_capability.paper_swap_not_supported';
+    const publishToInbound = vi.fn(async () => { throw capError; });
+    const ctx = makeCtx({ publishToInbound });
+
+    const result = await createBotTool.execute({ config: validConfig }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('execution_capability.paper_swap_not_supported');
+    expect(result.error).toMatch(/paper mode is not supported for swap venues/i);
+  });
+
+  it('re-throws a non-capability error unchanged (→ boundary internal.non_retryable)', async () => {
+    const publishToInbound = vi.fn(async () => { throw new Error('bot_limit_unavailable: not configured'); });
+    const ctx = makeCtx({ publishToInbound });
+
+    await expect(createBotTool.execute({ config: validConfig }, ctx)).rejects.toThrow(/bot_limit_unavailable/);
+  });
+});
 
 describe('adjust_bot_config — mode-rank enforcement', () => {
   // ── Mode escalation rejections ─────────────────────────────────────────
@@ -258,13 +328,19 @@ describe('list_owner_bots — owner-scoped list', () => {
     const data = result.data as { ok: boolean; bots: Array<Record<string, unknown>> };
     expect(data.ok).toBe(true);
     expect(data.bots).toHaveLength(2);
-    // Parity shape: id, status, strategyPreset, symbol, createdAt — nothing else.
+    // Owner-scoped shape (C): the list_bots parity fields PLUS the additive
+    // creatorType + creatorId (the intentional divergence from agent-scoped
+    // list_bots — 004 ruling 4).
     expect(Object.keys(data.bots[0]).sort()).toEqual(
-      ['createdAt', 'id', 'status', 'strategyPreset', 'symbol'].sort(),
+      ['createdAt', 'creatorId', 'creatorType', 'id', 'status', 'strategyPreset', 'symbol'].sort(),
     );
     expect(data.bots[0].id).toBe('bot-a');
+    expect(data.bots[0].creatorType).toBe('agent');
     expect(data.bots[1].id).toBe('bot-b');
     expect(data.bots[1].symbol).toBe('BTC/USDC');
+    // Owner-scoping does NOT filter by creatorType — a user-created bot surfaces
+    // its own creatorType.
+    expect(data.bots[1].creatorType).toBe('user');
   });
 
   it('passes a since date derived from days', async () => {
@@ -317,11 +393,15 @@ describe('get_owner_bot_status — owner-scoped status', () => {
     expect(result.success).toBe(true);
     expect(getBotByIdForOwner).toHaveBeenCalledWith('bot-1', 'owner-1');
     const data = result.data as Record<string, unknown>;
-    // Parity shape: ok, id, status, strategyPreset, symbol, config, startedAt, stoppedAt.
+    // Owner-scoped shape (C): the get_bot_status parity fields PLUS the additive
+    // creatorType + creatorId (the intentional divergence from agent-scoped
+    // get_bot_status — 004 ruling 4).
     expect(Object.keys(data).sort()).toEqual(
-      ['config', 'id', 'ok', 'startedAt', 'status', 'stoppedAt', 'strategyPreset', 'symbol'].sort(),
+      ['config', 'creatorId', 'creatorType', 'id', 'ok', 'startedAt', 'status', 'stoppedAt', 'strategyPreset', 'symbol'].sort(),
     );
     expect(data.id).toBe('bot-1');
+    expect(data.creatorType).toBe('agent');
+    expect(data.creatorId).toBe('agent-1');
   });
 
   it('rejects when the bot does not belong to the owner (repo returns null)', async () => {

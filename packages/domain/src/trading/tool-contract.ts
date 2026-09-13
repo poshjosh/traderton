@@ -71,6 +71,18 @@ export interface ToolResult {
   fault?: boolean;
 }
 
+/**
+ * The synchronously-available result of a `MANAGE_BOT` create_and_start dispatch.
+ * The bot ROW + its id are persisted synchronously by the drive path (the
+ * item-E atomic create seam); only the actor START is deferred to the lifecycle
+ * queue. `publishToInbound` surfaces this so `create_bot` can return the id in
+ * its `ToolResult.data` rather than a hardcoded "next tick" note. Other message
+ * types (DECISION_SUBMIT, non-create MANAGE_BOT actions) resolve `void`.
+ */
+export interface ManageBotResult {
+  botId: string;
+}
+
 /** Bot row shape returned by bot repository queries. */
 export interface ToolBotRecord {
   id: string;
@@ -150,8 +162,12 @@ export interface TradingToolContext {
     srem: (key: string, ...members: string[]) => Promise<number>;
     expire: (key: string, seconds: number) => Promise<number>;
   };
-  /** Publish agent protocol message to inbound stream */
-  publishToInbound: (type: string, payload: Record<string, unknown>) => Promise<void>;
+  /**
+   * Publish agent protocol message to inbound stream. Resolves `void` for most
+   * message types; a `MANAGE_BOT` create_and_start resolves a `ManageBotResult`
+   * carrying the synchronously-persisted `botId` (see `ManageBotResult`).
+   */
+  publishToInbound: (type: string, payload: Record<string, unknown>) => Promise<void | ManageBotResult>;
   /** Optional database repository for direct bot queries */
   botRepo?: {
     getBotsByCreator: (creatorType: string, creatorId: string, since?: Date) => Promise<ToolBotRecord[]>;

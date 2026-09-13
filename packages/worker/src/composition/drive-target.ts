@@ -25,7 +25,9 @@ import {
   AGENT_MESSAGE_TYPES,
   BotConfigSchema,
   checkModeEscalation,
+  validateExecutionCapability,
   type DecisionIntent,
+  type ManageBotResult,
 } from '@traderton/domain';
 
 import { createLogger } from '../logger.js';
@@ -167,8 +169,17 @@ export interface DriveTargetDeps {
   venueAccountId: string;
 }
 
-/** The `TradingToolContext.publishToInbound` port shape. */
-export type PublishToInbound = (type: string, payload: Record<string, unknown>) => Promise<void>;
+/**
+ * The `TradingToolContext.publishToInbound` port shape. Resolves `void` for most
+ * message types; a `MANAGE_BOT` create_and_start resolves a `ManageBotResult`
+ * carrying the synchronously-persisted `botId` (A1 — the row + id are synchronous;
+ * only the actor START is deferred). Kept structurally identical to the domain
+ * `TradingToolContext.publishToInbound` so `createDriveTarget` remains assignable.
+ */
+export type PublishToInbound = (
+  type: string,
+  payload: Record<string, unknown>,
+) => Promise<void | ManageBotResult>;
 
 /** The manage_bot payload shape the copied tools emit (herobids ManageBotPayload). */
 interface ManageBotPayload {
@@ -209,7 +220,10 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * (decisions 7–13). `venue`/`venueType`/`venueAccountId` are INJECTED; ownership
  * is validated against the injected `ownerId`, never the `agents` table.
  */
-export async function handleManageBot(deps: DriveTargetDeps, payload: ManageBotPayload): Promise<void> {
+export async function handleManageBot(
+  deps: DriveTargetDeps,
+  payload: ManageBotPayload,
+): Promise<void | ManageBotResult> {
   switch (payload.action) {
     case 'create_and_start':
       return createAndStart(deps, payload);
@@ -226,7 +240,7 @@ export async function handleManageBot(deps: DriveTargetDeps, payload: ManageBotP
   }
 }
 
-async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload): Promise<void> {
+async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload): Promise<ManageBotResult> {
   if (!payload.config) throw new Error('config is required for create_and_start');
 
   // Stamp the INJECTED venue/venueType onto the raw config before validation —
@@ -238,6 +252,44 @@ async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload):
     venue: deps.venue,
     venueType: deps.venueType,
   };
+
+  // Execution-capability guard (B1) — restores the pre-migration API-route parity
+  // gap (herobids rejected paper+swap with a 400 at write time before the broker;
+  // the boundary validated it nowhere). Copied from the quarantined API route
+  // (packages/worker/src/_deferred-authoring/api-routes/bots.ts): it calls
+  // `validateExecutionCapability({ actorType, executionMode, venueType })` and
+  // surfaces the dedicated `execution_capability.<code>` on failure.
+  //
+  // GATED on an explicit mode being PRESENT in the raw config — faithfully mirrors
+  // the source route's `if (botVenueType && botExecutionMode)`. A config with no
+  // explicit mode is left to `BotConfigSchema` (which defaults `execution.mode` to
+  // 'paper' and owns shape validation), so this guard does NOT shadow generic
+  // schema failures (missing strategy, missing mode) with `execution_mode_required`.
+  // Runs BEFORE the schema parse so paper+swap yields the DEDICATED code rather
+  // than the generic schema-refine failure (`Bot config is invalid: …`), which
+  // also rejects paper+swap and would otherwise shadow it. `deps.venueType` is the
+  // INJECTED venue type.
+  const requestedMode = (rawConfig['execution'] as Record<string, unknown> | undefined)?.['mode'] as
+    | 'paper'
+    | 'shadow'
+    | 'live'
+    | undefined;
+  if (requestedMode) {
+    const capCheck = validateExecutionCapability({
+      actorType: 'agent',
+      executionMode: requestedMode,
+      venueType: deps.venueType,
+    });
+    if (!capCheck.ok) {
+      // Carry the DEDICATED code so the boundary can surface the paper_swap identity
+      // distinctly from a generic schema-validation failure (see `create_bot`'s
+      // capability-error mapping in tools/bots.ts). Namespaced as the herobids API
+      // route did: `execution_capability.<code>`.
+      const capError = new Error(capCheck.error.message) as Error & { code?: string };
+      capError.code = `execution_capability.${capCheck.error.code}`;
+      throw capError;
+    }
+  }
 
   // Validate the full config against the (mechanical-only, item A′) schema before
   // persisting (herobids broker :651–658).
@@ -338,6 +390,12 @@ async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload):
     ownerId: deps.ownerId,
   });
   logger.info({ ownerId: deps.ownerId, botId }, 'Bot enqueued for start');
+
+  // Surface the synchronously-persisted botId back out (A1). The row + its id are
+  // created SYNCHRONOUSLY above (`tryCreateBotWithLimit`); only the actor START is
+  // deferred to the lifecycle queue. `createDriveTarget` returns this for the
+  // create branch so `create_bot` can return the id in its ToolResult.data.
+  return { botId };
 }
 
 async function startBot(deps: DriveTargetDeps, payload: ManageBotPayload): Promise<void> {
@@ -543,14 +601,15 @@ async function handleDecisionSubmit(deps: DriveTargetDeps, payload: Record<strin
  *    copied tool emits it; the constant exists only for vocabulary fidelity.
  */
 export function createDriveTarget(deps: DriveTargetDeps): PublishToInbound {
-  return async (type: string, payload: Record<string, unknown>): Promise<void> => {
+  return async (type: string, payload: Record<string, unknown>): Promise<void | ManageBotResult> => {
     switch (type) {
       case AGENT_MESSAGE_TYPES.DECISION_SUBMIT:
         await handleDecisionSubmit(deps, payload);
         return;
       case AGENT_MESSAGE_TYPES.MANAGE_BOT:
-        await handleManageBot(deps, payload as unknown as ManageBotPayload);
-        return;
+        // Only create_and_start returns a ManageBotResult (the synchronous botId,
+        // A1); start/stop/restart/adjust_config resolve void.
+        return handleManageBot(deps, payload as unknown as ManageBotPayload);
       default:
         // No BOT_QUERY route (decision). Unknown types are ignored — the tools
         // only ever emit DECISION_SUBMIT + MANAGE_BOT.
