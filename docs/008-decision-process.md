@@ -158,3 +158,28 @@ rulings collected for one review pass.
 The governing docs describe the loop with an autonomous default (proceed to the branch, record
 the trail) rather than "pause and ask at each step." The historical investigate→propose→**pause**
 framing is superseded by this contract; the merge gate remains the hard stop.
+
+
+## 7. Decide-by-default; escalate only on a rule/decision/objective conflict (adopted 2026-09-12)
+
+The default is: **the coordinating/implementing agent decides.** Escalation to the human is
+the exception, and it must be *justified* — not a reflex.
+
+**Only escalate when the choice would:**
+1. **violate a rule** (e.g. "no new features during migration"; copy-never-author; main-branch/merge-gate; read-only source outside the `consume-traderton` branch), OR
+2. **contradict a recorded decision** (004-decision-log / 001-ledger / CANONICAL-STATE), OR
+3. **undermine a strategic objective** (e.g. legal isolation — no trading/market-data in the herobids agent process), OR
+4. be a **four-risk** choice per §1 (parity / legal-isolation / feature-drop / behaviour-or-contract) that is not already settled — which routes to the DECISION AGENT (§3), not the human, unless the decision agent itself says it needs a genuine product/policy call.
+
+**If none of the above is at stake, DO NOT ask — decide and proceed.** Offering the human an
+"option" for a call the agent is equipped to make is a failure mode (it offloads work and slows
+autonomy). Verification runs, local env/infra wiring, test-harness fixes, and reversible
+branch work are decide-and-proceed by default.
+
+**When the agent genuinely cannot decide, it must say WHY in these exact terms** — name the
+rule violated, the decision contradicted, or the objective undermined (or the unsettled
+four-risk). "I'm not sure" is not a reason; "this would author trading logic in herobids,
+violating copy-never-author" is. Absent such a reason, the agent has no grounds to escalate.
+
+This tightens §6 (autonomy contract): §6 said proceed to the branch; §7 says the *decision to
+proceed* is also the agent's by default, gated only by the four conflicts above.
