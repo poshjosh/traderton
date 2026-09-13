@@ -909,3 +909,12 @@ The 5 herobids bot-detail read endpoints (costs/sessions/events/journal/journal-
 - herobids endpoints keep the boundary-first + local-fallback posture (consistent with the delete/get routes); local reads removed at D1.
 
 **FOR THE HUMAN (pending ratification, safe default — proceeding per §8.2):** tool granularity for the 2 pass-through reads — default = ONE shared `get_owner_bot_journal` (4 tools total); could split events/journal 1:1 (5 tools). Naming/ergonomics only, no rule impact.
+
+
+## 2026-09-12 — H-1 RESOLVED by parity (no ratification needed)
+
+Verified against herobids `main` (pre-migration production): the original `DELETE /bots/:id` handler does `await db.delete(bots).where(eq(bots.id, id))` — a HARD row delete. Searched every historical revision of `bots.ts` across all branches: ZERO soft-delete/`deletedAt`/archival/`status='deleted'` markers, ever.
+
+So Traderton's `delete_bot` hard-delete is **copy-faithful** — it reproduces exactly what herobids did. It HONOURS copy-never-author; it does not violate/contradict/undermine anything. The earlier decision-agent escalation of H-1 as a "product call (retain config for audit?)" was an OVER-ESCALATION: retention is a capability herobids never had, so adding it would be authoring a new feature (forbidden mid-migration), and NOT adding it is not a degrade — it's parity.
+
+**H-1 is SETTLED by parity — NOT pending ratification.** The standing ratification queue is now EMPTY. (Lesson: the ratification test is "does it go AGAINST a rule?", not "does it touch deletion semantics?" — a copy-faithful behaviour needs no sign-off even when the topic sounds consequential.)
