@@ -1,6 +1,9 @@
 import { z } from 'zod';
+import { and, asc, eq, inArray, sql, sum } from 'drizzle-orm';
 import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig } from '@traderton/domain';
+import type { Database } from '@traderton/db';
+import { fills, journalEvents, PgJournal } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
 import { createLogger } from '../logger.js';
 
@@ -299,6 +302,277 @@ const getOwnerBotStatusTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- Owner-scoped bot read-wave (Wave A2, 004 2026-09-12) ───────────────────
+//
+// UN-QUARANTINE + adapt: the aggregation bodies are COPIED byte-for-byte from
+// the quarantined herobids route (packages/worker/src/_deferred-authoring/
+// api-routes/bots.ts) — fee-grouping, session-pairing, the journal query, and
+// the summary. The ONLY adaptation is re-keying the ownership check from the
+// local `bots where(id, userId)` lookup to the owner-scoped
+// `getBotByIdForOwner(botId, ctx.ownerId)`, and returning the SAME payload shape
+// the herobids endpoint returns today. Aggregation stays in Traderton — NOT
+// authored trading behaviour (004 "Wave A2"; ruling 4).
+//
+// Guards mirror list_owner_bots (fault:false): botRepo absent →
+// 'direct db access not available'; ownerId absent → 'owner scope not
+// available'. Owner-scoped existence via getBotByIdForOwner → absent →
+// not_found.resource (fault:false), identical to get_owner_bot_status. The
+// aggregation tools additionally need the raw Drizzle handle (ctx.db) for the
+// copied table queries. Category read-database → the boundary resolver
+// short-circuits venue resolution (no ownerScopedNoVenue flag needed — that
+// flag is only for owner-scoped WRITES that drive no executor).
+
+// --- get_owner_bot_costs ---
+
+const GetOwnerBotCostsParamsSchema = z.object({
+  botId: z.string().min(1).describe('ID of the bot to query'),
+});
+
+const getOwnerBotCostsTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_bot_costs',
+  description: 'Get total trading fees for a specific bot, grouped by fee currency. Only works for bots owned by this owner.',
+  parametersSchema: GetOwnerBotCostsParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerBotCostsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botId } = params as z.infer<typeof GetOwnerBotCostsParamsSchema>;
+
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const bot = await ctx.botRepo.getBotByIdForOwner(botId, ctx.ownerId);
+    if (!bot) {
+      return { success: false, fault: false, errorCode: 'not_found.resource', error: `bot ${botId} not found or not owned by this owner` };
+    }
+
+    const db = ctx.db as Database;
+
+    // Group by feeCurrency to avoid summing across heterogeneous assets.
+    const feeRows = await db
+      .select({ feeCurrency: fills.feeCurrency, total: sum(fills.fee) })
+      .from(fills)
+      .where(and(eq(fills.actorType, 'bot'), eq(fills.actorId, botId)))
+      .groupBy(fills.feeCurrency);
+
+    const feesByCurrency: Record<string, string> = {};
+    for (const row of feeRows) {
+      feesByCurrency[row.feeCurrency ?? 'unknown'] = row.total ?? '0';
+    }
+
+    return { success: true, data: { ok: true, botId, feesByCurrency } };
+  },
+};
+
+// --- get_owner_bot_sessions ---
+
+const GetOwnerBotSessionsParamsSchema = z.object({
+  botId: z.string().min(1).describe('ID of the bot to query'),
+  // coerce: LLMs may send numbers as strings
+  limit: z.coerce.number().int().positive().optional().describe('Max sessions to return (default 20, max 100)'),
+  offset: z.coerce.number().int().nonnegative().optional().describe('Number of sessions to skip (default 0)'),
+});
+
+const getOwnerBotSessionsTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_bot_sessions',
+  description: 'Get lifecycle sessions for a specific bot, derived by pairing instance start/stop events. Newest first, paginated. Only works for bots owned by this owner.',
+  parametersSchema: GetOwnerBotSessionsParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerBotSessionsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botId, limit: rawLimit, offset: rawOffset } = params as z.infer<typeof GetOwnerBotSessionsParamsSchema>;
+
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const bot = await ctx.botRepo.getBotByIdForOwner(botId, ctx.ownerId);
+    if (!bot) {
+      return { success: false, fault: false, errorCode: 'not_found.resource', error: `bot ${botId} not found or not owned by this owner` };
+    }
+
+    const db = ctx.db as Database;
+
+    // Same clamping the herobids /sessions endpoint applies to its query params.
+    const limit = Math.min(rawLimit ?? 20, 100);
+    const offset = rawOffset ?? 0;
+
+    // Derive sessions by pairing instance.started / instance.stopped events.
+    // Fetch ascending so pairs can be built left-to-right, then reverse for newest-first output.
+    // (limit + offset) * 2 + 2 bounds the fetch to what's needed for a single page.
+    const maxEvents = (limit + offset) * 2 + 2;
+    const rawEvents = await db.select()
+      .from(journalEvents)
+      .where(and(
+        eq(journalEvents.actorId, botId),
+        inArray(journalEvents.type, ['instance.started', 'instance.stopped']),
+      ))
+      .orderBy(asc(journalEvents.createdAt))
+      .limit(maxEvents);
+
+    type Session = {
+      startedAt: Date;
+      endedAt: Date | null;
+      durationMs: number | null;
+      startEventId: string;
+      endEventId: string | null;
+    };
+    const sessions: Session[] = [];
+    let pendingStart: (typeof journalEvents.$inferSelect) | null = null;
+    for (const event of rawEvents) {
+      if (event.type === 'instance.started') {
+        pendingStart = event;
+      } else if (event.type === 'instance.stopped' && pendingStart) {
+        const startedAt = pendingStart.createdAt;
+        const endedAt = event.createdAt;
+        sessions.push({
+          startedAt,
+          endedAt,
+          durationMs: endedAt.getTime() - startedAt.getTime(),
+          startEventId: pendingStart.id,
+          endEventId: event.id,
+        });
+        pendingStart = null;
+      }
+    }
+    // Include the currently-running session (started but not yet stopped).
+    if (pendingStart) {
+      sessions.push({
+        startedAt: pendingStart.createdAt,
+        endedAt: null,
+        durationMs: null,
+        startEventId: pendingStart.id,
+        endEventId: null,
+      });
+    }
+    sessions.reverse(); // newest first
+    const page = sessions.slice(offset, offset + limit);
+
+    return { success: true, data: { ok: true, botId, sessions: page, limit, offset } };
+  },
+};
+
+// --- get_owner_bot_journal_summary ---
+
+const GetOwnerBotJournalSummaryParamsSchema = z.object({
+  botId: z.string().min(1).describe('ID of the bot to query'),
+});
+
+const getOwnerBotJournalSummaryTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_bot_journal_summary',
+  description: 'Get aggregate trade stats for a specific bot: total trade count and fees grouped by currency. Only works for bots owned by this owner.',
+  parametersSchema: GetOwnerBotJournalSummaryParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerBotJournalSummaryParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botId } = params as z.infer<typeof GetOwnerBotJournalSummaryParamsSchema>;
+
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const bot = await ctx.botRepo.getBotByIdForOwner(botId, ctx.ownerId);
+    if (!bot) {
+      return { success: false, fault: false, errorCode: 'not_found.resource', error: `bot ${botId} not found or not owned by this owner` };
+    }
+
+    const db = ctx.db as Database;
+
+    const [countResult] = await db
+      .select({ tradeCount: sql<number>`count(*)::int` })
+      .from(fills)
+      .where(and(eq(fills.actorType, 'bot'), eq(fills.actorId, botId)));
+
+    // Group by feeCurrency — consistent with /costs; avoids summing across heterogeneous assets.
+    const feeRows = await db
+      .select({ feeCurrency: fills.feeCurrency, total: sum(fills.fee) })
+      .from(fills)
+      .where(and(eq(fills.actorType, 'bot'), eq(fills.actorId, botId)))
+      .groupBy(fills.feeCurrency);
+
+    const feesByCurrency: Record<string, string> = {};
+    for (const row of feeRows) {
+      feesByCurrency[row.feeCurrency ?? 'unknown'] = row.total ?? '0';
+    }
+
+    return {
+      success: true,
+      data: {
+        ok: true,
+        botId,
+        tradeCount: countResult?.tradeCount ?? 0,
+        feesByCurrency,
+      },
+    };
+  },
+};
+
+// --- get_owner_bot_journal ---
+//
+// Serves BOTH herobids reads: /bots/:id/events (call with just `limit`) and
+// /bots/:id/journal (type + limit + offset). Thin pass-through over
+// PgJournal(ctx.db).query — the same journal query the quarantined route ran.
+// PgJournal is constructable from the raw Drizzle handle (ctx.db) — its
+// constructor takes a Database (see @traderton/db journal-pg.ts), matching how
+// the herobids route did `new PgJournal(db)`.
+
+const GetOwnerBotJournalParamsSchema = z.object({
+  botId: z.string().min(1).describe('ID of the bot to query'),
+  type: z.string().min(1).optional().describe('Filter by journal event type'),
+  // coerce: LLMs may send numbers as strings
+  limit: z.coerce.number().int().positive().optional().describe('Max events to return'),
+  offset: z.coerce.number().int().nonnegative().optional().describe('Number of events to skip'),
+});
+
+const getOwnerBotJournalTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_bot_journal',
+  description: 'Get journal events for a specific bot, optionally filtered by type and paginated. Only works for bots owned by this owner.',
+  parametersSchema: GetOwnerBotJournalParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerBotJournalParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botId, type, limit, offset } = params as z.infer<typeof GetOwnerBotJournalParamsSchema>;
+
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const bot = await ctx.botRepo.getBotByIdForOwner(botId, ctx.ownerId);
+    if (!bot) {
+      return { success: false, fault: false, errorCode: 'not_found.resource', error: `bot ${botId} not found or not owned by this owner` };
+    }
+
+    const journal = new PgJournal(ctx.db as Database);
+    const events = await journal.query({ actorId: botId, type, limit, offset });
+
+    return { success: true, data: { ok: true, events } };
+  },
+};
+
 // --- stop_bot ---
 
 const StopBotParamsSchema = z.object({
@@ -564,6 +838,10 @@ export const botManagementTools: AgentTool[] = [
   getBotStatusTool,
   listOwnerBotsTool,
   getOwnerBotStatusTool,
+  getOwnerBotCostsTool,
+  getOwnerBotSessionsTool,
+  getOwnerBotJournalSummaryTool,
+  getOwnerBotJournalTool,
   stopBotTool,
   startBotTool,
   adjustBotConfigTool,

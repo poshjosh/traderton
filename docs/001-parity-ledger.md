@@ -601,3 +601,14 @@ Closes the DELETE parity gap (herobids previously deleted only the local mirror;
 - **herobids:** DELETE routes over `delete_bot` as authoritative, fail-closed (503 when boundary absent); boundary-FIRST then local-mirror delete (S5); 409 via `details.errorCode`. Pre-guard 409 + backstop cleanly layered.
 - **Verified:** traderton build/lint/test 2448 passed / 0 failed; herobids lint clean + functional 172 passed / 0 failed. CodeReviewer PASS (no critical/high). 1 MEDIUM = backstop-409 test deferred to D1 (untested-today because the pre-guard fires first; tracked in 011 D1 sub-obligation).
 - **H-1 pending ratification (safe default proceeding):** hard-delete is the terminal semantics (copy-faithful; forensic trail FK-independent). Retention, if ever wanted, is a post-migration 010 item.
+
+
+### Wave A2 — owner-scoped bot read-wave (costs/sessions/events/journal/journal-summary) — DONE (2026-09-12)
+
+Per 004 2026-09-12 "Wave A2" (S-C). Un-quarantine + adapt (agent→owner) — aggregation stays in Traderton; herobids is a thin pass-through.
+- **traderton:** 4 owner-scoped read-database tools — `get_owner_bot_costs`, `get_owner_bot_sessions`, `get_owner_bot_journal_summary` (aggregation copied VERBATIM from the quarantined route: fee-grouping, session-pairing, count), `get_owner_bot_journal` (raw PgJournal.query serving both /events + /journal). Owner-scoped via `getBotByIdForOwner` → `not_found.resource`.
+- **herobids:** 5 bot-detail endpoints re-pointed to the tools (boundary-when-present, local fallback ruling 5). Response shapes preserved.
+- **Verified:** traderton build/lint/test 2463/0; herobids lint clean + functional 179/0.
+- **CodeReviewer found + FIXED a HIGH (was a false green):** the read handlers checked top-level `code === 'not_found.resource'`, but the dispatcher remaps a tool's fault:false errorCode to the wire `validation.invalid_payload` (real code in `details.errorCode`) → absent/unowned bot returned 502 not 404. FIX: `readBoundary` now UNWRAPS `details.errorCode` when the wire code is `validation.invalid_payload`, surfacing the tool code so the 404 mapping fires (mirrors accounts.ts/delete precedent); the functional stub's `notFound()` now reproduces the real dispatcher mapping so the 404 tests genuinely gate it.
+- Local aggregation reads removed at D1 (with the tables).
+- **Human item (pending ratification, safe default proceeding):** journal tool granularity — 1 shared `get_owner_bot_journal` (chosen) vs 5 tools 1:1. Naming only.

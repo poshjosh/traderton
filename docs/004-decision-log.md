@@ -894,3 +894,18 @@ Pivotal verified fact: **NO FK points to `bots`** (fills/orders/positions/journa
 
 **FOR THE HUMAN (pending ratification, safe default — proceeding per 008 §8.2):**
 - **H-1:** confirm hard-delete is the intended terminal semantics (no forensic-retention policy requiring bot-config rows to persist). Default (proceeding): hard-delete — copy-faithful; forensic trail is FK-independent and survives. Retention, if ever wanted, is a POST-migration 010 item (would author new behaviour; must not ride this wave).
+
+
+## 2026-09-12 — Wave A2: owner-scoped bot read-wave SHAPE (008-routed; decision agent)
+
+The 5 herobids bot-detail read endpoints (costs/sessions/events/journal/journal-summary) read Traderton-owned `fills`/`journalEvents` LOCALLY. Verified: their handler bodies are BYTE-IDENTICAL to the quarantined Traderton copy (`_deferred-authoring/api-routes/bots.ts`) — so this is un-quarantine, not authoring. `get_analytics` does NOT subsume them (agent-scoped, time-windowed, different shape) — brief premise corrected.
+
+**SETTLED (rule-forced on the core axis): S-C hybrid.**
+- **S-B (herobids re-aggregates) is RULE-UNACCEPTABLE** — re-homes trading aggregation (fee-grouping, session-pairing, summary) into herobids = legal-isolation + copy-never-author violation. Aggregation MUST execute in Traderton.
+- **3 dedicated owner-scoped AGGREGATION tools** (un-quarantine + adapt agent→owner, reusing the identical copied bodies): `get_owner_bot_costs` → `{botId, feesByCurrency}`; `get_owner_bot_sessions` → `{botId, sessions, limit, offset}` (pairing server-side); `get_owner_bot_journal_summary` → `{botId, tradeCount, feesByCurrency}` (verify exact summary shape).
+- **1 owner-scoped RAW journal-read tool** `get_owner_bot_journal({botId, type?, limit, offset?})` → `{events}` serving BOTH `/journal` and `/events` (events = filtered read, NOT aggregation → no herobids-side logic). herobids passes results through verbatim.
+- Every tool follows the landed `get_owner_bot_status` shape: resolve via `getBotByIdForOwner(botId, ctx.ownerId)` → `not_found.resource` (fault:false) if absent/unowned → compute/return. category read-database. Ownership gate preserved (replaces the local `bots` where(id,userId)).
+- **All 5 endpoints / 4 tools are cutover-blocking as a SET** — each reads a local trading table; leaving any local blocks dropping the tables at D1.
+- herobids endpoints keep the boundary-first + local-fallback posture (consistent with the delete/get routes); local reads removed at D1.
+
+**FOR THE HUMAN (pending ratification, safe default — proceeding per §8.2):** tool granularity for the 2 pass-through reads — default = ONE shared `get_owner_bot_journal` (4 tools total); could split events/journal 1:1 (5 tools). Naming/ergonomics only, no rule impact.

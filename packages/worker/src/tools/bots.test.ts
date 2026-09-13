@@ -7,6 +7,10 @@ const createBotTool = botManagementTools.find((t) => t.name === 'create_bot')!;
 const adjustBotConfigTool = botManagementTools.find((t) => t.name === 'adjust_bot_config')!;
 const listOwnerBotsTool = botManagementTools.find((t) => t.name === 'list_owner_bots')!;
 const getOwnerBotStatusTool = botManagementTools.find((t) => t.name === 'get_owner_bot_status')!;
+const getOwnerBotCostsTool = botManagementTools.find((t) => t.name === 'get_owner_bot_costs')!;
+const getOwnerBotSessionsTool = botManagementTools.find((t) => t.name === 'get_owner_bot_sessions')!;
+const getOwnerBotJournalSummaryTool = botManagementTools.find((t) => t.name === 'get_owner_bot_journal_summary')!;
+const getOwnerBotJournalTool = botManagementTools.find((t) => t.name === 'get_owner_bot_journal')!;
 const deleteBotTool = botManagementTools.find((t) => t.name === 'delete_bot')!;
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
@@ -526,5 +530,317 @@ describe('delete_bot — owner-scoped hard delete', () => {
     expect(result.success).toBe(false);
     expect(result.fault).toBe(true);
     expect(result.errorCode).toBe('bot.db_unavailable');
+  });
+});
+
+// ── Owner-scoped bot read-wave (Wave A2) ────────────────────────────────────
+//
+// The 4 read tools UN-QUARANTINE + adapt the herobids aggregation into
+// owner-scoped tools. These mirror the owner-tool test pattern: owner-scoped
+// not-found via getBotByIdForOwner, payload shape, and (for the journal tool)
+// that type/limit/offset pass through. The aggregation tools drive a stubbed
+// Drizzle `ctx.db` returning fixture fills/events and assert the grouped/paired
+// output.
+
+/**
+ * Build a stub Drizzle `db` whose `select().from()...<terminal>` chain resolves
+ * to each queued result in call order (one result per `select()` call). Every
+ * chain method returns a thenable so any terminal (`where`, `groupBy`, `limit`,
+ * `offset`, `orderBy`) resolves to that select's result — matching the copied
+ * aggregation queries and PgJournal's internal query chain.
+ */
+function makeReadDb(results: unknown[]): ToolContext['db'] {
+  let call = 0;
+  const makeChain = (result: unknown) => {
+    const chain: Record<string, unknown> = {
+      then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
+    };
+    for (const method of ['from', 'where', 'groupBy', 'orderBy', 'limit', 'offset', 'innerJoin', 'leftJoin']) {
+      chain[method] = () => chain;
+    }
+    return chain;
+  };
+  return {
+    select: vi.fn(() => makeChain(results[call++] ?? [])),
+  } as unknown as ToolContext['db'];
+}
+
+describe('get_owner_bot_costs — owner-scoped fee grouping', () => {
+  it('groups fills.fee by feeCurrency for the owned bot', async () => {
+    const getBotByIdForOwner = vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1' }));
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[
+        { feeCurrency: 'USDC', total: '1.50' },
+        { feeCurrency: 'SOL', total: '0.02' },
+      ]]),
+    });
+
+    const result = await getOwnerBotCostsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(getBotByIdForOwner).toHaveBeenCalledWith('bot-1', 'owner-1');
+    expect(result.data).toEqual({
+      ok: true,
+      botId: 'bot-1',
+      feesByCurrency: { USDC: '1.50', SOL: '0.02' },
+    });
+  });
+
+  it('maps a null feeCurrency to "unknown" and a null total to "0"', async () => {
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => makeBotRecord({ ownerId: 'owner-1' })) } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[{ feeCurrency: null, total: null }]]),
+    });
+
+    const result = await getOwnerBotCostsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect((result.data as { feesByCurrency: Record<string, string> }).feesByCurrency).toEqual({ unknown: '0' });
+  });
+
+  it('returns not_found.resource for an absent/unowned bot (never queries fills)', async () => {
+    const getBotByIdForOwner = vi.fn(async () => null);
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerBotCostsTool.execute({ botId: 'bot-x' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('not_found.resource');
+    expect(result.error).toContain('not found or not owned');
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('fails when the owner scope is unavailable', async () => {
+    const ctx = makeCtx({
+      botRepo: { getBotByIdForOwner: vi.fn() } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerBotCostsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('owner scope');
+  });
+
+  it('fails when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ ownerId: 'owner-1' });
+
+    const result = await getOwnerBotCostsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+});
+
+describe('get_owner_bot_sessions — owner-scoped session pairing', () => {
+  it('pairs instance.started / instance.stopped events into sessions (newest first)', async () => {
+    const t0 = new Date('2026-01-01T00:00:00Z');
+    const t1 = new Date('2026-01-01T01:00:00Z'); // +1h
+    const t2 = new Date('2026-01-01T02:00:00Z');
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => makeBotRecord({ ownerId: 'owner-1' })) } as unknown as ToolContext['botRepo'],
+      // Ascending order: a closed session (t0→t1) then a still-running one (t2).
+      db: makeReadDb([[
+        { id: 'ev-1', type: 'instance.started', createdAt: t0 },
+        { id: 'ev-2', type: 'instance.stopped', createdAt: t1 },
+        { id: 'ev-3', type: 'instance.started', createdAt: t2 },
+      ]]),
+    });
+
+    const result = await getOwnerBotSessionsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    const data = result.data as { ok: boolean; botId: string; sessions: Array<Record<string, unknown>>; limit: number; offset: number };
+    expect(data.ok).toBe(true);
+    expect(data.limit).toBe(20);
+    expect(data.offset).toBe(0);
+    expect(data.sessions).toHaveLength(2);
+    // Newest first: the currently-running session (started t2, no end).
+    expect(data.sessions[0]).toEqual({
+      startedAt: t2,
+      endedAt: null,
+      durationMs: null,
+      startEventId: 'ev-3',
+      endEventId: null,
+    });
+    // The closed session, with a computed duration of 1h.
+    expect(data.sessions[1]).toEqual({
+      startedAt: t0,
+      endedAt: t1,
+      durationMs: 60 * 60 * 1000,
+      startEventId: 'ev-1',
+      endEventId: 'ev-2',
+    });
+  });
+
+  it('clamps limit to 100 and passes offset through', async () => {
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => makeBotRecord({ ownerId: 'owner-1' })) } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerBotSessionsTool.execute({ botId: 'bot-1', limit: 500, offset: 5 }, ctx);
+
+    expect(result.success).toBe(true);
+    const data = result.data as { limit: number; offset: number };
+    expect(data.limit).toBe(100);
+    expect(data.offset).toBe(5);
+  });
+
+  it('returns not_found.resource for an absent/unowned bot', async () => {
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => null) } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerBotSessionsTool.execute({ botId: 'bot-x' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('not_found.resource');
+  });
+});
+
+describe('get_owner_bot_journal_summary — owner-scoped trade summary', () => {
+  it('returns the trade count and fees grouped by currency', async () => {
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => makeBotRecord({ ownerId: 'owner-1' })) } as unknown as ToolContext['botRepo'],
+      // First select() → count row; second select() → fee-group rows.
+      db: makeReadDb([
+        [{ tradeCount: 7 }],
+        [{ feeCurrency: 'USDC', total: '3.25' }],
+      ]),
+    });
+
+    const result = await getOwnerBotJournalSummaryTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      ok: true,
+      botId: 'bot-1',
+      tradeCount: 7,
+      feesByCurrency: { USDC: '3.25' },
+    });
+  });
+
+  it('defaults tradeCount to 0 when the count row is absent', async () => {
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => makeBotRecord({ ownerId: 'owner-1' })) } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[], []]),
+    });
+
+    const result = await getOwnerBotJournalSummaryTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    const data = result.data as { tradeCount: number; feesByCurrency: Record<string, string> };
+    expect(data.tradeCount).toBe(0);
+    expect(data.feesByCurrency).toEqual({});
+  });
+
+  it('returns not_found.resource for an absent/unowned bot', async () => {
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => null) } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[], []]),
+    });
+
+    const result = await getOwnerBotJournalSummaryTool.execute({ botId: 'bot-x' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('not_found.resource');
+  });
+});
+
+describe('get_owner_bot_journal — owner-scoped journal query (serves /events + /journal)', () => {
+  it('passes actorId + type/limit/offset through to the journal query', async () => {
+    const events = [{ id: 'ev-1', type: 'decision.made', actorId: 'bot-1', createdAt: new Date() }];
+    // Capture the args the PgJournal chain is invoked with. PgJournal builds
+    // select().from().where().orderBy().limit(N).offset(M); we assert on the
+    // clamped/threaded limit + offset via the terminal calls.
+    const limitSpy = vi.fn();
+    const offsetSpy = vi.fn();
+    const chain: Record<string, unknown> = {
+      then: (resolve: (v: unknown) => unknown) => Promise.resolve(events).then(resolve),
+    };
+    chain.from = () => chain;
+    chain.where = () => chain;
+    chain.orderBy = () => chain;
+    chain.limit = (n: number) => { limitSpy(n); return chain; };
+    chain.offset = (n: number) => { offsetSpy(n); return chain; };
+    const db = { select: vi.fn(() => chain) } as unknown as ToolContext['db'];
+
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1' })) } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerBotJournalTool.execute({ botId: 'bot-1', type: 'decision.made', limit: 25, offset: 10 }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, events });
+    // PgJournal.query threads limit/offset straight to the query.
+    expect(limitSpy).toHaveBeenCalledWith(25);
+    expect(offsetSpy).toHaveBeenCalledWith(10);
+  });
+
+  it('works with only a limit (the /events call shape)', async () => {
+    const events: unknown[] = [];
+    const chain: Record<string, unknown> = {
+      then: (resolve: (v: unknown) => unknown) => Promise.resolve(events).then(resolve),
+    };
+    for (const m of ['from', 'where', 'orderBy', 'limit', 'offset']) chain[m] = () => chain;
+    const db = { select: vi.fn(() => chain) } as unknown as ToolContext['db'];
+
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1' })) } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerBotJournalTool.execute({ botId: 'bot-1', limit: 50 }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, events: [] });
+  });
+
+  it('returns not_found.resource for an absent/unowned bot (never queries the journal)', async () => {
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => null) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerBotJournalTool.execute({ botId: 'bot-x' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('not_found.resource');
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('fails when the owner scope is unavailable', async () => {
+    const ctx = makeCtx({
+      botRepo: { getBotByIdForOwner: vi.fn() } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerBotJournalTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('owner scope');
   });
 });
