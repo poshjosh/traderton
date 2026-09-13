@@ -818,6 +818,22 @@ export class BotRepository {
     return row ?? null;
   }
 
+  /**
+   * Get a single bot by ID scoped to an owner — the owner-scoped existence/
+   * ownership check the owner-facing status read depends on. Returns null when
+   * the bot does not exist OR does not belong to the owner.
+   * Owner scoping is by soft `ownerId` (decision 10 + soft-reference rule);
+   * owner-view semantics per 004 "Bot-consumer contract" ruling 4 (pending ratification).
+   */
+  async getBotByIdForOwner(botId: string, ownerId: string) {
+    const [row] = await this.db
+      .select()
+      .from(bots)
+      .where(and(eq(bots.id, botId), eq(bots.ownerId, ownerId)))
+      .limit(1);
+    return row ?? null;
+  }
+
   // getResolvedVenueAccount + createBot REMOVED (Phase 2):
   //  - getResolvedVenueAccount read the platform `connections` table (the connection
   //    indirection dropped by decision 13); only the platform agent-broker called it.
@@ -828,6 +844,26 @@ export class BotRepository {
   /** Get all bots created by an actor (agent, user, or system) */
   async getBotsByCreator(creatorType: string, creatorId: string, since?: Date) {
     const conditions = [eq(bots.creatorType, creatorType), eq(bots.creatorId, creatorId)];
+    if (since) {
+      conditions.push(gte(bots.createdAt, since));
+    }
+
+    return this.db
+      .select()
+      .from(bots)
+      .where(and(...conditions))
+      .orderBy(desc(bots.createdAt));
+  }
+
+  /**
+   * Get all bots for an owner, regardless of `creatorType` (owner = the tenancy
+   * boundary). Optionally filter by creation date. Mirrors `getBotsByCreator`,
+   * re-keyed to the soft `ownerId` column.
+   * Owner scoping is by soft `ownerId` (decision 10 + soft-reference rule);
+   * owner-view semantics per 004 "Bot-consumer contract" ruling 4 (pending ratification).
+   */
+  async getBotsByOwner(ownerId: string, since?: Date) {
+    const conditions = [eq(bots.ownerId, ownerId)];
     if (since) {
       conditions.push(gte(bots.createdAt, since));
     }

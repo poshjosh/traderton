@@ -156,6 +156,10 @@ export interface TradingToolContext {
   botRepo?: {
     getBotsByCreator: (creatorType: string, creatorId: string, since?: Date) => Promise<ToolBotRecord[]>;
     getBotById: (botId: string) => Promise<ToolBotRecord | null>;
+    /** Owner-scoped list — all bots for an owner regardless of creatorType. */
+    getBotsByOwner: (ownerId: string, since?: Date) => Promise<ToolBotRecord[]>;
+    /** Owner-scoped existence/ownership check — null when not owned by ownerId. */
+    getBotByIdForOwner: (botId: string, ownerId: string) => Promise<ToolBotRecord | null>;
     markBotStopped: (botId: string) => Promise<void>;
     markBotRunning: (botId: string) => Promise<void>;
     restoreBotRuntimeState: (state: { botId: string; status: string; startedAt: Date | null; stoppedAt: Date | null }) => Promise<void>;

@@ -569,3 +569,14 @@ The 008 decision agent settled the bot-consumer contract (see 004 2026-09-12 + d
 - **Lost synchronous paper+swap 400 at create — Intentional-divergence / transitional Gap.** Capability validation is now async (rejected at Traderton publish); the immediate 400 herobids gave is gone until the bot read path (1b) can surface the async failure. Pending human item B (accept async-only vs fund a sync `preview_bot_capability` tool).
 - **Interim local-mirror staleness — transitional Gap (closes on 1b).** Between the write re-point (done) and the read re-point (1b), a bot created over the boundary writes NO local row, so herobids' local-mirror read endpoints are stale/incomplete for boundary-created bots. Accepted transitional inconsistency, confined to the branch, resolved when 1b lands. NOT a silent drop (recorded here).
 - **7 skipped bots-lifecycle functional tests** (herobids `dbf0c4f1`) are the parity harness for this slice — re-enable when 1b + the contract changes land.
+
+
+### Owner-scoped bot read surface — LIST + STATUS landed (2026-09-12)
+
+First slice of the owner-scoped read surface (004 ruling 4 — the gating prerequisite for the herobids bot read re-point). COPY/ADAPT of the agent-creator-scoped read path re-keyed to the soft `ownerId` column; agent-scoped path untouched.
+
+- **Built (Traderton `l3-integration`):** `BotRepository.getBotsByOwner(ownerId, since?)` + `getBotByIdForOwner(botId, ownerId)` (mirror `getBotsByCreator`/`getBotById`, filter re-keyed to `ownerId`, no `creatorType` filter — owner = tenancy boundary, default C). Boundary read tools `list_owner_bots` + `get_owner_bot_status` (category read-database; field-for-field payload parity with `list_bots`/`get_bot_status`; scope on `ctx.ownerId`; ownership check pushed into SQL — no info leak).
+- **Verified:** build/lint green; full suite 2436 passed / 0 failed; 5/5 owner-read repo integration on real Postgres; 17 bot-tool tests. CodeReviewer PASS (no critical/high/medium).
+- **Scoping semantics (default C) PENDING RATIFICATION:** owner view = all bots whose `ownerId` matches regardless of `creatorType`.
+- **Follow-on wave (still Deferred — required for the full read re-point):** owner/bot-scoped costs, journal, journal-summary, sessions, events (the remaining herobids GET /bots/:id/* endpoints read fills/journal). Not built in this slice.
+- Next: with LIST+STATUS available over the boundary, the herobids consumer bot read/lifecycle re-point (1b) can re-point GET /bots + /bots/:id + the DELETE/stop/start ownership+status checks; then re-enable the 7 skipped bots-lifecycle tests.

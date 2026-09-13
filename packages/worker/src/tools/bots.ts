@@ -168,6 +168,101 @@ const getBotStatusTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- list_owner_bots ---
+//
+// Owner-scoped adapt of list_bots: scopes by ctx.ownerId (the tenancy boundary)
+// instead of ('agent', ctx.agentId), returning ALL bots for the owner regardless
+// of creatorType. Payload shape matches list_bots field-for-field. Copy/adapt of
+// the creator-scoped read path re-keyed to the soft `ownerId` column — NOT
+// authored trading behaviour (004 "Bot-consumer contract", ruling 4).
+
+const ListOwnerBotsParamsSchema = z.object({
+  // coerce: LLMs may send numbers as strings
+  days: z.coerce.number().int().positive().optional().describe('Only return bots created within this many days'),
+});
+
+const listOwnerBotsTool: AgentTool<TradingToolContext> = {
+  name: 'list_owner_bots',
+  description: 'List all bots owned by this owner, regardless of which actor created them. Optionally filter by creation date (days). Returns bot ID, status, strategy preset, and symbol.',
+  parametersSchema: ListOwnerBotsParamsSchema,
+  parameters: convertZodToJsonSchema(ListOwnerBotsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { days } = params as z.infer<typeof ListOwnerBotsParamsSchema>;
+
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+
+    const since = days ? new Date(Date.now() - days * 24 * 60 * 60 * 1000) : undefined;
+    const botRows = await ctx.botRepo.getBotsByOwner(ctx.ownerId, since);
+
+    return {
+      success: true,
+      data: {
+        ok: true,
+        bots: botRows.map((b) => ({
+          id: b.id,
+          status: b.status,
+          strategyPreset: deriveStrategyPreset(extractStrategyFromConfig(b.config)?.type),
+          symbol: b.config['symbol'] ?? null,
+          createdAt: b.createdAt.toISOString(),
+        })),
+      },
+    };
+  },
+};
+
+// --- get_owner_bot_status ---
+//
+// Owner-scoped adapt of get_bot_status: resolves via getBotByIdForOwner(botId,
+// ctx.ownerId) so the not-found behaviour also covers bots that don't belong to
+// the owner. Same payload shape as get_bot_status.
+
+const GetOwnerBotStatusParamsSchema = z.object({
+  botId: z.string().min(1).describe('ID of the bot to query'),
+});
+
+const getOwnerBotStatusTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_bot_status',
+  description: 'Get detailed status for a specific bot. Returns configuration, runtime state, and timestamps. Only works for bots owned by this owner.',
+  parametersSchema: GetOwnerBotStatusParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerBotStatusParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botId } = params as z.infer<typeof GetOwnerBotStatusParamsSchema>;
+
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+
+    const bot = await ctx.botRepo.getBotByIdForOwner(botId, ctx.ownerId);
+    if (!bot) {
+      return { success: false, error: `bot ${botId} not found or not owned by this owner`, fault: false };
+    }
+
+    return {
+      success: true,
+      data: {
+        ok: true,
+        id: bot.id,
+        status: bot.status,
+        strategyPreset: deriveStrategyPreset(extractStrategyFromConfig(bot.config)?.type),
+        symbol: bot.config['symbol'] ?? null,
+        config: bot.config,
+        startedAt: bot.startedAt?.toISOString() ?? null,
+        stoppedAt: bot.stoppedAt?.toISOString() ?? null,
+      },
+    };
+  },
+};
+
 // --- stop_bot ---
 
 const StopBotParamsSchema = z.object({
@@ -344,6 +439,8 @@ export const botManagementTools: AgentTool[] = [
   createBotTool,
   listBotsTool,
   getBotStatusTool,
+  listOwnerBotsTool,
+  getOwnerBotStatusTool,
   stopBotTool,
   startBotTool,
   adjustBotConfigTool,
