@@ -1,4 +1,5 @@
 import type { PriceCandle } from './types.js';
+import type { VolatilityEvidence } from '@traderton/domain';
 
 /**
  * Exponential Moving Average — returns array of EMA values aligned with input candles.
@@ -561,4 +562,78 @@ export function calculateAtrPercent(candles: PriceCandle[]): number | null {
 
   const atr = totalTrueRange / sample.length;
   return (atr / lastClose) * 100;
+}
+
+// ─── Volatility Evidence (ATR + percentile-classified regime) ───────────────
+
+/**
+ * Volatility evidence derivation — COPIED VERBATIM from the herobids source
+ * (`apps/worker/src/market-intelligence/platform-assessor.ts`, git HEAD ~L548-620:
+ * `computeVolatilityEvidence` + `percentileValue`). This must live behind the
+ * boundary because the percentile-regime classification requires the full candle
+ * true-range distribution, which never crosses the boundary (D1-b rework: H1/H2).
+ *
+ * The ONLY authored change from the source is the return-shape seam: the source
+ * returned `EvidenceValue<VolatilityEvidence>` (available/unavailable); here we
+ * return `VolatilityEvidence | null` (null on <2 candles) and let the consumer map
+ * null → unavailable. The derivation itself is unchanged.
+ */
+const ATR_LOOKBACK_PERIODS = 14;
+const VOLATILITY_LOW_PERCENTILE = 25;
+const VOLATILITY_HIGH_PERCENTILE = 75;
+const VOLATILITY_EXTREME_PERCENTILE = 95;
+const VOLATILITY_CALCULATION_VERSION = '1.0.0';
+
+/** Compute ATR and classify volatility regime from candle data. */
+export function computeVolatilityEvidence(
+  candles: readonly PriceCandle[],
+): VolatilityEvidence | null {
+  if (candles.length < 2) {
+    return null;
+  }
+  const trueRanges: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const current = candles[i]!;
+    const prev = candles[i - 1]!;
+    const tr = Math.max(
+      current.high - current.low,
+      Math.abs(current.high - prev.close),
+      Math.abs(current.low - prev.close),
+    );
+    trueRanges.push(tr);
+  }
+  const lookback = Math.min(ATR_LOOKBACK_PERIODS, trueRanges.length);
+  const recentTRs = trueRanges.slice(-lookback);
+  const atr = recentTRs.reduce((sum, tr) => sum + tr, 0) / recentTRs.length;
+  // Classify regime by comparing current ATR against the candle distribution.
+  // Use the most recent trueRange as the "current" ATR for classification.
+  const currentATR = recentTRs[recentTRs.length - 1] ?? atr;
+  // Build a sorted copy of true ranges for percentile computation
+  const sortedTRs = [...trueRanges].sort((a, b) => a - b);
+  let volatilityRegime: VolatilityEvidence['volatilityRegime'];
+  if (currentATR >= percentileValue(sortedTRs, VOLATILITY_EXTREME_PERCENTILE)) {
+    volatilityRegime = 'extreme';
+  } else if (currentATR >= percentileValue(sortedTRs, VOLATILITY_HIGH_PERCENTILE)) {
+    volatilityRegime = 'high';
+  } else if (currentATR <= percentileValue(sortedTRs, VOLATILITY_LOW_PERCENTILE)) {
+    volatilityRegime = 'low';
+  } else {
+    volatilityRegime = 'normal';
+  }
+  return {
+    averageTrueRange: Math.round(atr * 1e8) / 1e8,
+    volatilityRegime,
+    calculationVersion: VOLATILITY_CALCULATION_VERSION,
+  };
+}
+
+/** Compute the value at a given percentile from a sorted array. */
+function percentileValue(sorted: number[], pct: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = ((pct / 100) * (sorted.length - 1));
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo]!;
+  const frac = idx - lo;
+  return (sorted[lo]! * (1 - frac)) + (sorted[hi]! * frac);
 }

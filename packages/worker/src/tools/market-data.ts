@@ -4,6 +4,7 @@ import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domai
 import {
   evaluateRegime,
   calculateAtrPercent,
+  computeVolatilityEvidence,
   applyTokenSearchPolicy,
   CANDLE_PROVIDERS,
   type TokenInfo,
@@ -361,7 +362,7 @@ const getVolatilityTool: AgentTool<TradingToolContext> = {
 
     // Capture the fetch freshness so the consumer can re-source its telemetry
     // from it (parity with check_regime). The candles are fetched BEHIND the
-    // boundary and reduced to a derived `volatilityPct` — raw candles never
+    // boundary and reduced to derived scalars/evidence — raw candles never
     // cross the boundary.
     let freshness: { provider: string; source: 'upstream' | 'cache'; ageMs: number; isStale: boolean } | null = null;
 
@@ -390,10 +391,18 @@ const getVolatilityTool: AgentTool<TradingToolContext> = {
 
       // `volatilityPct` may be null (parity with calculateAtrPercent — <2 candles
       // or non-positive last close). That is a valid success result: the consumer's
-      // adaptive-interval calc treats null as "no adjustment". Do NOT map it to an error.
+      // adaptive-interval calc (agent tick-loop B5) treats null as "no adjustment".
+      // Do NOT map it to an error, and do NOT change/remove volatilityPct.
       const volatilityPct = calculateAtrPercent(withMeta.candles);
 
-      return { success: true, data: { ok: true, volatilityPct, ...(freshness ? { freshness } : {}) } };
+      // `volatilityEvidence` is the FULL VolatilityEvidence (absolute-units ATR +
+      // percentile-classified regime + calculationVersion), derived over the SAME
+      // fetched candles behind the boundary (D1-b rework: the percentile regime
+      // needs the full candle TR distribution, so it must be derived here — H1/H2).
+      // null when <2 candles; the consumer maps null → unavailable.
+      const volatilityEvidence = computeVolatilityEvidence(withMeta.candles);
+
+      return { success: true, data: { ok: true, volatilityPct, volatilityEvidence, ...(freshness ? { freshness } : {}) } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown error';
       if (message.includes('Rate limit exceeded')) {

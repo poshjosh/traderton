@@ -312,6 +312,23 @@ describe('get_volatility tool', () => {
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({ ok: true });
     expect((result.data as { volatilityPct: number }).volatilityPct).toBeGreaterThan(0.3);
+
+    // volatilityEvidence is the FULL VolatilityEvidence derived over the same
+    // candles: absolute-units ATR (NOT a percentage), percentile-classified regime,
+    // and the version stamp from Traderton. Each candle has high-low=4 with equal
+    // closes → every true range = 4 → ATR = 4 (ABSOLUTE price units, the H1 guard).
+    // With a flat TR distribution the current TR sits at/above the 95th percentile,
+    // so the verbatim percentile classifier lands on 'extreme' (H2: label comes from
+    // the candle TR distribution, not an invented absolute band).
+    const evidence = (result.data as { volatilityEvidence: {
+      averageTrueRange: number;
+      volatilityRegime: string;
+      calculationVersion: string;
+    } | null }).volatilityEvidence;
+    expect(evidence).not.toBeNull();
+    expect(evidence!.averageTrueRange).toBe(4);
+    expect(['low', 'normal', 'high', 'extreme']).toContain(evidence!.volatilityRegime);
+    expect(evidence!.calculationVersion).toBe('1.0.0');
   });
 
   it('defaults to BTC when no symbol is provided', async () => {
@@ -371,6 +388,46 @@ describe('get_volatility tool', () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({ ok: true, volatilityPct: null });
+    // <2 candles → computeVolatilityEvidence returns null (consumer maps null → unavailable).
+    expect((result.data as { volatilityEvidence: unknown }).volatilityEvidence).toBeNull();
+  });
+
+  it('derives a distinct extreme regime when the current true range dominates the distribution', async () => {
+    // 23 quiet candles (TR ≈ 0.1) then a final wide candle (TR = 20): the current
+    // TR sits above the 95th percentile of the distribution → percentile-classified
+    // 'extreme' (H2 guard: regime comes from the candle TR distribution, not an
+    // invented absolute-ATR% band).
+    const candles = Array.from({ length: 24 }, (_, index) => {
+      const isLast = index === 23;
+      return {
+        timestamp: new Date(Date.UTC(2026, 0, 1, index)).toISOString(),
+        open: 100,
+        high: isLast ? 110 : 100.05,
+        low: isLast ? 90 : 99.95,
+        close: 100,
+        volume: 1_000,
+      };
+    });
+    const candlesSpy = vi.fn().mockResolvedValue({
+      data: candles,
+      meta: { freshness: { isStale: false, ageMs: 0 }, provider: 'binance' },
+    });
+
+    const result = await getVolatilityTool!.execute(
+      { symbol: 'BTC' },
+      makeContext({
+        marketDataRegistry: {
+          binance: { candles: candlesSpy },
+        } as ToolContext['marketDataRegistry'],
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    const evidence = (result.data as { volatilityEvidence: {
+      volatilityRegime: string;
+    } | null }).volatilityEvidence;
+    expect(evidence).not.toBeNull();
+    expect(evidence!.volatilityRegime).toBe('extreme');
   });
 });
 

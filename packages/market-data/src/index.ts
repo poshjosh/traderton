@@ -51,6 +51,7 @@ export {
   classifyStructure,
   detectCHOCH,
   calculateAtrPercent,
+  computeVolatilityEvidence,
   type SwingPoint,
   type MarketStructureFromSwings,
   type ChochSignal,
