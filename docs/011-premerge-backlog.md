@@ -96,4 +96,7 @@ Accumulated from per-slice CodeReviewer passes. Grouped by item. None gate the m
 - **[D1-3b]** LOW — `generate.network` is an unconstrained caller-supplied free-string not cross-validated against the venue; intentional per the slice (pre-boundary caller's concern), noted as an explicit assumption.
 - **[D1-cred]** LOW — `resolveGmailTokens` has no DIRECT unit test (exercised only via a `vi.mock` in `email.test.ts`); the real DB join/re-encrypt against `platform_credentials` is tsc-guarded but not runtime-asserted. Future: an integration test seeding platform_credentials+connections+agent_connections. Pre-existing gap, not introduced by the split.
 
+- **[D1-c1]** MEDIUM — the inlined `loadAgentBotIds` helper is triplicated across FillRepository/PositionRepository/PgJournal (byte-identical). Acceptable per the sub-step (small, copy-faithful, avoids a cross-class dep); collapse to one shared db-internal `agentBotIds(db, agentId)` free function if a later sub-step introduces a shared module boundary.
+- **[D1-c1]** LOW — the loader unit tests are mock-db based (can't execute SQL WHERE), so the from/to time-filter test only proves the union composition survives the opts path (not that gte/lte apply); the `at`-snapshot test IS meaningful (real JS post-filter). Real WHERE/arm-content correctness deferred to integration/L3e. Consider distinct per-arm row IDs so an arm swap would be caught.
+
 ## Hard stops (008 §8.2) — the loop halts ONLY for: merge-to-main; a decision-agent-escalated product/policy call; an on-branch-unresolvable blocker; backlog exhausted.
