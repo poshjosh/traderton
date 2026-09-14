@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { ToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES } from '@traderton/domain';
+import { FillRepository, PositionRepository, PgJournal } from '@traderton/db';
 import { botManagementTools } from './bots.js';
 
 const createBotTool = botManagementTools.find((t) => t.name === 'create_bot')!;
@@ -12,6 +13,9 @@ const getOwnerBotSessionsTool = botManagementTools.find((t) => t.name === 'get_o
 const getOwnerBotJournalSummaryTool = botManagementTools.find((t) => t.name === 'get_owner_bot_journal_summary')!;
 const getOwnerBotJournalTool = botManagementTools.find((t) => t.name === 'get_owner_bot_journal')!;
 const deleteBotTool = botManagementTools.find((t) => t.name === 'delete_bot')!;
+const getAgentFillsTool = botManagementTools.find((t) => t.name === 'get_agent_fills')!;
+const getAgentJournalEventsTool = botManagementTools.find((t) => t.name === 'get_agent_journal_events')!;
+const getAgentPositionsTool = botManagementTools.find((t) => t.name === 'get_agent_positions')!;
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -842,5 +846,212 @@ describe('get_owner_bot_journal — owner-scoped journal query (serves /events +
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('owner scope');
+  });
+});
+
+// ── Agent-scoped evidence reads (D1-c1 Sub-step 2) ──────────────────────────
+//
+// Unlike the get_owner_bot_* family, these are AGENT-scoped: no botId param, no
+// ownerId/getBotByIdForOwner. They delegate to the Sub-step 1 loaders
+// (FillRepository.loadAgentFills / PositionRepository.loadAgentPositions /
+// PgJournal.loadAgentJournalEvents) over ctx.db, scoped by ctx.agentId. The
+// tests spy on the loader prototype methods to assert (a) delegation with the
+// agent id, (b) ISO date params are parsed to Date and threaded into opts, and
+// use a stubbed ctx.db so the constructed repo/journal is real but never hits a
+// DB. Guards mirror get_owner_bot_costs: !ctx.db and !ctx.agentId → fault:false.
+
+// A stubbed Drizzle `db` sufficient to construct the repos/journal. The loader
+// methods are spied at the prototype level, so this handle is never queried.
+const stubDb = { select: vi.fn() } as unknown as ToolContext['db'];
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('get_agent_fills — agent-scoped fills read', () => {
+  it('is registered read-database', () => {
+    expect(getAgentFillsTool).toBeDefined();
+    expect(getAgentFillsTool.category).toBe('read-database');
+  });
+
+  it('delegates to FillRepository.loadAgentFills with ctx.agentId and returns { fills }', async () => {
+    const fillRows = [{ id: 'f-1' }, { id: 'f-2' }];
+    const spy = vi.spyOn(FillRepository.prototype, 'loadAgentFills').mockResolvedValue(fillRows as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    const result = await getAgentFillsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, fills: fillRows });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [agentIdArg, optsArg] = spy.mock.calls[0];
+    expect(agentIdArg).toBe('agent-1');
+    // No from/to provided → both undefined.
+    expect(optsArg).toEqual({ from: undefined, to: undefined });
+    // Scope invariant: the tool must NEVER thread botIds (that would let a caller
+    // widen scope beyond the context agent).
+    expect(optsArg).not.toHaveProperty('botIds');
+  });
+
+  it('parses ISO from/to into Date and passes them to the loader', async () => {
+    const spy = vi.spyOn(FillRepository.prototype, 'loadAgentFills').mockResolvedValue([] as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    await getAgentFillsTool.execute(
+      { from: '2024-01-01T00:00:00.000Z', to: '2024-02-01T00:00:00.000Z' },
+      ctx,
+    );
+
+    const [, optsArg] = spy.mock.calls[0];
+    const opts = optsArg as { from?: Date; to?: Date };
+    expect(opts.from).toBeInstanceOf(Date);
+    expect(opts.to).toBeInstanceOf(Date);
+    expect(opts.from?.toISOString()).toBe('2024-01-01T00:00:00.000Z');
+    expect(opts.to?.toISOString()).toBe('2024-02-01T00:00:00.000Z');
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ agentId: 'agent-1' });
+
+    const result = await getAgentFillsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+
+  it('fails fault:false when the agent scope is unavailable', async () => {
+    const ctx = makeCtx({ db: stubDb });
+    // agentId is required by ToolContext; clear it to exercise the guard.
+    (ctx as { agentId?: string }).agentId = undefined;
+
+    const result = await getAgentFillsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('agent scope');
+  });
+});
+
+describe('get_agent_journal_events — agent-scoped journal read', () => {
+  it('is registered read-database', () => {
+    expect(getAgentJournalEventsTool).toBeDefined();
+    expect(getAgentJournalEventsTool.category).toBe('read-database');
+  });
+
+  it('delegates to PgJournal.loadAgentJournalEvents with ctx.agentId and returns { events }', async () => {
+    const eventRows = [{ id: 'ev-1' }];
+    const spy = vi.spyOn(PgJournal.prototype, 'loadAgentJournalEvents').mockResolvedValue(eventRows as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    const result = await getAgentJournalEventsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, events: eventRows });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [agentIdArg, optsArg] = spy.mock.calls[0];
+    expect(agentIdArg).toBe('agent-1');
+    expect(optsArg).toEqual({ from: undefined, to: undefined });
+    expect(optsArg).not.toHaveProperty('botIds');
+  });
+
+  it('parses ISO from/to into Date and passes them to the loader', async () => {
+    const spy = vi.spyOn(PgJournal.prototype, 'loadAgentJournalEvents').mockResolvedValue([] as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    await getAgentJournalEventsTool.execute(
+      { from: '2024-03-01T00:00:00.000Z', to: '2024-04-01T00:00:00.000Z' },
+      ctx,
+    );
+
+    const [, optsArg] = spy.mock.calls[0];
+    const opts = optsArg as { from?: Date; to?: Date };
+    expect(opts.from?.toISOString()).toBe('2024-03-01T00:00:00.000Z');
+    expect(opts.to?.toISOString()).toBe('2024-04-01T00:00:00.000Z');
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ agentId: 'agent-1' });
+
+    const result = await getAgentJournalEventsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+
+  it('fails fault:false when the agent scope is unavailable', async () => {
+    const ctx = makeCtx({ db: stubDb });
+    (ctx as { agentId?: string }).agentId = undefined;
+
+    const result = await getAgentJournalEventsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('agent scope');
+  });
+});
+
+describe('get_agent_positions — agent-scoped positions read', () => {
+  it('is registered read-database', () => {
+    expect(getAgentPositionsTool).toBeDefined();
+    expect(getAgentPositionsTool.category).toBe('read-database');
+  });
+
+  it('delegates to PositionRepository.loadAgentPositions with ctx.agentId and returns { positions }', async () => {
+    const positionRows = [{ id: 'p-1' }];
+    const spy = vi.spyOn(PositionRepository.prototype, 'loadAgentPositions').mockResolvedValue(positionRows as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    const result = await getAgentPositionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, positions: positionRows });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [agentIdArg, optsArg] = spy.mock.calls[0];
+    expect(agentIdArg).toBe('agent-1');
+    expect(optsArg).toEqual({ from: undefined, to: undefined, at: undefined });
+    expect(optsArg).not.toHaveProperty('botIds');
+  });
+
+  it('parses ISO from/to/at into Date and passes them to the loader', async () => {
+    const spy = vi.spyOn(PositionRepository.prototype, 'loadAgentPositions').mockResolvedValue([] as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    await getAgentPositionsTool.execute(
+      {
+        from: '2024-05-01T00:00:00.000Z',
+        to: '2024-06-01T00:00:00.000Z',
+        at: '2024-05-15T00:00:00.000Z',
+      },
+      ctx,
+    );
+
+    const [, optsArg] = spy.mock.calls[0];
+    const opts = optsArg as { from?: Date; to?: Date; at?: Date };
+    expect(opts.from?.toISOString()).toBe('2024-05-01T00:00:00.000Z');
+    expect(opts.to?.toISOString()).toBe('2024-06-01T00:00:00.000Z');
+    expect(opts.at?.toISOString()).toBe('2024-05-15T00:00:00.000Z');
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ agentId: 'agent-1' });
+
+    const result = await getAgentPositionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+
+  it('fails fault:false when the agent scope is unavailable', async () => {
+    const ctx = makeCtx({ db: stubDb });
+    (ctx as { agentId?: string }).agentId = undefined;
+
+    const result = await getAgentPositionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('agent scope');
   });
 });

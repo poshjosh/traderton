@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, sql, sum } from 'drizzle-orm';
 import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig } from '@traderton/domain';
 import type { Database } from '@traderton/db';
-import { fills, journalEvents, PgJournal } from '@traderton/db';
+import { fills, journalEvents, FillRepository, PositionRepository, PgJournal } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
 import { createLogger } from '../logger.js';
 
@@ -832,6 +832,132 @@ const deleteBotTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- Agent-scoped evidence read-wave (D1-c1 Sub-step 2) ────────────────────
+//
+// AUTHOR thin seams only. Unlike the get_owner_bot_* family (botId-scoped via
+// getBotByIdForOwner), these are AGENT-scoped: they read ALL rows attributable
+// to ctx.agentId (agent-native + agent-owned bots) — the same scope list_bots
+// uses via getBotsByCreator('agent', ctx.agentId). No botId param; agent-owned
+// bot resolution is folded into the copied loaders (Sub-step 1).
+//
+// The query bodies are the Sub-step 1 loaders (FillRepository.loadAgentFills /
+// PositionRepository.loadAgentPositions / PgJournal.loadAgentJournalEvents),
+// copied verbatim from herobids agent-evidence-loaders.ts. These tools author
+// nothing but guards + ISO→Date param parse + delegation. category
+// read-database → the boundary resolver short-circuits venue resolution.
+//
+// Guards mirror get_owner_bot_costs (fault:false): ctx.db absent →
+// 'direct db access not available'; ctx.agentId absent → 'agent scope not
+// available'. No ownerId guard — the scope is the agent, not the tenant.
+
+// --- get_agent_fills ---
+
+const GetAgentFillsParamsSchema = z.object({
+  from: z.string().optional().describe('ISO date — only include fills at or after this time'),
+  to: z.string().optional().describe('ISO date — only include fills at or before this time'),
+});
+
+const getAgentFillsTool: AgentTool<TradingToolContext> = {
+  name: 'get_agent_fills',
+  description: 'Get all fills attributable to this agent (agent-native + agent-owned bots), optionally time-filtered. Only returns this agent\'s own data.',
+  parametersSchema: GetAgentFillsParamsSchema,
+  parameters: convertZodToJsonSchema(GetAgentFillsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { from, to } = params as z.infer<typeof GetAgentFillsParamsSchema>;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.agentId) {
+      return { success: false, error: 'agent scope not available', fault: false };
+    }
+
+    const db = ctx.db as Database;
+    // Scope invariant: NEVER pass `botIds` — the agent-owned bot resolution MUST
+    // stay context-derived (loadAgentBotIds(ctx.agentId)) so a caller cannot widen
+    // scope to another agent's rows. Only time filters cross from params.
+    const fillRows = await new FillRepository(db).loadAgentFills(ctx.agentId, {
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
+
+    return { success: true, data: { ok: true, fills: fillRows } };
+  },
+};
+
+// --- get_agent_journal_events ---
+
+const GetAgentJournalEventsParamsSchema = z.object({
+  from: z.string().optional().describe('ISO date — only include events at or after this time'),
+  to: z.string().optional().describe('ISO date — only include events at or before this time'),
+});
+
+const getAgentJournalEventsTool: AgentTool<TradingToolContext> = {
+  name: 'get_agent_journal_events',
+  description: 'Get all journal events attributable to this agent (agent-native + agent-owned bots), optionally time-filtered. Only returns this agent\'s own data.',
+  parametersSchema: GetAgentJournalEventsParamsSchema,
+  parameters: convertZodToJsonSchema(GetAgentJournalEventsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { from, to } = params as z.infer<typeof GetAgentJournalEventsParamsSchema>;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.agentId) {
+      return { success: false, error: 'agent scope not available', fault: false };
+    }
+
+    const db = ctx.db as Database;
+    // Scope invariant: NEVER pass `botIds` — agent-owned bot resolution stays
+    // context-derived so a caller cannot widen scope. Only time filters cross.
+    const events = await new PgJournal(db).loadAgentJournalEvents(ctx.agentId, {
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
+
+    return { success: true, data: { ok: true, events } };
+  },
+};
+
+// --- get_agent_positions ---
+
+const GetAgentPositionsParamsSchema = z.object({
+  from: z.string().optional().describe('ISO date — only include positions at or after this time'),
+  to: z.string().optional().describe('ISO date — only include positions at or before this time'),
+  at: z.string().optional().describe('ISO date — snapshot: only positions open at this instant (openedAt <= at AND (closedAt is null OR closedAt > at))'),
+});
+
+const getAgentPositionsTool: AgentTool<TradingToolContext> = {
+  name: 'get_agent_positions',
+  description: 'Get all positions attributable to this agent (agent-native + agent-owned bots), optionally time-filtered or snapshotted at a point in time. Only returns this agent\'s own data.',
+  parametersSchema: GetAgentPositionsParamsSchema,
+  parameters: convertZodToJsonSchema(GetAgentPositionsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { from, to, at } = params as z.infer<typeof GetAgentPositionsParamsSchema>;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.agentId) {
+      return { success: false, error: 'agent scope not available', fault: false };
+    }
+
+    const db = ctx.db as Database;
+    // Scope invariant: NEVER pass `botIds` — agent-owned bot resolution stays
+    // context-derived so a caller cannot widen scope. Only time filters cross.
+    const positionRows = await new PositionRepository(db).loadAgentPositions(ctx.agentId, {
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      at: at ? new Date(at) : undefined,
+    });
+
+    return { success: true, data: { ok: true, positions: positionRows } };
+  },
+};
+
 export const botManagementTools: AgentTool[] = [
   createBotTool,
   listBotsTool,
@@ -846,4 +972,7 @@ export const botManagementTools: AgentTool[] = [
   startBotTool,
   adjustBotConfigTool,
   deleteBotTool,
+  getAgentFillsTool,
+  getAgentJournalEventsTool,
+  getAgentPositionsTool,
 ];
