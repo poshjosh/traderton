@@ -90,4 +90,8 @@ Accumulated from per-slice CodeReviewer passes. Grouped by item. None gate the m
 - **[D1-b]** LOW (accepted transitional) — the candle adapter calls BOTH `get_volatility` and `score_candidate` per assessment, and `generateScorecards` calls `score_candidate` again per-preset. Extra behind-boundary fetches vs the old single in-process fetch. Accepted transitional cost (M1); revisit if assessment latency matters.
 - **[D1-b]** LOW — `evidence-adapters.ts` candlesAdapter passes `providerSymbol` as both `symbol` and `instrumentId` in the `score_candidate` payload; fine for orderbook (the only supported kind), minor readability nit.
 
+- **[D1-3b]** MEDIUM→LOW — the worker provisioning test's `expect(envelope).not.toContain('secret')` is a brittle literal-word check (passes coincidentally); the real custody guard is the value-based `not.toContain(decryptedSecret)` assertion (present + correct). Tighten the literal check or drop it.
+- **[D1-3b]** LOW — `generatedWalletAddress`/`generatedNetwork` are parallel nullables always co-set; a single `{address,network}|null` would make the invariant structural.
+- **[D1-3b]** LOW — `generate.network` is an unconstrained caller-supplied free-string not cross-validated against the venue; intentional per the slice (pre-boundary caller's concern), noted as an explicit assumption.
+
 ## Hard stops (008 §8.2) — the loop halts ONLY for: merge-to-main; a decision-agent-escalated product/policy call; an on-branch-unresolvable blocker; backlog exhausted.

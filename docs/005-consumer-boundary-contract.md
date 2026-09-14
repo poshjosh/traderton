@@ -353,10 +353,19 @@ idempotent transaction. Registered as a side-effecting (non-read-only) tool, so
 it flows through the standard idempotency store + deadline path — a retry with
 the same `idempotencyKey` yields one persisted invocation and one set of rows.
 
-- **payload:** `{ venue: string, label: string, secrets: Record<string,string>,
-  venueAccountRef?: string }`
-- **result (success):** `{ venueAccountId: string, venue: string, label: string }`
-  — **metadata only; never the secrets.**
+- **payload:** `{ venue: string, label: string, secrets?: Record<string,string>,
+  generate?: { network: string }, venueAccountRef?: string }` — EXACTLY ONE of
+  `secrets` (manual) or `generate` (mint the trading keypair BEHIND the boundary)
+  must be present (both/neither → `validation.invalid_payload`).
+- **generate mode (D1-3b):** the trading venue keypair is minted Traderton-side
+  (the consumer must NOT generate trading keys — legal isolation, decision 12),
+  encrypted at rest, and only the PUBLIC address is returned. For Jupiter the
+  minted Solana address becomes the `venueAccountRef`.
+- **result (success):** `{ venueAccountId: string, venue: string, label: string,
+  wallet: { address: string, network: string } | null }` — `wallet` is the PUBLIC
+  minted address in generate mode (so the consumer can surface it to the user to
+  fund), `null` in manual mode. **Metadata only; the private key / secrets are
+  NEVER returned or logged.**
 - **credential custody:** `secrets` arrive over the HMAC+TLS channel, are
   validated + canonicalized per venue, encrypted at rest (AES-256-GCM via
   `CREDENTIAL_ENCRYPTION_KEY`) before insert, and are never logged or returned.
