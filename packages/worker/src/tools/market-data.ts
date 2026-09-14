@@ -3,6 +3,7 @@ import { createLogger } from '../logger.js';
 import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domain';
 import {
   evaluateRegime,
+  calculateAtrPercent,
   applyTokenSearchPolicy,
   CANDLE_PROVIDERS,
   type TokenInfo,
@@ -335,6 +336,85 @@ const checkRegimeTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- get_volatility ---
+
+const GetVolatilityParamsSchema = z.object({
+  symbol: z.string().optional().transform(v => v === '' ? undefined : v).describe('Benchmark symbol for volatility (ATR%). Defaults to "BTC".'),
+});
+
+const getVolatilityTool: AgentTool<TradingToolContext> = {
+  name: 'get_volatility',
+  description: 'Get the current volatility (ATR% over recent 1h candles) for a benchmark symbol. Used for adaptive scheduling / context.',
+  parametersSchema: GetVolatilityParamsSchema,
+  parameters: convertZodToJsonSchema(GetVolatilityParamsSchema),
+  category: 'read-market-data',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    if (!ctx.marketDataRegistry) {
+      return {
+        success: false,
+        error: 'market_data_not_configured',
+        retryable: false,
+      };
+    }
+
+    const symbol = (params as z.infer<typeof GetVolatilityParamsSchema>).symbol ?? 'BTC';
+
+    // Capture the fetch freshness so the consumer can re-source its telemetry
+    // from it (parity with check_regime). The candles are fetched BEHIND the
+    // boundary and reduced to a derived `volatilityPct` — raw candles never
+    // cross the boundary.
+    let freshness: { provider: string; source: 'upstream' | 'cache'; ageMs: number; isStale: boolean } | null = null;
+
+    try {
+      const withMeta = await (async () => {
+        ctx.recordMarketDataAttempt?.(regimeCandleProvider.id);
+        try {
+          return await regimeCandleProvider.fetchCandlesWithMeta(ctx.marketDataRegistry!, symbol, {
+            interval: '1h',
+            limit: 24,
+          });
+        } catch (fetchErr: unknown) {
+          const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+          if (msg.includes('400') || msg.includes('status 400') || msg.includes('Bad Request')) {
+            throw new Error(
+              `Symbol not available on ${regimeCandleProvider.id}: "${symbol}". ` +
+              `Use a major benchmark like BTC, ETH, or SOL for volatility.`,
+            );
+          }
+          throw fetchErr;
+        }
+      })();
+      if (withMeta.freshness) {
+        freshness = { provider: withMeta.freshness.provider, source: withMeta.freshness.source, ageMs: withMeta.freshness.ageMs, isStale: withMeta.freshness.isStale };
+      }
+
+      // `volatilityPct` may be null (parity with calculateAtrPercent — <2 candles
+      // or non-positive last close). That is a valid success result: the consumer's
+      // adaptive-interval calc treats null as "no adjustment". Do NOT map it to an error.
+      const volatilityPct = calculateAtrPercent(withMeta.candles);
+
+      return { success: true, data: { ok: true, volatilityPct, ...(freshness ? { freshness } : {}) } };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown error';
+      if (message.includes('Rate limit exceeded')) {
+        ctx.recordMarketDataRejection?.(regimeCandleProvider.id, { priority: 'execution' });
+        // `errorCode: 'rate_limit'` makes the throttle distinguishable at the
+        // boundary (dispatcher maps it to `rate_limit.exceeded` BEFORE the generic
+        // retryable→upstream.transient mapping), so the consumer can tell a
+        // throttle from a generic failure for its telemetry split (parity).
+        return {
+          success: false,
+          error: 'rate_limit',
+          errorCode: 'rate_limit',
+          retryable: true,
+        };
+      }
+      logger.warn({ err, tool: 'get_volatility' }, 'get_volatility failed');
+      return { success: false, error: message, retryable: false, fault: false };
+    }
+  },
+};
+
 // --- get_funding_rates ---
 
 const GetFundingRatesParamsSchema = z.object({
@@ -413,6 +493,7 @@ export const marketDataTools: AgentTool<TradingToolContext>[] = [
   searchTokensTool,
   discoverTokensTool,
   checkRegimeTool,
+  getVolatilityTool,
   getFundingRatesTool,
   getMarketOverviewTool,
 ];

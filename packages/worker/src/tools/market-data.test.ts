@@ -5,6 +5,7 @@ import { marketDataTools } from './market-data.js';
 const discoverTokensTool = marketDataTools.find((tool) => tool.name === 'discover_tokens');
 const searchTokensTool = marketDataTools.find((tool) => tool.name === 'search_tokens');
 const checkRegimeTool = marketDataTools.find((tool) => tool.name === 'check_regime');
+const getVolatilityTool = marketDataTools.find((tool) => tool.name === 'get_volatility');
 
 function makeContext(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -276,6 +277,99 @@ describe('check_regime tool', () => {
 
     expect(candlesSpy).toHaveBeenCalledWith('BTCUSDT', { interval: '1h', limit: 200 });
     expect(result.success).toBe(true);
+  });
+});
+
+describe('get_volatility tool', () => {
+  it('fetches 1h/limit-24 candles for the benchmark symbol and returns the derived volatilityPct', async () => {
+    // Wide 4-point band around close 100 → high ATR% (well above 0.3).
+    const candles = Array.from({ length: 24 }, (_, index) => ({
+      timestamp: new Date(Date.UTC(2026, 0, 1, index)).toISOString(),
+      open: 100,
+      high: 102,
+      low: 98,
+      close: 100,
+      volume: 1_000 + index,
+    }));
+    const candlesSpy = vi.fn().mockResolvedValue({
+      data: candles,
+      meta: { freshness: { isStale: false, ageMs: 0 }, provider: 'binance' },
+    });
+
+    const result = await getVolatilityTool!.execute(
+      { symbol: 'BTC' },
+      makeContext({
+        marketDataRegistry: {
+          binance: {
+            candles: candlesSpy,
+          },
+        } as ToolContext['marketDataRegistry'],
+      }),
+    );
+
+    expect(candlesSpy).toHaveBeenCalledWith('BTCUSDT', { interval: '1h', limit: 24 });
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({ ok: true });
+    expect((result.data as { volatilityPct: number }).volatilityPct).toBeGreaterThan(0.3);
+  });
+
+  it('defaults to BTC when no symbol is provided', async () => {
+    const candlesSpy = vi.fn().mockResolvedValue({
+      data: Array.from({ length: 24 }, (_, index) => ({
+        timestamp: new Date(Date.UTC(2026, 0, 1, index)).toISOString(),
+        open: 100,
+        high: 100.05,
+        low: 99.95,
+        close: 100,
+        volume: 1_000,
+      })),
+      meta: { freshness: { isStale: false, ageMs: 0 }, provider: 'binance' },
+    });
+
+    const result = await getVolatilityTool!.execute(
+      {},
+      makeContext({
+        marketDataRegistry: {
+          binance: { candles: candlesSpy },
+        } as ToolContext['marketDataRegistry'],
+      }),
+    );
+
+    expect(candlesSpy).toHaveBeenCalledWith('BTCUSDT', { interval: '1h', limit: 24 });
+    expect(result.success).toBe(true);
+  });
+
+  it('returns market_data_not_configured when no registry is present', async () => {
+    const result = await getVolatilityTool!.execute({ symbol: 'BTC' }, makeContext());
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('market_data_not_configured');
+  });
+
+  it('passes a null volatilityPct through as a success result (parity with calculateAtrPercent)', async () => {
+    // A single candle → calculateAtrPercent returns null; still a success.
+    const candlesSpy = vi.fn().mockResolvedValue({
+      data: [{
+        timestamp: new Date(Date.UTC(2026, 0, 1, 0)).toISOString(),
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 1_000,
+      }],
+      meta: { freshness: { isStale: false, ageMs: 0 }, provider: 'binance' },
+    });
+
+    const result = await getVolatilityTool!.execute(
+      { symbol: 'BTC' },
+      makeContext({
+        marketDataRegistry: {
+          binance: { candles: candlesSpy },
+        } as ToolContext['marketDataRegistry'],
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({ ok: true, volatilityPct: null });
   });
 });
 

@@ -522,3 +522,43 @@ export function detectCHOCH(
 
   return null;
 }
+
+// ─── ATR% (Volatility) ─────────────────────────────────────────────────────────
+
+/**
+ * Average True Range as a percent of the last close — the volatility measure
+ * that feeds adaptive tick cadence (a low ATR% widens the tick interval, a high
+ * ATR% narrows it). Returns null when there is insufficient data (<2 candles) or
+ * the last close is non-finite/<=0.
+ *
+ * Uses the last min(14, len) candles; for each candle the true range is
+ * max(high-low, |high-prevClose|, |low-prevClose|) with prevClose = own close
+ * for the first sampled candle. ATR = mean true range; ATR% = (ATR/lastClose)*100.
+ */
+export function calculateAtrPercent(candles: PriceCandle[]): number | null {
+  if (candles.length < 2) {
+    return null;
+  }
+
+  const sample = candles.slice(-Math.min(14, candles.length));
+  let totalTrueRange = 0;
+
+  for (let index = 0; index < sample.length; index++) {
+    const candle = sample[index]!;
+    const previousClose = index === 0 ? candle.close : sample[index - 1]!.close;
+    const trueRange = Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - previousClose),
+      Math.abs(candle.low - previousClose),
+    );
+    totalTrueRange += trueRange;
+  }
+
+  const lastClose = sample[sample.length - 1]!.close;
+  if (!Number.isFinite(lastClose) || lastClose <= 0) {
+    return null;
+  }
+
+  const atr = totalTrueRange / sample.length;
+  return (atr / lastClose) * 100;
+}

@@ -13,6 +13,7 @@ import {
   detectSwingPoints,
   classifyStructure,
   detectCHOCH,
+  calculateAtrPercent,
   type SwingPoint,
 } from './indicators.js';
 import type { PriceCandle } from './types.js';
@@ -625,5 +626,51 @@ describe('detectCHOCH', () => {
     const swings = [sp(2, 120, 'high')]; // level never broken
     const result = detectCHOCH(candles, swings, 'bearish', 5);
     expect(result).toBeNull();
+  });
+});
+
+// ─── ATR% (Volatility) ─────────────────────────────────────────────────────────
+
+describe('calculateAtrPercent', () => {
+  const lowVolCandles: PriceCandle[] = Array.from({ length: 14 }, (_, index) => ({
+    timestamp: new Date(Date.UTC(2026, 5, 8, index)).toISOString(),
+    open: 100,
+    high: 100.05,
+    low: 99.95,
+    close: 100,
+    volume: 1_000,
+  }));
+
+  const highVolCandles: PriceCandle[] = Array.from({ length: 14 }, (_, index) => ({
+    timestamp: new Date(Date.UTC(2026, 5, 8, index)).toISOString(),
+    open: 100,
+    high: 102,
+    low: 98,
+    close: 100,
+    volume: 1_000,
+  }));
+
+  it('returns null for fewer than 2 candles', () => {
+    expect(calculateAtrPercent([])).toBeNull();
+    expect(calculateAtrPercent(lowVolCandles.slice(0, 1))).toBeNull();
+  });
+
+  it('reports a lower ATR% for a low-volatility candle set than a high-volatility one', () => {
+    const low = calculateAtrPercent(lowVolCandles);
+    const high = calculateAtrPercent(highVolCandles);
+    expect(low).not.toBeNull();
+    expect(high).not.toBeNull();
+    // Tight 0.1-wide band around close 100 → ~0.1% ATR; wide 4-wide band → ~4%.
+    expect(low!).toBeLessThan(0.3);
+    expect(high!).toBeGreaterThan(0.3);
+    expect(high!).toBeGreaterThan(low!);
+  });
+
+  it('returns null when the last close is not positive', () => {
+    const candles: PriceCandle[] = [
+      { timestamp: '', open: 1, high: 1, low: 0, close: 1, volume: 100 },
+      { timestamp: '', open: 0, high: 1, low: 0, close: 0, volume: 100 },
+    ];
+    expect(calculateAtrPercent(candles)).toBeNull();
   });
 });

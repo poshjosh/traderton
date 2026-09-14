@@ -50,6 +50,7 @@ export {
   detectSwingPoints,
   classifyStructure,
   detectCHOCH,
+  calculateAtrPercent,
   type SwingPoint,
   type MarketStructureFromSwings,
   type ChochSignal,
