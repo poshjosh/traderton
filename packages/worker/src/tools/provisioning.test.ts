@@ -325,6 +325,123 @@ describe('provision_venue_account', () => {
     expect(envelope).not.toContain('secret-value');
   });
 
+  // -- GENERATE mode (D1-3b): mint the keypair Traderton-side --
+
+  it('generate mode for hyperliquid mints + stores + returns only the public address (never secrets)', async () => {
+    const ctx = makeCtx();
+    const res = await provisionTool.execute(
+      { venue: 'hyperliquid', label: 'minted-hl', generate: { network: 'Hyperliquid' } },
+      ctx,
+    );
+
+    expect(res.success).toBe(true);
+    const data = res.data as Record<string, unknown>;
+    expect(data.venueAccountId).toBeDefined();
+    expect(data.venue).toBe('hyperliquid');
+    expect(data.label).toBe('minted-hl');
+
+    // The PUBLIC wallet is surfaced (address + network) so the owner can fund it.
+    const wallet = data.wallet as { address: string; network: string };
+    expect(wallet).toBeDefined();
+    expect(wallet.address).toMatch(/^0x[0-9a-f]{40}$/i);
+    expect(wallet.network).toBe('Hyperliquid');
+
+    // Rows written owner-keyed + linked; credential stored encrypted.
+    expect(credentialInsert?.ownerId).toBe(OWNER_ID);
+    expect(venueAccountInsert?.ownerId).toBe(OWNER_ID);
+    expect(venueAccountInsert?.credentialId).toBe(credentialInsert?.id);
+
+    // Encrypt-at-rest: the minted private key/secret is stored encrypted — the
+    // stored blob is NOT the plaintext. Decrypt with the known key to confirm the
+    // minted secret round-trips into storage but never into the result.
+    const { decryptCredential } = await import('../crypto.js');
+    const decrypted = JSON.parse(decryptCredential(credentialInsert!.encryptedData as string, VALID_KEY)) as {
+      apiKey: string;
+      secret: string;
+      walletAddress: string;
+    };
+    // The stored walletAddress is the canonicalized (lowercased) form of the
+    // returned checksummed public address — same key, different casing.
+    expect(decrypted.walletAddress.toLowerCase()).toBe(wallet.address.toLowerCase());
+    expect(decrypted.secret).toMatch(/^0x[0-9a-f]{64}$/i); // the minted EVM private key
+    expect(credentialInsert?.encryptionMeta).toMatchObject({ algorithm: 'aes-256-gcm' });
+    const encrypted = credentialInsert?.encryptedData as string;
+    expect(encrypted).not.toContain(decrypted.secret);
+
+    // CUSTODY: the private key/secret NEVER appears in the result envelope.
+    const envelope = JSON.stringify(res);
+    expect(envelope).not.toContain(decrypted.secret);
+    expect(envelope).not.toContain('secret');
+    expect(envelope).not.toContain('privateKey');
+  });
+
+  it('generate mode for jupiter sets venueAccountRef to the minted Solana address (and returns it)', async () => {
+    const ctx = makeCtx();
+    const res = await provisionTool.execute(
+      { venue: 'jupiter', label: 'minted-jup', generate: { network: 'Solana' } },
+      ctx,
+    );
+
+    expect(res.success).toBe(true);
+    const data = res.data as Record<string, unknown>;
+    const wallet = data.wallet as { address: string; network: string };
+    expect(wallet.network).toBe('Solana');
+    // The minted Solana address is a base58 public key AND becomes the venueAccountRef.
+    expect(wallet.address).toMatch(/^[1-9A-HJ-NP-Za-km-z]+$/);
+    expect(venueAccountInsert?.venueAccountRef).toBe(wallet.address);
+
+    // The minted Solana private key is stored encrypted, never returned.
+    const { decryptCredential } = await import('../crypto.js');
+    const decrypted = JSON.parse(decryptCredential(credentialInsert!.encryptedData as string, VALID_KEY)) as {
+      privateKey: string;
+    };
+    expect(typeof decrypted.privateKey).toBe('string');
+    const envelope = JSON.stringify(res);
+    expect(envelope).not.toContain(decrypted.privateKey);
+    expect(envelope).not.toContain('privateKey');
+  });
+
+  it('rejects when BOTH secrets and generate are provided (invalid credential mode)', async () => {
+    const ctx = makeCtx();
+    const res = await provisionTool.execute(
+      {
+        venue: 'hyperliquid',
+        label: 'x',
+        secrets: { apiKey: 'k', secret: 's', walletAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+        generate: { network: 'Hyperliquid' },
+      },
+      ctx,
+    );
+    expect(res.success).toBe(false);
+    expect(res.fault).toBe(false);
+    expect(res.errorCode).toBe('provision.validation_error.invalid_credential_mode');
+    expect(credentialInsert).toBeUndefined();
+  });
+
+  it('rejects when NEITHER secrets nor generate is provided (invalid credential mode)', async () => {
+    const ctx = makeCtx();
+    const res = await provisionTool.execute(
+      { venue: 'hyperliquid', label: 'x' },
+      ctx,
+    );
+    expect(res.success).toBe(false);
+    expect(res.fault).toBe(false);
+    expect(res.errorCode).toBe('provision.validation_error.invalid_credential_mode');
+    expect(credentialInsert).toBeUndefined();
+  });
+
+  it('rejects generate mode for an unsupported venue with wallet_generation.unsupported_provider', async () => {
+    const ctx = makeCtx();
+    const res = await provisionTool.execute(
+      { venue: 'bybit', label: 'x', generate: { network: 'Bybit' } },
+      ctx,
+    );
+    expect(res.success).toBe(false);
+    expect(res.fault).toBe(false); // caller error → maps to validation.invalid_payload
+    expect(res.errorCode).toBe('wallet_generation.unsupported_provider');
+    expect(credentialInsert).toBeUndefined();
+  });
+
   // -- Persistence failure --
 
   it('reports a persist failure when the transaction throws', async () => {

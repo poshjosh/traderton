@@ -165,6 +165,11 @@ async function invoke(app: ReturnType<typeof makeApp>, envelope: Envelope) {
 describe('provision_venue_account boundary invoke', () => {
   beforeEach(() => {
     process.env['CREDENTIAL_ENCRYPTION_KEY'] = ENCRYPTION_KEY;
+    // Reset captured inserts so a test that rejects BEFORE the context factory
+    // runs (e.g. payload-schema rejection) does not observe a prior test's rows.
+    credentialInsert = undefined;
+    venueAccountInsert = undefined;
+    insertOrder = [];
   });
 
   it('a signed invoke creates encrypted rows and returns { venueAccountId } (metadata only)', async () => {
@@ -210,6 +215,53 @@ describe('provision_venue_account boundary invoke', () => {
     expect(envelopeStr).not.toContain('secret-key');
     expect(envelopeStr).not.toContain('secret-value');
 
+    await app.close();
+  });
+
+  it('generate mode mints Traderton-side: creates encrypted rows and returns only the public wallet address', async () => {
+    const app = makeApp();
+    const res = await invoke(
+      app,
+      validEnvelope({ payload: { venue: 'hyperliquid', label: 'minted', generate: { network: 'Hyperliquid' } } }),
+    );
+
+    const body = res.json();
+    expect(body.outcome.kind).toBe('success');
+    expect(body.outcome.payload.venueAccountId).toBeDefined();
+    // The PUBLIC wallet address is surfaced so the owner can fund it.
+    const wallet = body.outcome.payload.wallet as { address: string; network: string };
+    expect(wallet.address).toMatch(/^0x[0-9a-f]{40}$/i);
+    expect(wallet.network).toBe('Hyperliquid');
+
+    // The minted secret is stored ENCRYPTED and NEVER appears in the envelope.
+    const encrypted = credentialInsert?.encryptedData as string;
+    const decrypted = JSON.parse(decryptCredential(encrypted, ENCRYPTION_KEY)) as { secret: string };
+    expect(decrypted.secret).toMatch(/^0x[0-9a-f]{64}$/i);
+    const envelopeStr = JSON.stringify(body);
+    expect(envelopeStr).not.toContain(decrypted.secret);
+    expect(envelopeStr).not.toContain('privateKey');
+
+    await app.close();
+  });
+
+  it('providing both secrets and generate → validation.invalid_payload (no rows written)', async () => {
+    const app = makeApp();
+    const res = await invoke(
+      app,
+      validEnvelope({
+        payload: {
+          venue: 'hyperliquid',
+          label: 'x',
+          secrets: { apiKey: 'k', secret: 's', walletAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+          generate: { network: 'Hyperliquid' },
+        },
+      }),
+    );
+    const body = res.json();
+    expect(body.outcome.kind).toBe('failure');
+    expect(body.outcome.code).toBe('validation.invalid_payload');
+    expect(credentialInsert).toBeUndefined();
+    expect(venueAccountInsert).toBeUndefined();
     await app.close();
   });
 

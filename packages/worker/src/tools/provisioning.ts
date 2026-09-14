@@ -31,6 +31,7 @@ import { convertZodToJsonSchema } from './registry.js';
 import { encryptCredential, getEncryptionKey } from '../crypto.js';
 import { findProviderRegistryEntry } from '../providers/registry.js';
 import { canonicalizeProviderSecrets, validateProviderSecrets, type ProviderValidationError } from '../providers/validator.js';
+import { generateWallet, WalletGenerationError } from '@traderton/venues';
 
 // --- Copied venue-secret canonicalisation + validation seams (from the copied
 //     credentials route). Thin wrappers over the un-quarantined providers logic. ---
@@ -81,14 +82,35 @@ function isValidSolanaAddress(address: string): boolean {
 
 // --- The tool ---
 
-const ProvisionVenueAccountParamsSchema = z.object({
+// Base object shape. The mutual-exclusion rule is applied via `.refine()` below;
+// the JSON-schema derivation uses this base object so the required-field
+// normalisation (which only unwraps a plain ZodObject) stays correct.
+const ProvisionVenueAccountObject = z.object({
   venue: z.string().min(1),
   label: z.string().min(1),
-  /** The secrets to encrypt (API key, secret, wallet key, etc.) — never logged or returned. */
-  secrets: z.record(z.string()),
+  /**
+   * MANUAL mode: the caller-supplied secrets to encrypt (API key, secret,
+   * wallet key, etc.) — never logged or returned. Omit when using GENERATE mode.
+   */
+  secrets: z.record(z.string()).optional(),
+  /**
+   * GENERATE mode: mint the trading keypair Traderton-side (custody follows the
+   * venue caller). `network` labels the generated wallet (operator-config concern
+   * resolved by the pre-boundary caller). Mutually exclusive with `secrets`.
+   */
+  generate: z.object({ network: z.string().min(1) }).optional(),
   /** Venue-specific reference (e.g. a Solana wallet address for Jupiter). */
   venueAccountRef: z.string().optional(),
 });
+
+// EXACTLY ONE of manual `secrets` / `generate` must be provided.
+const ProvisionVenueAccountParamsSchema = ProvisionVenueAccountObject.refine(
+  (v) => (v.secrets != null) !== (v.generate != null),
+  {
+    message: 'Provide exactly one of `secrets` (manual) or `generate` (mint Traderton-side)',
+    path: ['secrets'],
+  },
+);
 
 type ProvisionVenueAccountParams = z.infer<typeof ProvisionVenueAccountParamsSchema>;
 
@@ -108,12 +130,12 @@ const provisionVenueAccountTool: AgentTool<TradingToolContext> = {
   // CREATES the owner's first venue account, so requiring one would deadlock.
   ownerScopedNoVenue: true,
   description:
-    "Provision a venue account with its trading credential in one step: validate + encrypt the venue secrets, store them, and create the linked venue account. Returns the new venueAccountId (never the secrets). Use this to onboard an owner's exchange/wallet before creating bots or submitting decisions.",
+    "Provision a venue account with its trading credential in one step: either supply the venue secrets (manual) or mint a fresh trading keypair Traderton-side (generate); then validate + encrypt them, store them, and create the linked venue account. Returns the new venueAccountId (never the secrets); generate mode also returns the new wallet's public address to fund. Use this to onboard an owner's exchange/wallet before creating bots or submitting decisions.",
   parametersSchema: ProvisionVenueAccountParamsSchema,
-  parameters: convertZodToJsonSchema(ProvisionVenueAccountParamsSchema),
+  parameters: convertZodToJsonSchema(ProvisionVenueAccountObject),
   category: 'write-database',
   promptGuidance:
-    'Provide the venue (e.g. "hyperliquid", "jupiter", "1inch", "bybit"), a display label, and the venue secrets. For Jupiter, venueAccountRef must be a valid Solana wallet address. Secrets are encrypted at rest and are never returned.',
+    'Provide the venue (e.g. "hyperliquid", "jupiter", "1inch", "bybit") and a display label, then EITHER `secrets` (manual: supply the venue credentials to encrypt) OR `generate: { network }` (mint the trading keypair Traderton-side) — exactly one. For manual Jupiter, venueAccountRef must be a valid Solana wallet address; in generate mode the minted address is used automatically. Secrets are encrypted at rest and are never returned; generate mode returns only the new wallet\'s public address.',
   async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
     const params = rawParams as ProvisionVenueAccountParams;
 
@@ -136,8 +158,61 @@ const provisionVenueAccountTool: AgentTool<TradingToolContext> = {
     const db = ctx.db as Database;
     const ownerId = ctx.ownerId;
 
+    // 0. Credential-mode resolution (D1-3b). EXACTLY ONE of manual `secrets` /
+    //    `generate` must be provided. The boundary schema (`.refine`) already
+    //    enforces this, but the tool re-checks so a direct in-process caller
+    //    cannot bypass it. A mode-shape violation is a caller error (fault:false).
+    const hasSecrets = params.secrets != null;
+    const hasGenerate = params.generate != null;
+    if (hasSecrets === hasGenerate) {
+      return validationFailure({
+        field: 'secrets',
+        code: 'provision.validation_error.invalid_credential_mode',
+        message: 'Provide exactly one of `secrets` (manual) or `generate` (mint Traderton-side)',
+        params: { hasSecrets, hasGenerate },
+      });
+    }
+
+    // GENERATE mode: mint the trading keypair Traderton-side BEFORE
+    // canonicalise/validate. Custody follows the venue caller → Traderton.
+    // The generated secrets replace params.secrets for the rest of the flow
+    // (canonicalize → validate → encrypt → store). The private key is used
+    // ONLY to encrypt-at-rest; only the PUBLIC address is ever surfaced.
+    let rawSecrets: Record<string, string>;
+    let generatedWalletAddress: string | null = null;
+    let generatedNetwork: string | null = null;
+    if (params.generate) {
+      try {
+        const generated = generateWallet({
+          provider: params.venue,
+          enabled: true,
+          network: params.generate.network,
+        });
+        // GeneratedWalletSecrets is a union of string-valued fields — safe to
+        // treat as Record<string,string> for the canonicalize/validate flow.
+        rawSecrets = { ...generated.secrets } as Record<string, string>;
+        generatedWalletAddress = generated.wallet.address;
+        generatedNetwork = generated.wallet.network;
+      } catch (err) {
+        // Unsupported/disabled provider → a clean validation-style failure
+        // (caller error, not a fault). Never surface secrets.
+        if (err instanceof WalletGenerationError) {
+          return validationFailure({
+            field: 'generate',
+            code: err.code,
+            message: err.message,
+            params: { venue: params.venue },
+          });
+        }
+        throw err;
+      }
+    } else {
+      // MANUAL mode. The schema refinement guarantees secrets is present here.
+      rawSecrets = params.secrets!;
+    }
+
     // 1. Canonicalise + validate the venue secrets (copied parity logic).
-    const normalizedSecrets = canonicalizeVenueSecrets(params.venue, params.secrets);
+    const normalizedSecrets = canonicalizeVenueSecrets(params.venue, rawSecrets);
     const venueSecretErrors = validateVenueSecrets(params.venue, normalizedSecrets);
     if (venueSecretErrors.length > 0) {
       return validationFailure(venueSecretErrors[0]!);
@@ -145,7 +220,12 @@ const provisionVenueAccountTool: AgentTool<TradingToolContext> = {
 
     // 2. Venue-specific venueAccountRef enforcement (copied Jupiter rule verbatim).
     //    Normalise early so the trimmed value is used for validation + persistence.
+    //    In GENERATE mode the minted wallet address IS the venueAccountRef for
+    //    Jupiter (mirrors herobids `generated.wallet.address`).
     let venueAccountRef = params.venueAccountRef != null ? params.venueAccountRef.trim() : null;
+    if (params.venue === 'jupiter' && generatedWalletAddress) {
+      venueAccountRef = generatedWalletAddress;
+    }
     if (params.venue === 'jupiter') {
       const ref = venueAccountRef ?? '';
       if (!ref) {
@@ -235,13 +315,20 @@ const provisionVenueAccountTool: AgentTool<TradingToolContext> = {
       };
     }
 
-    // 6. Metadata-only success — NEVER the secrets.
+    // 6. Metadata-only success — NEVER the secrets. In GENERATE mode ADD the
+    //    minted wallet's PUBLIC address + network so the caller can surface it
+    //    to the owner to fund. The private key/secrets are never returned.
+    const wallet =
+      generatedWalletAddress != null
+        ? { address: generatedWalletAddress, network: generatedNetwork }
+        : null;
     return {
       success: true,
       data: {
         venueAccountId,
         venue: params.venue,
         label: params.label,
+        wallet,
       },
     };
   },
