@@ -441,12 +441,18 @@ owner-scoped repo methods (`getBotByIdForOwner` / `getBotsByOwner`, the same the
   ALL bots owned by the subject owner (`getBotsByOwner`); `fills` where
   `actorType='bot' AND actorId IN ownerBotIds` (+ optional bounds); empty owner-bots
   → `[]`. Parity with `/export/trades`.
-- **`get_owner_positions`** — payload `{}`; result `{ ok: true, positions: PositionRow[] }`.
+- **`get_owner_positions`** — payload `{ botIds?: string[], from?: string(ISO), to?: string(ISO), limit?: number }`
+  (all optional; c4.2-analytics ADDITIVE); result `{ ok: true, positions: PositionRow[] }`.
   ALL owner bots; `positions` where `actorType='bot' AND actorId IN ownerBotIds`.
-  Parity with `/export/bundle` positions read.
-- **`get_owner_journal`** — payload `{}`; result `{ ok: true, events: JournalRow[] }`.
+  When present: `botIds` INTERSECTS ownerBotIds (never widens); `from`/`to` filter
+  `closedAt`; `limit` caps rows. No-arg call → `/export/bundle` positions read parity.
+- **`get_owner_journal`** — payload `{ botIds?: string[], from?: string(ISO), to?: string(ISO), limit?: number }`
+  (all optional; c4.2-analytics ADDITIVE); result `{ ok: true, events: JournalRow[] }`.
   ALL owner bots; `journalEvents` where `actorId IN ownerBotIds` (no `actorType`
-  filter — matches source). Parity with `/export/bundle` journal read.
+  filter — matches source). When present: `botIds` INTERSECTS ownerBotIds (never
+  widens); `from`/`to` filter `createdAt`; `limit` caps rows AND applies
+  `orderBy(desc(createdAt))` (newest first). No-arg call → `/export/bundle` journal
+  read parity (unordered/unlimited).
 
 Scope is the SUBJECT owner (`ownerId`); no caller-supplied id can widen scope
 (single-bot tools gate on ownership first; owner-wide tools scope by the owner's

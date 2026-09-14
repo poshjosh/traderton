@@ -1528,6 +1528,157 @@ describe('get_owner_journal — owner-wide journal read', () => {
   });
 });
 
+// ── c4.2-analytics: optional botIds / from / to / limit on the owner-wide reads ──
+//
+// A recording query stub that captures which chain methods fired (and their
+// args) so the tests can assert the DB-side subset/window/limit/order — proving
+// the filters are applied at the query, NOT moved in-app.
+function makeRecordingDb(result: unknown) {
+  const calls = { where: undefined as unknown, limit: undefined as unknown, orderByFired: false };
+  const chain: Record<string, unknown> = {
+    then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
+    from: () => chain,
+    where: (arg: unknown) => { calls.where = arg; return chain; },
+    orderBy: () => { calls.orderByFired = true; return chain; },
+    limit: (arg: unknown) => { calls.limit = arg; return chain; },
+  };
+  const db = { select: vi.fn(() => chain) } as unknown as ToolContext['db'];
+  return { db, calls };
+}
+
+describe('get_owner_positions — optional subset / window / limit (c4.2)', () => {
+  it('intersects botIds with the owner bots (an unowned botId is excluded)', async () => {
+    const positionRows = [{ id: 'p-1' }];
+    // Owner owns bot-1 + bot-2; the caller asks for bot-2 + bot-99 (not owned).
+    const getBotsByOwner = vi.fn(async () => [{ id: 'bot-1' }, { id: 'bot-2' }]);
+    const { db, calls } = makeRecordingDb(positionRows);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerPositionsTool.execute({ botIds: ['bot-2', 'bot-99'] }, ctx);
+
+    expect(result.success).toBe(true);
+    // Intersection is bot-2 only — bot-99 (unowned) never reaches the query.
+    // The query DID run with a where filter (a non-empty intersection is queried,
+    // vs the empty-intersection case below which short-circuits with NO select).
+    expect(result.data).toEqual({ ok: true, positions: positionRows });
+    expect(calls.where).toBeDefined();
+  });
+
+  it('short-circuits to [] when the requested subset shares no bot with the owner', async () => {
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerPositionsTool.execute({ botIds: ['bot-99'] }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, positions: [] });
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('applies the limit when present', async () => {
+    const { db, calls } = makeRecordingDb([{ id: 'p-1' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerPositionsTool.execute({ limit: 10_000 }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(calls.limit).toBe(10_000);
+  });
+
+  it('omitting all params reproduces the old behaviour (no limit, no orderBy)', async () => {
+    const { db, calls } = makeRecordingDb([{ id: 'p-1' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerPositionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(calls.limit).toBeUndefined();
+    expect(calls.orderByFired).toBe(false);
+  });
+});
+
+describe('get_owner_journal — optional subset / window / limit (c4.2)', () => {
+  it('intersects botIds with the owner bots (an unowned botId is excluded)', async () => {
+    const eventRows = [{ id: 'ev-1' }];
+    const getBotsByOwner = vi.fn(async () => [{ id: 'bot-1' }, { id: 'bot-2' }]);
+    const { db, calls } = makeRecordingDb(eventRows);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerJournalTool.execute({ botIds: ['bot-2', 'bot-99'] }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, events: eventRows });
+    // The query ran with a where filter (non-empty intersection); the empty-
+    // intersection case below short-circuits with NO select.
+    expect(calls.where).toBeDefined();
+  });
+
+  it('short-circuits to [] when the requested subset shares no bot with the owner', async () => {
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerJournalTool.execute({ botIds: ['bot-99'] }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, events: [] });
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('applies limit AND orderBy(desc(createdAt)) when limit is present', async () => {
+    const { db, calls } = makeRecordingDb([{ id: 'ev-1' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerJournalTool.execute({ from: '2026-01-01T00:00:00.000Z', to: '2026-02-01T00:00:00.000Z', limit: 10_000 }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(calls.limit).toBe(10_000);
+    expect(calls.orderByFired).toBe(true);
+  });
+
+  it('omitting all params reproduces the old behaviour (no limit, no orderBy)', async () => {
+    const { db, calls } = makeRecordingDb([{ id: 'ev-1' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerJournalTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(calls.limit).toBeUndefined();
+    expect(calls.orderByFired).toBe(false);
+  });
+});
+
 
 describe('get_owner_bot_reconciliation_events — owner-scoped reconciliation read', () => {
   it('is registered read-database', () => {

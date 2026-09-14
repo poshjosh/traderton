@@ -1277,16 +1277,32 @@ const getOwnerFillsTool: AgentTool<TradingToolContext> = {
 // Reproduces herobids /export/bundle positions read (exports.ts): resolve ALL
 // bots owned by the user, then positions where actorType='bot' AND actorId IN
 // ownerBotIds. Empty ownerBotIds short-circuits to [].
+//
+// ADDITIVE optional params (c4.2-analytics): `botIds` subsets the owner-bot set
+// (INTERSECTION with ownerBotIds — a caller can never widen beyond owner scope),
+// `from`/`to` window on `closedAt` (matching herobids' analytics positions query,
+// which time-filters on closedAt — NOT createdAt), and `limit` caps the result.
+// Each filter/cap is applied ONLY when its param is present, so the existing
+// no-arg /export/bundle caller behaves EXACTLY as before (all owner-bot rows,
+// actorType='bot', no time filter, no limit, no orderBy).
 
-const GetOwnerPositionsParamsSchema = z.object({});
+const GetOwnerPositionsParamsSchema = z.object({
+  botIds: z.array(z.string()).optional().describe('Restrict to these bot ids (intersected with the owner\'s bots — cannot widen beyond owner scope)'),
+  from: z.string().optional().describe('Only positions closed at or after this ISO timestamp (filters closedAt)'),
+  to: z.string().optional().describe('Only positions closed at or before this ISO timestamp (filters closedAt)'),
+  // coerce: callers may send numbers as strings
+  limit: z.coerce.number().int().positive().optional().describe('Max positions to return'),
+});
 
 const getOwnerPositionsTool: AgentTool<TradingToolContext> = {
   name: 'get_owner_positions',
-  description: 'Get all positions across every bot owned by this owner. Only returns this owner\'s own data.',
+  description: 'Get positions across bots owned by this owner. Optionally restrict to a subset of bot ids, a closedAt time window, and a row limit. Only returns this owner\'s own data.',
   parametersSchema: GetOwnerPositionsParamsSchema,
   parameters: convertZodToJsonSchema(GetOwnerPositionsParamsSchema),
   category: 'read-database',
-  async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botIds, from, to, limit } = params as z.infer<typeof GetOwnerPositionsParamsSchema>;
+
     if (!ctx.botRepo) {
       return { success: false, error: 'direct db access not available', fault: false };
     }
@@ -1298,19 +1314,31 @@ const getOwnerPositionsTool: AgentTool<TradingToolContext> = {
     }
 
     const ownerBots = await ctx.botRepo.getBotsByOwner(ctx.ownerId);
-    const ownerBotIds = ownerBots.map((b) => b.id);
+    let ownerBotIds = ownerBots.map((b) => b.id);
 
-    // Copied from herobids /export/bundle: no owned bots → empty result.
+    // INTERSECT with the requested subset when provided — never widen beyond the
+    // owner's bots, so a caller cannot read another owner's rows via botIds.
+    if (botIds) {
+      const requested = new Set(botIds);
+      ownerBotIds = ownerBotIds.filter((id) => requested.has(id));
+    }
+
+    // Copied from herobids /export/bundle: no owned (in-scope) bots → empty result.
     if (ownerBotIds.length === 0) {
       return { success: true, data: { ok: true, positions: [] } };
     }
 
     const db = ctx.db as Database;
 
-    const positionRows = await db
-      .select()
-      .from(positions)
-      .where(and(eq(positions.actorType, 'bot'), inArray(positions.actorId, ownerBotIds)));
+    const conditions = [eq(positions.actorType, 'bot'), inArray(positions.actorId, ownerBotIds)];
+    // Positions time-filter is on closedAt (matches the herobids analytics query).
+    if (from) conditions.push(gte(positions.closedAt, new Date(from)));
+    if (to) conditions.push(lte(positions.closedAt, new Date(to)));
+
+    // Apply the limit only when present; the no-arg caller stays unlimited.
+    const positionRows = limit !== undefined
+      ? await db.select().from(positions).where(and(...conditions)).limit(limit)
+      : await db.select().from(positions).where(and(...conditions));
 
     return { success: true, data: { ok: true, positions: positionRows } };
   },
@@ -1322,16 +1350,32 @@ const getOwnerPositionsTool: AgentTool<TradingToolContext> = {
 // owned by the user, then journalEvents where actorId IN ownerBotIds. Empty
 // ownerBotIds short-circuits to []. The account bundle needs this owner-wide
 // journal read alongside get_owner_fills / get_owner_positions.
+//
+// ADDITIVE optional params (c4.2-analytics): `botIds` subsets the owner-bot set
+// (INTERSECTION with ownerBotIds — never widens beyond owner scope), `from`/`to`
+// window on `createdAt`, and `limit` caps the result. When `limit` is present
+// the query also applies `.orderBy(desc(createdAt))` — MATCHING the herobids
+// analytics journal query (`.orderBy(desc(createdAt)).limit(10_000)`). orderBy is
+// tied to limit so the no-arg /export/bundle caller (which passes none of these)
+// keeps its existing unordered/unlimited behaviour EXACTLY.
 
-const GetOwnerJournalParamsSchema = z.object({});
+const GetOwnerJournalParamsSchema = z.object({
+  botIds: z.array(z.string()).optional().describe('Restrict to these bot ids (intersected with the owner\'s bots — cannot widen beyond owner scope)'),
+  from: z.string().optional().describe('Only events created at or after this ISO timestamp'),
+  to: z.string().optional().describe('Only events created at or before this ISO timestamp'),
+  // coerce: callers may send numbers as strings
+  limit: z.coerce.number().int().positive().optional().describe('Max events to return (newest first when set)'),
+});
 
 const getOwnerJournalTool: AgentTool<TradingToolContext> = {
   name: 'get_owner_journal',
-  description: 'Get all journal events across every bot owned by this owner. Only returns this owner\'s own data.',
+  description: 'Get journal events across bots owned by this owner. Optionally restrict to a subset of bot ids, a createdAt time window, and a row limit (newest first when limited). Only returns this owner\'s own data.',
   parametersSchema: GetOwnerJournalParamsSchema,
   parameters: convertZodToJsonSchema(GetOwnerJournalParamsSchema),
   category: 'read-database',
-  async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botIds, from, to, limit } = params as z.infer<typeof GetOwnerJournalParamsSchema>;
+
     if (!ctx.botRepo) {
       return { success: false, error: 'direct db access not available', fault: false };
     }
@@ -1343,19 +1387,32 @@ const getOwnerJournalTool: AgentTool<TradingToolContext> = {
     }
 
     const ownerBots = await ctx.botRepo.getBotsByOwner(ctx.ownerId);
-    const ownerBotIds = ownerBots.map((b) => b.id);
+    let ownerBotIds = ownerBots.map((b) => b.id);
 
-    // Copied from herobids /export/bundle: no owned bots → empty result.
+    // INTERSECT with the requested subset when provided — never widen beyond the
+    // owner's bots, so a caller cannot read another owner's rows via botIds.
+    if (botIds) {
+      const requested = new Set(botIds);
+      ownerBotIds = ownerBotIds.filter((id) => requested.has(id));
+    }
+
+    // Copied from herobids /export/bundle: no owned (in-scope) bots → empty result.
     if (ownerBotIds.length === 0) {
       return { success: true, data: { ok: true, events: [] } };
     }
 
     const db = ctx.db as Database;
 
-    const eventRows = await db
-      .select()
-      .from(journalEvents)
-      .where(inArray(journalEvents.actorId, ownerBotIds));
+    const conditions = [inArray(journalEvents.actorId, ownerBotIds)];
+    if (from) conditions.push(gte(journalEvents.createdAt, new Date(from)));
+    if (to) conditions.push(lte(journalEvents.createdAt, new Date(to)));
+
+    // orderBy is tied to limit: only the limited path orders (newest first), so
+    // the no-arg /export/bundle caller keeps its unordered/unlimited behaviour.
+    const eventRows = limit !== undefined
+      ? await db.select().from(journalEvents).where(and(...conditions))
+          .orderBy(desc(journalEvents.createdAt)).limit(limit)
+      : await db.select().from(journalEvents).where(and(...conditions));
 
     return { success: true, data: { ok: true, events: eventRows } };
   },
