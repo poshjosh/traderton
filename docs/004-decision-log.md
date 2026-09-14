@@ -1149,3 +1149,15 @@ Grounding the carve-out found `apps/api/src/routes/credentials.ts` (`POST/GET/DE
 **Scope narrowing — `agent_runtime_sessions` is PLATFORM, STAYS LOCAL: settled by parity.** It hard-FKs `agents.id`, is agentId-scoped, written by the agent-container lifecycle, is NOT one of the four D1-c4 trading tables (fills/journal_events/positions/bots), and is absent from `@traderton/db`. So `loadAgentRuntimeSessions`/`sessions.json`/`/export/sessions` stay local (out of D1-c1/D1-c4). D1-c1 re-points FOUR loaders (fills, journal, positions, botIds), not five. Integration note: in evidence-assembler + /export/bundle, the sessions read STAYS a local `loadAgentRuntimeSessions` call alongside the boundary reads — those paths become mixed (expected, not a smell).
 
 **Tool granularity (mechanical, in-plan):** three granular tools `get_agent_fills`/`get_agent_journal_events`/`get_agent_positions` (botIds folded in server-side via the existing `getBotsByCreator('agent',agentId)` = byte-identical to `loadAgentBotIds`); no bundle, no separate botIds tool. Documented Traderton-first (005/006).
+
+
+### D1-cred-Q4 — RESOLVED (2026-09-12, human): REMOVE the standalone /credentials flow ENTIRELY
+Human ruled **A — remove entirely** (not re-point to Traderton). The standalone reusable-venue-credential flow is superseded by the holistic setup flow (`provision_venue_account`, incl. generate mode); greenfield = no data/users to preserve; removal best serves isolation and lets `user_credentials` drop.
+
+**Scope of removal (its own slice, folded into the D1-c4 trading-drop pass):**
+- herobids API: delete `apps/api/src/routes/credentials.ts` (`credentialRoutes`: POST/GET/DELETE/rotate `/credentials`) + its registration in `apps/api/src/index.ts` + `credentials.test.ts`; the credential audit events (`credentialCreatedEvent`/`credentialRotatedEvent`/`credentialDeletedEvent`) usage; `CreateCredentialSchema`/`RotateCredentialSchema`; `findCredentialDependents`/`credential-dependents.ts` if only used here.
+- herobids API: remove the `credentialId`-referencing branches in `accounts.ts` (POST /venue-accounts credentialId validation) and `connections.ts` (POST /connections credentialId validation) — the holistic flow supplies `credentialId=null` and provisions to Traderton; standalone credentialId linking goes away with the endpoint.
+- herobids WEB: remove the Credentials page + route + nav — `apps/web/src/features/credentials/CredentialsPage.tsx` (+ its tests), the `/credentials` route in `app/router.tsx`, the sidebar entry in `app/layout/Sidebar.tsx`, the `credentials` client in `lib/api-client.ts`, the `nav.credentials`/`credentials.*` i18n strings, and the `AgentCapabilityPage` "manage credentials" link. (ProviderSetupForm imports `PROVIDER_TEMPLATES` from CredentialsPage — relocate that constant so setup keeps working.)
+- After removal + the D1-c1/c2/c3 re-points, `user_credentials` has NO remaining writer/reader → drops at D1-c4 (greenfield, empty).
+
+Sequenced as part of the D1-c4 trading-drop pass (it is the last thing keeping `user_credentials` alive alongside the c1–c3 read re-points). Settled — no remaining Q4 ambiguity.
