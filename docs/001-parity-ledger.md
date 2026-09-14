@@ -407,11 +407,15 @@ Decided via the 008 process; traderton `l3-integration`, herobids `consume-trade
   when configured (Traderton tool is a byte-identical copy → parity by construction); read-fallback to
   in-process `riskContractOps` when absent. Completes the risk-limits pair with the `adjust_risk_limits`
   write (fail-closed). herobids `7748c199`.
-- **T2 swap `score_candidate` — approach decided (Option B), BUILD DEFERRED.** Grounded finding: swap
-  scoring is INERT today (evidence path returns null candles for swap; `scoreSwapInProcess` scores empty
-  → no signal; no in-process market-data fetch on this path). So not urgent for isolation; re-pointing
-  would be an improvement (real pool candles) requiring Traderton authoring (`score_candidate` accepts a
-  token + resolves pool behind the boundary). Deferred as its own slice. Orderbook/perp already Met (prior Q2).
+- **T2 swap `score_candidate` — Option B BUILT (C2, 2026-09-12; the earlier "BUILD DEFERRED" is SUPERSEDED).**
+  The swap arm landed with the market-intelligence group's `scannerPoolResolver`: `score_candidate`
+  (`packages/worker/src/tools/strategy.ts`) accepts a held token (`network+tokenAddress`), resolves its
+  canonical pool behind the boundary (`scannerPoolResolver` → `selectCanonicalPool`: highest liquidity,
+  tie-break volume then poolAddress, NO quote-asset constraint = the ratified decision), fetches that
+  pool's candles (`scannerCandleFetcher` → GeckoTerminal), and scores — plus the Option-A `poolAddress`
+  path. Wired in `bin.ts`; proven e2e (`boundary-e2e.ts` swap check, free endpoints); 15/15 strategy tests
+  incl. 7 swap cases. Orderbook/perp already Met (prior Q2). Swap `score_candidate` now at PARITY+improvement
+  (real pool candles). (The old note's "INERT today" reflected a pre-build state; verified stale at C2.)
 - **T3 coordinator discovery-loop re-point — Met; clears the coupling.** `discover_tokens` widened to
   `networks[]` + `maxResults` + reachable `rate_limit.exceeded` (traderton `e3a2e75`; engine already
   multi-network, cross-network dedupe/rank stays behind the boundary — not re-authored). herobids
