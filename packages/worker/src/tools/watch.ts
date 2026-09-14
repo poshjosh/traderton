@@ -729,6 +729,10 @@ const checkWatchesTool: AgentTool<TradingToolContext> = {
 
     const updatedWatches = new Map<string, WatchEntry>();
     const triggered: Array<WatchEntry & { currentPrice: number; priceSource: string; stale: boolean }> = [];
+    // watchIds whose condition went true → false this cycle (edge-down). The
+    // platform monitor uses this to clear its own wake-dedupe key so a
+    // cross-up → reset → cross-up-again sequence isn't wrongly suppressed.
+    const reset: string[] = [];
 
     for (const watch of pinnedWatches) {
       const lookupTarget = getPinnedLookupTarget(watch);
@@ -755,6 +759,7 @@ const checkWatchesTool: AgentTool<TradingToolContext> = {
       // When the condition clears (true → false), remove the watch from the
       // notified set so the next crossing can trigger a fresh escalation.
       if (watch.lastConditionMet === true && !conditionMet) {
+        reset.push(watch.watchId);
         const notifiedKey = `agent:watches:notified:${ctx.agentId}`;
         ctx.redis.srem(notifiedKey, watch.watchId).catch((err: unknown) => {
           logger.warn({ err, watchId: watch.watchId }, 'Failed to clear notified watch on condition reset');
@@ -787,7 +792,7 @@ const checkWatchesTool: AgentTool<TradingToolContext> = {
 
     return {
       success: true,
-      data: { ok: true, triggered, unchecked, totalWatches: watches.length },
+      data: { ok: true, triggered, reset, unchecked, totalWatches: watches.length },
     };
   },
 };

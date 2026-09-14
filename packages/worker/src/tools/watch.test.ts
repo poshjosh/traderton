@@ -429,6 +429,53 @@ describe('check_watches', () => {
     expect(data.unchecked).toHaveLength(1);
     expect(data.unchecked[0]!.symbol).toBe('UNKNOWN');
   });
+
+  it('surfaces edge-down (true → false) watchIds in data.reset', async () => {
+    const getPrice = vi.fn()
+      .mockResolvedValueOnce(okPrice(150))  // watch_token initial: below, not triggered
+      .mockResolvedValueOnce(okPrice(250))  // check_watches #1: crosses above → triggered
+      .mockResolvedValueOnce(okPrice(150)); // check_watches #2: falls back → reset
+    const resolvePriceTarget = vi.fn().mockResolvedValue(okResolve('SOL', 'solana', 150));
+    const ctx = makeCtx({ priceService: { getPrice, resolvePriceTarget } });
+
+    const created = await watchTokenTool.execute(
+      { symbol: 'SOL', chain: 'solana', thresholdPrice: 200, condition: 'above' },
+      ctx,
+    );
+    const watchId = (created.data as { watchId: string }).watchId;
+
+    // Cross-up cycle: triggered (edge-up), no reset.
+    const upResult = await checkWatchesTool.execute({ removeTriggered: false }, ctx);
+    const upData = upResult.data as { triggered: Array<{ watchId: string }>; reset: string[] };
+    expect(upData.triggered).toHaveLength(1);
+    expect(upData.reset).toEqual([]);
+
+    // Reset cycle: edge-down surfaces in reset, triggered is empty.
+    const downResult = await checkWatchesTool.execute({ removeTriggered: false }, ctx);
+    const downData = downResult.data as { triggered: unknown[]; reset: string[] };
+    expect(downData.reset).toContain(watchId);
+    expect(downData.triggered).toHaveLength(0);
+  });
+
+  it('returns an empty reset array on a cycle with no true → false transition', async () => {
+    const getPrice = vi.fn()
+      .mockResolvedValueOnce(okPrice(150))  // watch_token initial: below
+      .mockResolvedValueOnce(okPrice(250))  // check_watches: crosses above → triggered, no reset
+      .mockResolvedValueOnce(okPrice(260)); // check_watches: still above (true → true), no reset
+    const resolvePriceTarget = vi.fn().mockResolvedValue(okResolve('SOL', 'solana', 150));
+    const ctx = makeCtx({ priceService: { getPrice, resolvePriceTarget } });
+
+    await watchTokenTool.execute(
+      { symbol: 'SOL', chain: 'solana', thresholdPrice: 200, condition: 'above' },
+      ctx,
+    );
+
+    const firstResult = await checkWatchesTool.execute({ removeTriggered: false }, ctx);
+    expect((firstResult.data as { reset: string[] }).reset).toEqual([]);
+
+    const secondResult = await checkWatchesTool.execute({ removeTriggered: false }, ctx);
+    expect((secondResult.data as { reset: string[] }).reset).toEqual([]);
+  });
 });
 
 // ── Notified-set integration tests ───────────────────────────────────────

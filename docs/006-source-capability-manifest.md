@@ -68,7 +68,7 @@ apply inside Traderton itself.
 | `search_tokens` | discovery | |
 | `find_instrument` | discovery | |
 | `watch_token` | watch lifecycle | |
-| `check_watches` | watch lifecycle | |
+| `check_watches` | watch lifecycle | Success `data` = `{ ok, triggered[], reset[], unchecked[], totalWatches }`. `reset[]` (watchIds that went true→false this cycle) added for B3-monitor — lets the platform wake-monitor clear its dedupe on reset (parity). |
 | `list_watches` | watch lifecycle | |
 | `remove_watch` | watch lifecycle | |
 | `resolve_watch` | watch lifecycle | |
