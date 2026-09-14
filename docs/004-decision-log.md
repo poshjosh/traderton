@@ -1092,3 +1092,9 @@ Decision agent (Contemplator) verified: `connections.credentialId` is ALREADY as
 
 ### R1 / B7 fail-fast startup guard — ACKNOWLEDGED (2026-09-12, human); removed from pending-ratification
 The B7 fail-fast guard (trading agent + no read boundary → hard boot error instead of silent in-process degrade) was already settled-within-rules (boundary mandatory at cutover; fail-closed is the established posture). Framing it as "pending ratification" was a mislabel. Human acknowledged; the item is CLOSED — no ratify-list entry remains.
+
+
+### D1 open questions — HUMAN APPROVED (2026-09-12)
+- **Q2 (D1-b candle-evidence): APPROVED — Option B (derived-evidence hybrid).** No raw-candle tool; feed derived evidence over existing tools (`get_volatility`/`score_candidate`/`check_regime`), extend one to return the `{start,end}` candle-window. Seam sub-choices delegated to the coordinator.
+- **Q3 (D1-cred): APPROVED — carve-out hybrid.** New herobids-local non-trading credential table + re-point the non-trading paths + backfill non-trading rows (pre-cutover, branch); D2 migrates trading rows; drop the old shared table after D2. Naming/drop-timing sub-choices delegated to the coordinator.
+- Coordinator sub-choice defaults (recorded): Q2 — surface `{start,end}` candle-window on `score_candidate` (it already fetches candles Traderton-side, natural home) rather than `get_volatility`; keep `symbolCandles` as an availability flag (lower parity risk than removing the field). Q3 — new table named `platform_credentials`; the old-table DROP gated strictly AFTER D2 verifies trading-row migration; the transitional `accounts.ts`/`connections.ts` trading-validation re-points belong to the trading-drop workstream (D1-c4 area), NOT D1-cred (they read trading rows, which D2/the drop handle).
