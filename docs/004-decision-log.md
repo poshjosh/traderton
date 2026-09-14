@@ -1104,3 +1104,22 @@ The B7 fail-fast guard (trading agent + no read boundary → hard boot error ins
 The first D1-b herobids attempt re-derived `VolatilityEvidence` consumer-side from the boundary's scalar `volatilityPct`, causing two HIGH defects: **H1** — silent UNIT break: old `averageTrueRange` = ATR in absolute price units; new code put a percentage into the same field the LLM ranker consumes (llm-ranker feeds `averageTrueRange`→`atr`, `volatilityRegime`→`regime` into the prompt). **H2** — authored thresholds: old `volatilityRegime` was classified by PERCENTILE (25/75/95) of the current TR within the candle's own TR distribution (needs the full series); new code invented absolute-ATR% bands (only 0.3 copy-anchored; 1.0/2.0 invented) → violates copy-never-author + shifts label semantics on a consumed value.
 **Root cause:** the percentile classification + absolute-ATR require the full candle TR distribution, which we deliberately keep behind the boundary. So the derivation cannot faithfully happen consumer-side from a scalar.
 **Fix (settled by parity, no ratification):** move the ENTIRE `computeVolatilityEvidence` (ATR over 14 periods + percentile-regime + `percentileValue`) VERBATIM into `@traderton/market-data` (next to `calculateAtrPercent`), and have the boundary volatility read return the full `VolatilityEvidence {averageTrueRange, volatilityRegime, calculationVersion:'1.0.0'}` — derived behind the boundary from the candles it already fetches. herobids consumes the shape verbatim (no consumer-side classification, no invented thresholds, `calculationVersion` stays '1.0.0'). This reproduces herobids `main` exactly → SETTLED BY PARITY (copy-faithful, like B5's ATR% relocation; the B5/B6 derivation-crosses/verdict-stays split). Mechanical sub-choice (extend `get_volatility` to also return the full evidence vs a dedicated tool): coordinator's call, no behaviour impact — extend/add a derived read that returns the copied VolatilityEvidence; keep the existing `{volatilityPct}` shape intact for the agent tick-loop consumer (B5) so that consumer is unaffected. M1 (double score_candidate fetch per assessment) → address in the rework or log as an accepted transitional cost.
+
+
+## No pre-existing production data — greenfield cutover (2026-09-12, human-stated)
+
+**Human stated: "We have no real data. We are starting afresh."** No production/real rows exist
+(no trading-credential, venue-account, bot, fill, journal, or user_credentials rows to migrate).
+The cutover is GREENFIELD — post-cutover, all trading state is created NEW directly in Traderton.
+
+Impact on the D-wave (recorded in CANONICAL-STATE §2.0, 001 D2 row, 011):
+- **D2 (pre-existing row migration) → NO-OP.** Nothing to migrate. Reduces to a "confirm the old
+  tables are empty, then drop" step. The `Deferred (required for cutover)` obligation is satisfied
+  by the absence of data (not by a migration).
+- **D1-cred carve-out → NO backfill step.** The new herobids-local `platform_credentials` table
+  starts empty; there are no non-trading rows to copy. New links land directly in the new table.
+- **`user_credentials` DROP no longer gated on a data migration** — gated only on re-pointing its
+  code consumers (D1-cred non-trading half + the D1-c4 trading-validation re-points); then it drops
+  (empty).
+- **D3/D4 need no data-seeding** — E2E + soak run against freshly-created data.
+- Parity discipline unchanged — parity is measured against herobids `main` BEHAVIOUR, not a dataset.

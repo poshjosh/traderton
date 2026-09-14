@@ -48,6 +48,28 @@ authenticated `ownerId` + `actor`. Repos: `traderton` = `/Users/chinomso.ikwuagw
   verification scaffolding live on branches, per `main`-branch discipline (§4). **Nothing is merged to
   `main` for F**, and the merge gate is unmet (§4).
 
+### 2.0 No pre-existing production data — GREENFIELD cutover (2026-09-12, human-stated; TRUTH-NOW)
+
+**There is NO real/production data. We are starting afresh.** There are no pre-existing
+trading-credential, venue-account, bot, fill, journal, or user_credentials ROWS to migrate.
+This is a **greenfield cutover**: after cutover, all trading links/bots/data are created NEW
+directly in Traderton (via `provision_venue_account`, `create_bot`, the drive path, etc.).
+
+Consequences (binding on the D-wave):
+- **D2 (migrate pre-existing trading-credential + venue-account rows) collapses to a NO-OP** —
+  there are no rows to migrate. It remains as a documented "confirm-empty + drop the old table"
+  step, not a data-migration project. The `Deferred (required for cutover)` obligation is
+  satisfied by the absence of data.
+- **D1-cred carve-out needs NO backfill** — the new herobids-local `platform_credentials` table
+  starts empty; there are no non-trading credential rows to copy over. New non-trading links land
+  in the new table directly.
+- The old shared `user_credentials` table DROP is no longer gated on a data migration — once its
+  code consumers are re-pointed (D1-cred non-trading half + the D1-c4 trading-validation re-points),
+  it can drop (it is empty).
+- **D3/D4 need no data-seeding** — cross-stack E2E + staging soak run against freshly-created data.
+- Nothing else in the parity/copy discipline changes: parity is still measured against herobids
+  `main` BEHAVIOUR, not against any dataset.
+
 ### 2.1 L3 consumption progress (2026-09-12 — supersedes the older §3.1 D4 sub-phasing for CURRENT STATE)
 
 The §3.1 "L3a/b/c/d/e" sub-phasing was the original plan; the actual work has run as a series of
