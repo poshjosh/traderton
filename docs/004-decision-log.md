@@ -979,3 +979,23 @@ The B3 decision (above) set Option D as default and Option C as the fallback "if
 **Prerequisite check (resolved):** the decision agent flagged a possible D1 gap (boundary factory omits `marketDataRegistry`). VERIFIED STALE — `bin.ts:201` DOES wire `marketDataRegistry` into the context (B4's tools already rely on it). No wiring blocker for `get_volatility`.
 
 **Tool shape/name:** `get_volatility` (verb_noun per herobids convention) → `{ ok, volatilityPct: number|null, freshness }`, BTC 1h limit-24, candles fetched behind the boundary, ATR% derived Traderton-side. herobids re-point mirrors B4.
+
+
+## B6 — economic-calendar acquisition + consumption behind the boundary (2026-09-12, decision agent; SETTLED within rules, no ratification; LAND NOW)
+
+**Context.** Human ruled (final, legal-based) the economic calendar is TRADING-ADJACENT → in-scope for isolation, NOT platform. Two herobids sites: ACQUISITION (`index.ts:~1183` — worker constructs `CompositeEconomicCalendarProvider` w/ Scrapfly network fetch + LLM/DOM fallback parser, runs initial warm + `setInterval` refresh warming Redis `market-data:cache:`) and CONSUMPTION (`agent.ts:~1069` provider init + `:~3554` per-tick `getUpcomingEvents({cacheOnly:true})` → `macroEvents`, null-tolerant, non-blocking).
+
+**Decision (Option A, refined).** Move fetch + cache + provider + loop ALL Traderton-side; herobids becomes a pure boundary reader:
+1. **Acquisition (relocate loop → traderton `boundary/src/bin.ts`):** when `appConfig.marketData.economicCalendar.enabled` && `process.env.SCRAPFLY_API_KEY`, construct the copied `CompositeEconomicCalendarProvider` (config assembly copied from herobids index.ts, boundary's `redis` for the `market-data:cache:` cache, `createScrapflyFetch`, `createFallbackCalendarParser` from `appConfig.llm`) + initial warm + `setInterval` refresh. Same `enabled && !key → warn` degrade.
+2. **Seam (new boundary read tool `get_economic_calendar`):** thin `AgentTool` in `@traderton/worker` market-data read set, registered via `buildToolRegistry`; behind the boundary calls the boundary-owned provider with `{cacheOnly:true}` and returns `EconomicCalendarResult {events,...}`; guards provider-presence → `market_data_not_configured` degrade when EC disabled. Authors NO calendar behaviour (provider is copied).
+3. **Consumption (re-point herobids `agent.ts` per-tick):** `tradertonReadBoundary.invoke({toolName:'get_economic_calendar', payload:{}})` → `result.data.events` → `macroEvents`; preserve exact null-tolerant degrade (failure/transport/empty → `macroEvents=null`, warn, block omitted). DELETE herobids EC provider init (agent.ts) + acquisition loop (index.ts) + now-unused imports/interval-clears.
+
+Net: no network fetch, no provider instance in the herobids process. cacheOnly non-blocking read + warm-loop/cacheOnly-read split are copy-faithful to source.
+
+**Rejected:** B (on-demand tool, no cron) — drops the warm loop → first read after cache-miss risks network latency on the tick path (today guaranteed non-blocking cacheOnly) = silent quality degrade; to make B safe you re-add the loop → collapses into A. C (herobids reads Traderton's EC cache directly) — re-introduces shared-state coupling = violates the top isolation rule.
+
+**Sequencing: LAND NOW (not Deferred).** All prerequisites present: provider copied (no authoring); `bin.ts` is a long-lived process w/ runtime + once-per-process init site (loop home); EC/scrapfly/llm config already loaded by `bin.ts`; Scrapfly key is env-var by design (NOT a schema gap); consumer transport generic by tool name; `mapReadResultToToolResult` exists. One cohesive slice; no dependency on the D-wave. Backlog's earlier "Deferred-required/shape TBD" is superseded.
+
+**§9.3 gate:** parity — behaviour (macro events reach context; cacheOnly non-blocking; null-tolerant degrade; warm-loop+cacheOnly-read split) copy-faithful to herobids main; the relocation is the same isolation-enforcing move as B4/B5. Violation check — A enforces isolation, honours copy-never-author (copied provider + relocated loop + thin seam), preserves parity, consistent with the human trading-adjacent ruling (does NOT reclassify as platform). **SETTLED WITHIN THE RULES. No human ratification.**
+
+**Ops prerequisite (not a Gap/degrade):** the boundary process must have `SCRAPFLY_API_KEY` in its env for acquisition to run — identical to the herobids worker requirement today; absent → same warn+empty degrade in both. Record in 001 B6 slice entry.

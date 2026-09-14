@@ -6,6 +6,7 @@ const discoverTokensTool = marketDataTools.find((tool) => tool.name === 'discove
 const searchTokensTool = marketDataTools.find((tool) => tool.name === 'search_tokens');
 const checkRegimeTool = marketDataTools.find((tool) => tool.name === 'check_regime');
 const getVolatilityTool = marketDataTools.find((tool) => tool.name === 'get_volatility');
+const getEconomicCalendarTool = marketDataTools.find((tool) => tool.name === 'get_economic_calendar');
 
 function makeContext(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -370,6 +371,86 @@ describe('get_volatility tool', () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({ ok: true, volatilityPct: null });
+  });
+});
+
+describe('get_economic_calendar tool', () => {
+  it('returns cached events from the provider on a cacheOnly read', async () => {
+    const events = [
+      {
+        time: '2026-06-10T12:30:00Z',
+        currency: 'USD',
+        event: 'CPI m/m',
+        impact: 'high',
+        forecast: '0.3%',
+        previous: '0.2%',
+        sources: ['forex-factory'],
+      },
+    ];
+    const getUpcomingEvents = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { events, fetchedAt: '2026-06-09T00:00:00.000Z', sources: ['forex-factory'] },
+    });
+
+    const result = await getEconomicCalendarTool!.execute(
+      {},
+      makeContext({
+        economicCalendarProvider: { getUpcomingEvents } as ToolContext['economicCalendarProvider'],
+      }),
+    );
+
+    expect(getUpcomingEvents).toHaveBeenCalledWith({ cacheOnly: true });
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      ok: true,
+      events,
+      sources: ['forex-factory'],
+      fetchedAt: '2026-06-09T00:00:00.000Z',
+    });
+  });
+
+  it('treats an empty cached result as a success', async () => {
+    const getUpcomingEvents = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { events: [], fetchedAt: '', sources: [] },
+    });
+
+    const result = await getEconomicCalendarTool!.execute(
+      {},
+      makeContext({
+        economicCalendarProvider: { getUpcomingEvents } as ToolContext['economicCalendarProvider'],
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({ ok: true, events: [] });
+  });
+
+  it('returns economic_calendar_not_configured when no provider is present', async () => {
+    const result = await getEconomicCalendarTool!.execute({}, makeContext());
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('economic_calendar_not_configured');
+    expect(result.retryable).toBe(false);
+  });
+
+  it('maps a provider error to a typed non-fault failure', async () => {
+    const getUpcomingEvents = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { code: 'economic-calendar.fetch_failed', message: 'source unavailable' },
+    });
+
+    const result = await getEconomicCalendarTool!.execute(
+      {},
+      makeContext({
+        economicCalendarProvider: { getUpcomingEvents } as ToolContext['economicCalendarProvider'],
+      }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('source unavailable');
+    expect(result.errorCode).toBe('economic-calendar.fetch_failed');
+    expect(result.retryable).toBe(false);
+    expect(result.fault).toBe(false);
   });
 });
 

@@ -489,6 +489,51 @@ const getMarketOverviewTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- get_economic_calendar ---
+
+const GetEconomicCalendarParamsSchema = z.object({});
+
+const getEconomicCalendarTool: AgentTool<TradingToolContext> = {
+  name: 'get_economic_calendar',
+  description: 'Get upcoming high-impact economic calendar events (cached). Returns events with impact, currency, and scheduled time for macro context.',
+  parametersSchema: GetEconomicCalendarParamsSchema,
+  parameters: convertZodToJsonSchema(GetEconomicCalendarParamsSchema),
+  category: 'read-market-data',
+  async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    if (!ctx.economicCalendarProvider) {
+      return {
+        success: false,
+        error: 'economic_calendar_not_configured',
+        retryable: false,
+      };
+    }
+
+    // cacheOnly read — never triggers a network fetch on the tick path. An empty
+    // events array (cache miss / unconfigured cache) is a valid success. The
+    // background acquisition loop (boundary composition root) owns the fetch.
+    const result = await ctx.economicCalendarProvider.getUpcomingEvents({ cacheOnly: true });
+    if (result.ok) {
+      return {
+        success: true,
+        data: {
+          ok: true,
+          events: result.data.events,
+          sources: result.data.sources,
+          fetchedAt: result.data.fetchedAt,
+        },
+      };
+    }
+
+    return {
+      success: false,
+      error: result.error.message ?? 'economic_calendar_unavailable',
+      errorCode: result.error.code,
+      retryable: false,
+      fault: false,
+    };
+  },
+};
+
 export const marketDataTools: AgentTool<TradingToolContext>[] = [
   searchTokensTool,
   discoverTokensTool,
@@ -496,4 +541,5 @@ export const marketDataTools: AgentTool<TradingToolContext>[] = [
   getVolatilityTool,
   getFundingRatesTool,
   getMarketOverviewTool,
+  getEconomicCalendarTool,
 ];

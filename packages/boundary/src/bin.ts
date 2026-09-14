@@ -22,7 +22,17 @@ import {
   venueAccounts,
 } from '@traderton/db';
 import { createTradingRuntime, loadConfig, createScannerCandleFetcherFromConfig, createScannerPoolResolverFromConfig } from '@traderton/worker';
-import { createProviderRegistry, createPriceService } from '@traderton/market-data';
+import {
+  createProviderRegistry,
+  createPriceService,
+  CompositeEconomicCalendarProvider,
+  RedisProviderResponseCache,
+  TokenBucketRateLimiter,
+  createScrapflyFetch,
+  createFallbackCalendarParser,
+  type ForexFactoryAdapterConfig,
+  type CompositeEconomicCalendarConfig,
+} from '@traderton/market-data';
 import type { RedisEvalClient } from '@traderton/market-data';
 import { createBoundaryApp } from './app.js';
 import { BoundaryConfigSchema, type BoundaryConfig } from './config.js';
@@ -123,6 +133,92 @@ async function main(): Promise<void> {
     ? createPriceService(marketDataRegistry)
     : undefined;
 
+  // ── Economic-calendar acquisition loop (relocated from the herobids worker) ──
+  //    Runs ENTIRELY Traderton-side: this composition root builds the provider,
+  //    warms the shared Redis cache on startup, and refreshes it periodically.
+  //    The `get_economic_calendar` read tool reads that cache exclusively
+  //    (cacheOnly), so agent ticks never block on a network call.
+  //
+  //    The Scrapfly key stays an env var by design (never a schema field).
+  //    The fallback calendar parser's LLM config is likewise sourced from env
+  //    (LLM_BASE_URL / LLM_MODEL / LLM_API_KEY / LLM_TIMEOUT_MS) — the
+  //    trading-only Traderton AppConfigSchema deliberately drops the platform
+  //    `appConfig.llm` block (see packages/worker/src/config.ts), so we mirror
+  //    the Scrapfly env-var seam rather than reintroduce a platform config key.
+  //    The parser is DOM-first; the LLM only activates if Forex Factory changes
+  //    its markup, so these env vars are optional in the common case.
+  const ecConfig = appConfig.marketData?.economicCalendar;
+  const scrapflyApiKey = process.env['SCRAPFLY_API_KEY'];
+  let economicCalendarProvider: CompositeEconomicCalendarProvider | undefined;
+
+  if (ecConfig?.enabled && scrapflyApiKey && appConfig.marketData) {
+    const scrapfly = appConfig.marketData.scrapfly;
+    economicCalendarProvider = new CompositeEconomicCalendarProvider({
+      daysForward: ecConfig.daysForward,
+      minImpact: ecConfig.minImpact,
+      currencies: ecConfig.currencies,
+      maxEvents: ecConfig.maxEventsInContext,
+      forexFactory: {
+        baseUrl: ecConfig.forexFactory.baseUrl,
+        requestTimeoutMs: ecConfig.forexFactory.requestTimeoutMs,
+        requestsPerMinute: ecConfig.forexFactory.requestsPerMinute,
+        userAgent: ecConfig.forexFactory.userAgent,
+        rateLimiter: new TokenBucketRateLimiter({
+          requestsPerMinute: ecConfig.forexFactory.requestsPerMinute,
+        }),
+        fetchFn: createScrapflyFetch({
+          apiKey: scrapflyApiKey,
+          baseUrl: scrapfly.baseUrl,
+          asp: scrapfly.asp,
+          requestTimeoutMs: scrapfly.requestTimeoutMs,
+        }),
+        parseHtmlFn: createFallbackCalendarParser({
+          baseUrl: process.env['LLM_BASE_URL'],
+          model: process.env['LLM_MODEL'] ?? 'anthropic/claude-sonnet-4-5',
+          timeoutMs: Number(process.env['LLM_TIMEOUT_MS'] ?? 60_000),
+          ...(process.env['LLM_API_KEY'] ? { apiKey: process.env['LLM_API_KEY'] } : {}),
+        }),
+      } satisfies ForexFactoryAdapterConfig,
+      cache: new RedisProviderResponseCache(redis, 'market-data:cache:'),
+      cacheTtlMs: ecConfig.cacheTtlMs,
+    } satisfies CompositeEconomicCalendarConfig);
+
+    // Initial fetch on startup — warm the cache before any agent reads it (full
+    // fetch, NOT cacheOnly).
+    economicCalendarProvider.getUpcomingEvents().then((result) => {
+      if (result.ok) {
+        // eslint-disable-next-line no-console
+        console.info(`economic calendar initial cache warmed (${result.data.events.length} events)`);
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn('economic calendar initial fetch failed', result.error);
+      }
+    }).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('economic calendar initial fetch threw', err);
+    });
+
+    // Periodic refresh. The interval lives for process life (no shutdown path in
+    // this composition root — same as the source worker).
+    setInterval(() => {
+      economicCalendarProvider?.getUpcomingEvents().then((result) => {
+        if (result.ok) {
+          // eslint-disable-next-line no-console
+          console.info(`economic calendar cache refreshed (${result.data.events.length} events)`);
+        } else {
+          // eslint-disable-next-line no-console
+          console.warn('economic calendar refresh failed', result.error);
+        }
+      }).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('economic calendar refresh threw', err);
+      });
+    }, ecConfig.refreshIntervalMs);
+  } else if (ecConfig?.enabled && !scrapflyApiKey) {
+    // eslint-disable-next-line no-console
+    console.warn('economic calendar enabled but SCRAPFLY_API_KEY not set — background refresh disabled');
+  }
+
   // ── The idempotency store (F2a repo) injected via the thin dispatcher port ──
   const invocationStore: BoundaryInvocationStore = new BoundaryInvocationRepository(db);
   const retentionMs = boundaryConfig.idempotencyRetentionHours * 60 * 60 * 1000;
@@ -201,6 +297,12 @@ async function main(): Promise<void> {
       marketDataRegistry: marketDataRegistry as unknown as TradingToolContext['marketDataRegistry'],
       marketDataConfig: marketDataConfig as unknown as TradingToolContext['marketDataConfig'],
       priceService: priceService as unknown as TradingToolContext['priceService'],
+      // Economic-calendar read provider for get_economic_calendar. The SAME
+      // single instance is threaded into every invocation — it is a cache reader
+      // (cacheOnly on the tick path); the background loop above owns the fetch.
+      // Undefined-when-disabled preserves the `economic_calendar_not_configured`
+      // degrade.
+      economicCalendarProvider: economicCalendarProvider as unknown as TradingToolContext['economicCalendarProvider'],
       // Raw Drizzle handle for tools that write tables directly (provisioning).
       db,
     };

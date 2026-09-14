@@ -11,6 +11,7 @@
 // platform `ToolContext` via the platform `AgentTool` alias in ../tools.ts.
 
 import type { z } from 'zod';
+import type { EconomicCalendarProvider } from '../ports/economic-calendar.js';
 
 /**
  * Tool category system — uses composite categories for fine-grained capability control.
@@ -301,6 +302,17 @@ export interface TradingToolContext {
    * cannot depend on @herobids/db.
    */
   db?: unknown;
+  /**
+   * Economic-calendar read provider for `get_economic_calendar`. The boundary
+   * composition root owns the acquisition loop (fetch + Redis cache + periodic
+   * refresh) and threads the SAME single provider instance into every
+   * invocation — the tool only ever performs a cache-only read
+   * (`getUpcomingEvents({ cacheOnly: true })`), so no network call happens on
+   * the tick path. Optional — the tool degrades to
+   * `economic_calendar_not_configured` when absent (mirrors the
+   * `market_data_not_configured` degrade).
+   */
+  economicCalendarProvider?: EconomicCalendarProvider;
 }
 
 /**
