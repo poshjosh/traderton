@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gte, inArray, lte, sql, sum } from 'drizzle-orm';
 import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig } from '@traderton/domain';
 import type { Database } from '@traderton/db';
-import { fills, journalEvents, positions, bots, venueAccounts, FillRepository, PositionRepository, PgJournal } from '@traderton/db';
+import { fills, journalEvents, positions, bots, venueAccounts, FillRepository, PositionRepository, PgJournal, ReconciliationEventRepository } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
 import { createLogger } from '../logger.js';
 
@@ -1151,6 +1151,76 @@ const getOwnerBotPositionsTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- get_owner_bot_reconciliation_events ---
+//
+// Reproduces herobids /bots/:id/reconciliation-events (reconciliation.ts):
+// resolves the OWNED bot → its venueAccountId server-side, then reads
+// `reconciliation_events` by venue account (reconciliation is venue-account-
+// scoped, not actor-scoped). `reconciliation_events` is a Traderton trading
+// table — this makes the herobids-local read boundary-owned. Query body copied
+// from herobids `ReconciliationEventRepository.getByVenueAccount` (same
+// signature/ordering as the Traderton repo). Guards + not_found.resource mirror
+// the get_owner_bot_* family.
+
+const GetOwnerBotReconciliationEventsParamsSchema = z.object({
+  botId: z.string().min(1).describe('ID of the bot to query'),
+  // coerce: LLMs may send numbers as strings
+  limit: z.coerce.number().int().positive().optional().describe('Max events to return (default 100)'),
+  offset: z.coerce.number().int().nonnegative().optional().describe('Number of events to skip (default 0)'),
+  since: z.string().optional().describe('ISO date — only include events at or after this time'),
+});
+
+const getOwnerBotReconciliationEventsTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_bot_reconciliation_events',
+  description: 'Get reconciliation events for a specific bot (via its venue account). Only works for bots owned by this owner.',
+  parametersSchema: GetOwnerBotReconciliationEventsParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerBotReconciliationEventsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botId, limit, offset, since } = params as z.infer<typeof GetOwnerBotReconciliationEventsParamsSchema>;
+
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const bot = await ctx.botRepo.getBotByIdForOwner(botId, ctx.ownerId);
+    if (!bot) {
+      return { success: false, fault: false, errorCode: 'not_found.resource', error: `bot ${botId} not found or not owned by this owner` };
+    }
+
+    const db = ctx.db as Database;
+
+    // The tool-context botRepo port (ToolBotRecord) doesn't expose venueAccountId;
+    // resolve it via a direct db read on the OWNER-VERIFIED bot (ownership already
+    // checked above). Same inline-query style get_agent_venue_binding uses.
+    const [venueRow] = await db
+      .select({ venueAccountId: bots.venueAccountId })
+      .from(bots)
+      .where(eq(bots.id, botId))
+      .limit(1);
+    const venueAccountId = venueRow?.venueAccountId ?? null;
+    if (!venueAccountId) {
+      // Owner-verified bot with no venue account → no reconciliation events.
+      return { success: true, data: { ok: true, botId, venueAccountId: null, events: [] } };
+    }
+
+    const reconRepo = new ReconciliationEventRepository(db);
+    const events = await reconRepo.getByVenueAccount(venueAccountId, {
+      limit,
+      offset,
+      since: since ? new Date(since) : undefined,
+    });
+
+    return { success: true, data: { ok: true, botId, venueAccountId, events } };
+  },
+};
+
 // --- get_owner_fills ---
 //
 // Reproduces herobids /export/trades (exports.ts): resolve ALL bots owned by the
@@ -1314,4 +1384,5 @@ export const botManagementTools: AgentTool[] = [
   getOwnerFillsTool,
   getOwnerPositionsTool,
   getOwnerJournalTool,
+  getOwnerBotReconciliationEventsTool,
 ];

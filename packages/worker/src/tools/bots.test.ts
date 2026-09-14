@@ -22,6 +22,7 @@ const getOwnerBotPositionsTool = botManagementTools.find((t) => t.name === 'get_
 const getOwnerFillsTool = botManagementTools.find((t) => t.name === 'get_owner_fills')!;
 const getOwnerPositionsTool = botManagementTools.find((t) => t.name === 'get_owner_positions')!;
 const getOwnerJournalTool = botManagementTools.find((t) => t.name === 'get_owner_journal')!;
+const getOwnerBotReconciliationEventsTool = botManagementTools.find((t) => t.name === 'get_owner_bot_reconciliation_events')!;
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -1520,6 +1521,83 @@ describe('get_owner_journal — owner-wide journal read', () => {
     const ctx = makeCtx({ ownerId: 'owner-1' });
 
     const result = await getOwnerJournalTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+});
+
+
+describe('get_owner_bot_reconciliation_events — owner-scoped reconciliation read', () => {
+  it('is registered read-database', () => {
+    expect(getOwnerBotReconciliationEventsTool).toBeDefined();
+    expect(getOwnerBotReconciliationEventsTool.category).toBe('read-database');
+  });
+
+  it('resolves the owned bot venue account then returns reconciliation events', async () => {
+    const getBotByIdForOwner = vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1' }));
+    const events = [{ id: 'rec-1', venueAccountId: 'va-1', result: 'match' }];
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner } as unknown as ToolContext['botRepo'],
+      // 1st select() → venueAccountId row; 2nd select() → reconciliation events.
+      db: makeReadDb([[{ venueAccountId: 'va-1' }], events]),
+    });
+
+    const result = await getOwnerBotReconciliationEventsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(getBotByIdForOwner).toHaveBeenCalledWith('bot-1', 'owner-1');
+    expect(result.data).toEqual({ ok: true, botId: 'bot-1', venueAccountId: 'va-1', events });
+  });
+
+  it('returns empty events when the owned bot has no venue account', async () => {
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => makeBotRecord({ ownerId: 'owner-1' })) } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[{ venueAccountId: null }]]),
+    });
+
+    const result = await getOwnerBotReconciliationEventsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, botId: 'bot-1', venueAccountId: null, events: [] });
+  });
+
+  it('returns not_found.resource for an absent/unowned bot (never queries)', async () => {
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => null) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerBotReconciliationEventsTool.execute({ botId: 'bot-x' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('not_found.resource');
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('fails fault:false when the owner scope is unavailable', async () => {
+    const ctx = makeCtx({
+      botRepo: { getBotByIdForOwner: vi.fn() } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerBotReconciliationEventsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('owner scope');
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ ownerId: 'owner-1' });
+
+    const result = await getOwnerBotReconciliationEventsTool.execute({ botId: 'bot-1' }, ctx);
 
     expect(result.success).toBe(false);
     expect(result.fault).toBe(false);
