@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
-import { eq, desc, asc, and, inArray, gte, gt, notInArray, like, sql, type SQL } from 'drizzle-orm';
+import { eq, desc, asc, and, inArray, gte, gt, lte, notInArray, like, sql, type SQL } from 'drizzle-orm';
 import type { Database } from './index.js';
-import { journalEvents } from './schema/index.js';
+import { bots, journalEvents } from './schema/index.js';
 
 /** Journal entry shape — structurally compatible with @traderton/engine Journal port */
 export interface JournalEntryInput {
@@ -205,5 +205,62 @@ export class PgJournal implements JournalPort {
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(asc(journalEvents.createdAt), asc(journalEvents.id))
       .limit(opts.limit);
+  }
+
+  /**
+   * Load all journal events attributable to an agent (agent-native + agent-owned bots).
+   *
+   * Agent-native: `actorType = 'agent'`, `actorId = agentId`.
+   * Bot: `actorType = 'bot'`, `actorId IN agentBotIds`.
+   *
+   * Copied verbatim from herobids `loadAgentJournalEvents`
+   * (packages/db/src/agent-evidence-loaders.ts), re-keyed to Traderton imports.
+   * The bot-id resolution inlines herobids `loadAgentBotIds` (bots where
+   * creatorType='agent' AND creatorId=agentId).
+   */
+  async loadAgentJournalEvents(
+    agentId: string,
+    opts?: { from?: Date; to?: Date; botIds?: string[] },
+  ): Promise<Array<typeof journalEvents.$inferSelect>> {
+    const agentBotIds = opts?.botIds ?? await this.loadAgentBotIds(agentId);
+
+    const [agentRows, botRows] = await Promise.all([
+      this.db
+        .select()
+        .from(journalEvents)
+        .where(and(
+          eq(journalEvents.actorType, 'agent'),
+          eq(journalEvents.actorId, agentId),
+          ...(opts?.from ? [gte(journalEvents.createdAt, opts.from)] : []),
+          ...(opts?.to ? [lte(journalEvents.createdAt, opts.to)] : []),
+        )),
+      agentBotIds.length > 0
+        ? this.db
+            .select()
+            .from(journalEvents)
+            .where(and(
+              eq(journalEvents.actorType, 'bot'),
+              inArray(journalEvents.actorId, agentBotIds),
+              ...(opts?.from ? [gte(journalEvents.createdAt, opts.from)] : []),
+              ...(opts?.to ? [lte(journalEvents.createdAt, opts.to)] : []),
+            ))
+        : Promise.resolve([]),
+    ]);
+
+    return [...agentRows, ...botRows];
+  }
+
+  /**
+   * Return the IDs of all bots owned by an agent.
+   * Agents own bots via `bots.creatorType = 'agent'` and `bots.creatorId = agentId`.
+   *
+   * Inlined copy of herobids `loadAgentBotIds`.
+   */
+  private async loadAgentBotIds(agentId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: bots.id })
+      .from(bots)
+      .where(and(eq(bots.creatorType, 'agent'), eq(bots.creatorId, agentId)));
+    return rows.map((r) => r.id);
   }
 }

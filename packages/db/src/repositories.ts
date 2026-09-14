@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { eq, and, isNull, desc, or, gte, inArray, notInArray, sql } from 'drizzle-orm';
+import { eq, and, isNull, desc, or, gte, lte, inArray, notInArray, sql } from 'drizzle-orm';
 import type { Database } from './index.js';
 import { fills, positions, bots, executionPlans, orders, balanceSnapshots, decisions, venueAccounts } from './schema/index.js';
 
@@ -168,6 +168,64 @@ export class FillRepository {
       .from(fills)
       .where(and(eq(fills.actorType, actorType), eq(fills.actorId, actorId), eq(fills.venueAccountId, venueAccountId)));
     return rows[0]?.total ?? '0';
+  }
+
+  /**
+   * Load all fills attributable to an agent (agent-native + agent-owned bots).
+   *
+   * Agent-native fills: `actorType = 'agent'`, `actorId = agentId`.
+   * Bot fills: `actorType = 'bot'`, `actorId IN agentBotIds`.
+   *
+   * Copied verbatim from herobids `loadAgentFills`
+   * (packages/db/src/agent-evidence-loaders.ts), re-keyed to Traderton imports.
+   * The bot-id resolution inlines herobids `loadAgentBotIds` (bots where
+   * creatorType='agent' AND creatorId=agentId).
+   */
+  async loadAgentFills(
+    agentId: string,
+    opts?: { from?: Date; to?: Date; botIds?: string[] },
+  ): Promise<Array<typeof fills.$inferSelect>> {
+    const agentBotIds = opts?.botIds ?? await this.loadAgentBotIds(agentId);
+
+    const [agentRows, botRows] = await Promise.all([
+      this.db
+        .select()
+        .from(fills)
+        .where(and(
+          eq(fills.actorType, 'agent'),
+          eq(fills.actorId, agentId),
+          ...(opts?.from ? [gte(fills.filledAt, opts.from)] : []),
+          ...(opts?.to ? [lte(fills.filledAt, opts.to)] : []),
+        )),
+      agentBotIds.length > 0
+        ? this.db
+            .select()
+            .from(fills)
+            .where(and(
+              eq(fills.actorType, 'bot'),
+              inArray(fills.actorId, agentBotIds),
+              ...(opts?.from ? [gte(fills.filledAt, opts.from)] : []),
+              ...(opts?.to ? [lte(fills.filledAt, opts.to)] : []),
+            ))
+        : Promise.resolve([]),
+    ]);
+
+    return [...agentRows, ...botRows];
+  }
+
+  /**
+   * Return the IDs of all bots owned by an agent.
+   * Agents own bots via `bots.creatorType = 'agent'` and `bots.creatorId = agentId`.
+   *
+   * Inlined copy of herobids `loadAgentBotIds` — byte-identical query to
+   * `BotRepository.getBotsByCreator('agent', agentId)`'s WHERE clause.
+   */
+  private async loadAgentBotIds(agentId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: bots.id })
+      .from(bots)
+      .where(and(eq(bots.creatorType, 'agent'), eq(bots.creatorId, agentId)));
+    return rows.map((r) => r.id);
   }
 }
 
@@ -382,6 +440,72 @@ export class PositionRepository {
           isNull(positions.closedAt),
         ),
       );
+  }
+
+  /**
+   * Load positions attributable to an agent (agent-native + agent-owned bots).
+   *
+   * Scope-aware via `opts.at`:
+   * - Omitted → returns all positions (open and closed).
+   * - Provided → returns positions open at that instant (openedAt <= at, not yet closed).
+   *
+   * Copied verbatim from herobids `loadAgentPositions`
+   * (packages/db/src/agent-evidence-loaders.ts), re-keyed to Traderton imports.
+   */
+  async loadAgentPositions(
+    agentId: string,
+    opts?: { from?: Date; to?: Date; at?: Date; botIds?: string[] },
+  ): Promise<Array<typeof positions.$inferSelect>> {
+    const agentBotIds = opts?.botIds ?? await this.loadAgentBotIds(agentId);
+
+    const buildConditions = (actorType: 'agent' | 'bot', actorId: string | string[]) => {
+      const base = actorType === 'agent'
+        ? [eq(positions.actorType, 'agent'), eq(positions.actorId, actorId as string)]
+        : [eq(positions.actorType, 'bot'), inArray(positions.actorId, actorId as string[])];
+      if (opts?.at) {
+        return [...base, lte(positions.openedAt, opts.at)];
+      }
+      return base;
+    };
+
+    const [agentRows, botRows] = await Promise.all([
+      this.db
+        .select()
+        .from(positions)
+        .where(and(...buildConditions('agent', agentId))),
+      agentBotIds.length > 0
+        ? this.db
+            .select()
+            .from(positions)
+            .where(and(...buildConditions('bot', agentBotIds)))
+        : Promise.resolve([]),
+    ]);
+
+    const allPositions = [...agentRows, ...botRows];
+
+    // When `at` is provided, additionally filter out positions not yet opened or already closed by that time
+    if (opts?.at) {
+      return allPositions.filter(
+        (p) => p.openedAt <= opts.at! && (p.closedAt === null || p.closedAt > opts.at!),
+      );
+    }
+
+    return allPositions;
+  }
+
+  /**
+   * Return the IDs of all bots owned by an agent.
+   * Agents own bots via `bots.creatorType = 'agent'` and `bots.creatorId = agentId`.
+   *
+   * Inlined copy of herobids `loadAgentBotIds` — byte-identical query to
+   * `BotRepository.getBotsByCreator('agent', agentId)`'s WHERE clause.
+   */
+  private async loadAgentBotIds(agentId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: bots.id })
+      .from(bots)
+      .where(and(eq(bots.creatorType, 'agent'), eq(bots.creatorId, agentId)));
+    return rows.map((r) => r.id);
   }
 }
 
