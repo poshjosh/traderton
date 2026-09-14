@@ -377,7 +377,7 @@ the same `idempotencyKey` yields one persisted invocation and one set of rows.
   the platform `connections` table (the consumer links
   `resolvedVenueAccountId` to the returned `venueAccountId` itself).
 
-### `get_agent_fills` / `get_agent_journal_events` / `get_agent_positions` (read-only) — D1-c1
+### `get_agent_fills` / `get_agent_journal_events` / `get_agent_positions` (read-only) — D1-c1; `get_agent_venue_binding` (read-only) — D1-c2
 
 Agent-scoped evidence reads used by the herobids PLATFORM agent-evaluation
 subsystem (and the agent-scoped `/agents/:id/export/*` routes) to source an
@@ -400,6 +400,20 @@ caller-supplied id can widen scope.
   NEVER credentials/secrets (those live in `user_credentials`/`venue_accounts`).
   This is the accepted full-row-for-evaluation carve-out (004 "D1-c1"), distinct
   from the market-data derived-only rule; grounded in the A2 raw-journal precedent.
+- **`get_agent_venue_binding`** (D1-c2) — payload `{}`; result
+  `{ ok: true, binding: { venueFamily: string, venueType: string | null } | null }`.
+  `read-database` (read-only; venue resolution short-circuited), agent-scoped.
+  Resolves the SUBJECT agent's first agent-owned bot (`creatorType='agent' AND
+  creatorId=agentId`, limit 1) → its `venue_accounts` row SERVER-SIDE and returns
+  DERIVED binding metadata only (`venueFamily` = `venue_accounts.venue`,
+  `venueType` = the jsonb `venue_profile.venueType` or null) — NEVER raw rows,
+  NEVER secrets. `binding` is null when the agent has no agent-owned bot, the bot
+  has no `venueAccountId`, or the venue account has no `venueProfile` (matching
+  the herobids resolver's bot-path null semantics exactly). Consumed by the
+  herobids `assessment-identity-resolver` bot-path; the `agents.unifiedConfig`
+  fallback + `agent_preset_bindings` styleTier read stay herobids-LOCAL (platform
+  tables). Distinct from the full-row evaluation reads above — this is the
+  derived-metadata rule (no raw trading rows cross the boundary).
 - **`agent_runtime_sessions` is NOT here** — it is a herobids PLATFORM table
   (agent-lifecycle-written, not a trading table); the sessions read stays local.
 

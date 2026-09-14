@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, sql, sum } from 'drizzle-orm';
 import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig } from '@traderton/domain';
 import type { Database } from '@traderton/db';
-import { fills, journalEvents, FillRepository, PositionRepository, PgJournal } from '@traderton/db';
+import { fills, journalEvents, bots, venueAccounts, FillRepository, PositionRepository, PgJournal } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
 import { createLogger } from '../logger.js';
 
@@ -958,6 +958,75 @@ const getAgentPositionsTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- get_agent_venue_binding ---
+//
+// Agent-scoped boundary READ of the agent's venue binding (D1-c2). Replaces the
+// bot-path of herobids' assessment-identity-resolver `resolveAgentBinding`: it
+// resolves the agent's first agent-owned bot → its venue account server-side and
+// returns DERIVED binding metadata only ({ venueFamily, venueType }) — never raw
+// rows, never secrets. Mirrors the herobids bot-path null semantics EXACTLY:
+// binding is null when there is no agent-owned bot, the bot has no venueAccountId,
+// or the venue account has no venueProfile. venueType comes from the jsonb
+// venueProfile.venueType (VenueProfile). The `agents.unifiedConfig` fallback +
+// styleTier read STAY herobids-local (platform tables). Inline 2-step lookup —
+// matches the get_owner_bot_* inline query style. Guards mirror get_agent_fills
+// (fault:false): ctx.db absent → 'direct db access not available'; ctx.agentId
+// absent → 'agent scope not available'. category read-database → the boundary
+// resolver short-circuits venue resolution.
+
+const GetAgentVenueBindingParamsSchema = z.object({});
+
+const getAgentVenueBindingTool: AgentTool<TradingToolContext> = {
+  name: 'get_agent_venue_binding',
+  description: "Get this agent's venue binding, derived server-side from the agent's first bot and its venue account. Returns { venueFamily, venueType } or null when the agent has no resolvable binding. Only returns this agent's own binding metadata (no raw rows, no secrets).",
+  parametersSchema: GetAgentVenueBindingParamsSchema,
+  parameters: convertZodToJsonSchema(GetAgentVenueBindingParamsSchema),
+  category: 'read-database',
+  async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.agentId) {
+      return { success: false, error: 'agent scope not available', fault: false };
+    }
+
+    const db = ctx.db as Database;
+
+    // Resolve the agent's first agent-owned bot (creatorType='agent' AND
+    // creatorId=ctx.agentId). No caller-supplied id — scope stays context-derived.
+    const [bot] = await db
+      .select({ venueAccountId: bots.venueAccountId })
+      .from(bots)
+      .where(and(eq(bots.creatorType, 'agent'), eq(bots.creatorId, ctx.agentId)))
+      .limit(1);
+
+    // null when: no agent-owned bot, or the bot has no venueAccountId, or the
+    // venue account has no venueProfile — matching herobids' bot-path exactly.
+    if (bot?.venueAccountId) {
+      const [va] = await db
+        .select({ venueFamily: venueAccounts.venue, venueProfile: venueAccounts.venueProfile })
+        .from(venueAccounts)
+        .where(eq(venueAccounts.id, bot.venueAccountId))
+        .limit(1);
+
+      if (va?.venueProfile) {
+        return {
+          success: true,
+          data: {
+            ok: true,
+            binding: {
+              venueFamily: va.venueFamily,
+              venueType: va.venueProfile.venueType ?? null,
+            },
+          },
+        };
+      }
+    }
+
+    return { success: true, data: { ok: true, binding: null } };
+  },
+};
+
 export const botManagementTools: AgentTool[] = [
   createBotTool,
   listBotsTool,
@@ -975,4 +1044,5 @@ export const botManagementTools: AgentTool[] = [
   getAgentFillsTool,
   getAgentJournalEventsTool,
   getAgentPositionsTool,
+  getAgentVenueBindingTool,
 ];

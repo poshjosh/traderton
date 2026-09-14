@@ -16,6 +16,7 @@ const deleteBotTool = botManagementTools.find((t) => t.name === 'delete_bot')!;
 const getAgentFillsTool = botManagementTools.find((t) => t.name === 'get_agent_fills')!;
 const getAgentJournalEventsTool = botManagementTools.find((t) => t.name === 'get_agent_journal_events')!;
 const getAgentPositionsTool = botManagementTools.find((t) => t.name === 'get_agent_positions')!;
+const getAgentVenueBindingTool = botManagementTools.find((t) => t.name === 'get_agent_venue_binding')!;
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -1049,6 +1050,107 @@ describe('get_agent_positions — agent-scoped positions read', () => {
     (ctx as { agentId?: string }).agentId = undefined;
 
     const result = await getAgentPositionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('agent scope');
+  });
+});
+
+describe('get_agent_venue_binding — agent-scoped venue binding read', () => {
+  // Builds a stub Drizzle handle whose `.select().from().where().limit()` chain
+  // resolves to the queued result arrays in order. The tool issues up to two
+  // sequential queries (bot lookup, then venue-account lookup); each shifts one
+  // result off the queue.
+  function makeSelectDb(results: unknown[][]): ToolContext['db'] {
+    const queue = [...results];
+    const chain = {
+      from: () => chain,
+      where: () => chain,
+      limit: () => Promise.resolve(queue.shift() ?? []),
+    };
+    return { select: vi.fn(() => chain) } as unknown as ToolContext['db'];
+  }
+
+  it('is registered read-database', () => {
+    expect(getAgentVenueBindingTool).toBeDefined();
+    expect(getAgentVenueBindingTool.category).toBe('read-database');
+  });
+
+  it('returns derived binding { venueFamily, venueType } from the agent bot + venue account', async () => {
+    const db = makeSelectDb([
+      [{ venueAccountId: 'va-1' }],
+      [{ venueFamily: 'hyperliquid', venueProfile: { venue: 'hyperliquid', venueType: 'orderbook', availableSymbols: [] } }],
+    ]);
+    const ctx = makeCtx({ agentId: 'agent-1', db });
+
+    const result = await getAgentVenueBindingTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, binding: { venueFamily: 'hyperliquid', venueType: 'orderbook' } });
+  });
+
+  it('maps a missing venueProfile.venueType to null', async () => {
+    const db = makeSelectDb([
+      [{ venueAccountId: 'va-1' }],
+      [{ venueFamily: 'hyperliquid', venueProfile: { venue: 'hyperliquid', availableSymbols: [] } }],
+    ]);
+    const ctx = makeCtx({ agentId: 'agent-1', db });
+
+    const result = await getAgentVenueBindingTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, binding: { venueFamily: 'hyperliquid', venueType: null } });
+  });
+
+  it('returns binding:null when the agent has no agent-owned bot', async () => {
+    const db = makeSelectDb([[]]);
+    const ctx = makeCtx({ agentId: 'agent-1', db });
+
+    const result = await getAgentVenueBindingTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, binding: null });
+  });
+
+  it('returns binding:null when the bot has no venueAccountId', async () => {
+    const db = makeSelectDb([[{ venueAccountId: null }]]);
+    const ctx = makeCtx({ agentId: 'agent-1', db });
+
+    const result = await getAgentVenueBindingTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, binding: null });
+  });
+
+  it('returns binding:null when the venue account has no venueProfile', async () => {
+    const db = makeSelectDb([
+      [{ venueAccountId: 'va-1' }],
+      [{ venueFamily: 'hyperliquid', venueProfile: null }],
+    ]);
+    const ctx = makeCtx({ agentId: 'agent-1', db });
+
+    const result = await getAgentVenueBindingTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, binding: null });
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ agentId: 'agent-1' });
+
+    const result = await getAgentVenueBindingTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+
+  it('fails fault:false when the agent scope is unavailable', async () => {
+    const ctx = makeCtx({ db: stubDb });
+    (ctx as { agentId?: string }).agentId = undefined;
+
+    const result = await getAgentVenueBindingTool.execute({}, ctx);
 
     expect(result.success).toBe(false);
     expect(result.fault).toBe(false);
