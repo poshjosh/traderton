@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { and, asc, eq, gte, inArray, lte, sql, sum } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, sql, sum } from 'drizzle-orm';
 import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig } from '@traderton/domain';
 import type { Database } from '@traderton/db';
@@ -1137,11 +1137,15 @@ const getOwnerBotPositionsTool: AgentTool<TradingToolContext> = {
     const db = ctx.db as Database;
 
     // Copied from herobids /bots/:id/export/report: actorType='bot' actorId=id,
-    // ALL positions (no closedAt filter).
+    // ALL positions (no closedAt filter). Ordered `desc(updatedAt)` to reproduce
+    // the herobids `PositionRepository.getAllByActor` ordering that the
+    // /bots/:botId/positions view relies on (the report/open consumers are
+    // order-independent).
     const positionRows = await db
       .select()
       .from(positions)
-      .where(and(eq(positions.actorType, 'bot'), eq(positions.actorId, botId)));
+      .where(and(eq(positions.actorType, 'bot'), eq(positions.actorId, botId)))
+      .orderBy(desc(positions.updatedAt));
 
     return { success: true, data: { ok: true, botId, positions: positionRows } };
   },
