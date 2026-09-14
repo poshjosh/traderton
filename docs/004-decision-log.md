@@ -1123,3 +1123,13 @@ Impact on the D-wave (recorded in CANONICAL-STATE §2.0, 001 D2 row, 011):
   (empty).
 - **D3/D4 need no data-seeding** — E2E + soak run against freshly-created data.
 - Parity discipline unchanged — parity is measured against herobids `main` BEHAVIOUR, not a dataset.
+
+
+### D1-cred scope CORRECTION — credentials.ts is a TRADING path (2026-09-12, decision agent = Contemplator)
+Grounding the carve-out found `apps/api/src/routes/credentials.ts` (`POST/GET/DELETE/rotate /credentials`, LIVE, web-client-called) is NOT non-trading: it validates VENUE secrets (`canonicalizeVenueSecrets`/`validateVenueSecrets` over `parsed.data.venue`, same as trading provisioning), stores them in `user_credentials`, and `accounts.ts`/`connections.ts` validate a supplied `credentialId` against it to link venue accounts/connections. So it mints/stores TRADING venue credentials in herobids-local storage — an isolation violation; must NOT move to `platform_credentials`.
+
+**Corrected D1-cred scope:**
+- **Move to `platform_credentials` (genuinely non-trading; SETTLED WITHIN RULES):** `gmail-credential-resolver`, `connections-oauth`, and the **setup.ts NON-trading path only** (the setup.ts trading path already provisions to Traderton, no local write). Re-point `plan-guards.checkCredentialLimit` to count `platform_credentials` only (trading quota is already covered by `count_venue_accounts`/`checkVenueAccountLimit`).
+- **Trading (NOT moved; belongs to the D1-c4 trading-drop / deprecation workstream):** `credentials.ts` + the `credentialId`-validation branches in `accounts.ts`/`connections.ts`.
+- **NEW human-ratification item (Q4):** deprecate/remove the live `POST/GET/DELETE/rotate /credentials` endpoint (superseded by `provision_venue_account` manual+generate via the holistic setup flow; greenfield = no data loss; best serves isolation) vs re-point it to Traderton. **Recommended: deprecate/remove.** Product/contract call (removing a live web-client-facing endpoint) → needs the human.
+- **Safe interim (proceed NOW, no block):** do the non-trading move + `checkCredentialLimit` re-point; FREEZE the trading paths (`credentials.ts`, accounts/connections credentialId validation, and the `user_credentials` table) unchanged until Q4 is ruled — `credentials.ts` keeps writing `user_credentials` (no user-facing regression) until then. Do NOT put trading secrets in `platform_credentials`.
