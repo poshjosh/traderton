@@ -175,8 +175,16 @@ const scoreCandidateTool: AgentTool<TradingToolContext> = {
 
       const signal = scoreCandidate(candidate, config);
 
+      // Derived candle-window (metadata only, NOT the raw candles): the first/last
+      // candle timestamps of the series that was scored. PriceCandle.timestamp is an
+      // ISO 8601 string, so pass the value through as-is (faithful to the underlying).
+      const candleWindow =
+        candles.length > 0
+          ? { start: candles[0]!.timestamp, end: candles[candles.length - 1]!.timestamp }
+          : null;
+
       // signal may be null — a valid "no signal" read result, not an error.
-      return { success: true, data: { signal, candlesEvaluated: candles.length } };
+      return { success: true, data: { signal, candlesEvaluated: candles.length, candleWindow } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown error';
       if (message.includes('Rate limit exceeded')) {

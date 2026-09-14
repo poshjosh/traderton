@@ -80,6 +80,12 @@ describe('score_candidate tool', () => {
     // signal is present or null — both are valid read outcomes; data carries it.
     expect(result.data).toHaveProperty('signal');
     expect(result.data).toHaveProperty('candlesEvaluated', 120);
+    // Derived candle-window: first/last timestamps of the fetched series (metadata only).
+    const candles = makeCandles(120);
+    expect(result.data).toHaveProperty('candleWindow', {
+      start: candles[0]!.timestamp,
+      end: candles[candles.length - 1]!.timestamp,
+    });
   });
 
   it('fetches candles behind the boundary for a SWAP target (network + poolAddress)', async () => {
@@ -109,6 +115,17 @@ describe('score_candidate tool', () => {
     );
     expect(result.success).toBe(true);
     expect((result.data as { signal: unknown }).signal).toBeNull();
+  });
+
+  it('derives a null candleWindow when zero candles are fetched', async () => {
+    const fetcher = vi.fn(async () => [] as PriceCandle[]);
+    const result = await scoreCandidateTool!.execute(
+      { symbol: 'BTC', venueType: 'orderbook', providerSymbol: 'BTCUSDT', config: baseConfig },
+      makeContext(fetcher),
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toHaveProperty('candlesEvaluated', 0);
+    expect((result.data as { candleWindow: unknown }).candleWindow).toBeNull();
   });
 
   it('degrades to market_data_not_configured when no candle fetcher is wired', async () => {
@@ -196,6 +213,11 @@ describe('score_candidate tool', () => {
     expect(result.success).toBe(true);
     expect(result.data).toHaveProperty('signal');
     expect(result.data).toHaveProperty('candlesEvaluated', 120);
+    const resolvedCandles = makeCandles(120);
+    expect(result.data).toHaveProperty('candleWindow', {
+      start: resolvedCandles[0]!.timestamp,
+      end: resolvedCandles[resolvedCandles.length - 1]!.timestamp,
+    });
   });
 
   it('tie-breaks equal liquidity by volume24h desc, then poolAddress lexicographic', async () => {
