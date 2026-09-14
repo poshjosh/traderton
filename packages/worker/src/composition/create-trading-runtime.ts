@@ -21,6 +21,7 @@ import {
   DecisionRepository,
   BacktestingRepository,
   BotRepository,
+  TokenSafetyOverrideRepository,
 } from '@traderton/db';
 import { MarkSelector, createFillFirstMarkSource } from '@traderton/engine';
 import {
@@ -33,7 +34,7 @@ import {
   JupiterSwapAdapter,
 } from '@traderton/venues';
 import type { SwapConfirmationPoller } from '@traderton/venues';
-import { createProviderRegistry } from '@traderton/market-data';
+import { createProviderRegistry, lookupCanonical, resolveTokenSafetyPolicyConfig } from '@traderton/market-data';
 import type { ProviderRegistry, RedisEvalClient } from '@traderton/market-data';
 import { MechanicalStrategy, DcaStrategy } from '@traderton/strategy';
 import { MarketDataRecorder } from '@traderton/backtesting';
@@ -47,7 +48,10 @@ import {
   type WorkerRuntimeConfig,
 } from '../runtime.js';
 import { TradingActor, type TradingActorDeps } from '../trading-actor.js';
-import { VenueAdapterFactory } from '../venue-adapter-factory.js';
+import { VenueAdapterFactory, CredentialResolutionError } from '../venue-adapter-factory.js';
+import { createSwapTokenSafetyAdapter } from '../token-safety-adapter.js';
+import { resolveSwapTokenData, type CanonicalResolver, type DexScreenerProvider } from '../swap-token-resolver.js';
+import { enrichTokenWithDiscovery } from '../swap-token-enrichment.js';
 import { buildPublicStreamConnectors, createScopedStreamPoolHandle } from '../public-stream-routing.js';
 import {
   VenueInstrumentCache,
@@ -285,6 +289,9 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
   const reconciliationRepo = new ReconciliationEventRepository(db);
   const decisionRepo = new DecisionRepository(db);
   const backtestingRepo = new BacktestingRepository(db);
+  // Token-safety override repo — constructed ONCE per runtime (not per-bot); the
+  // swap token-safety adapter (built per-bot in the ActorFactory) consumes it.
+  const tokenSafetyOverrideRepo = new TokenSafetyOverrideRepository(db);
   // Bot repository — the item-D drive target's bot-lifecycle handler reads/updates
   // bot rows through it (getBotById/updateBotConfig/markBotRunning/… — the
   // persist/limit primitives were deleted Phase 2 and are item E's seam).
@@ -570,6 +577,11 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
     }
 
     const swapNetwork = resolveSwapNetwork(venue, undefined, config.venues['1inch']);
+    if (venueType === 'swap' && venue === '1inch' && config.marketData?.tokenSafety?.enabled && !swapNetwork) {
+      throw new CredentialResolutionError(
+        `Unsupported 1inch chainId ${String(config.venues['1inch']?.chainId)} for token safety on bot ${botId}`,
+      );
+    }
 
     // Per-bot candle fetcher — mechanical strategy phases consume OHLCV. Undefined
     // when marketData is not configured (paper bots without a mechanical strategy).
@@ -585,6 +597,51 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
 
     // 5. Strategy — mechanical/dca only (013 §4.1d).
     const strategy = createStrategy(idGen, config_.strategy, candleFetcher);
+
+    // Swap token-safety adapter — gates swap-venue buys against liquidity/volume/age
+    // thresholds. The outer guard (config.marketData && sharedMarketDataRegistry)
+    // prevents creation when the registry is absent (orderbook/paper bots keep
+    // swapTokenSafety undefined). The inner null-check defends against a theoretical
+    // edge case where the closure is invoked after the module-level variable is
+    // reassigned (capture-by-reference, not by value). The override repo is the
+    // once-per-runtime instance. Copied from herobids index.ts:243–268 + :2035–2062.
+    const swapTokenSafety = config.marketData && sharedMarketDataRegistry
+      ? createSwapTokenSafetyAdapter({
+          marketDataConfig: config.marketData,
+          overrideRepo: tokenSafetyOverrideRepo,
+          resolveTokenData: async (network, tokenAddress) => {
+            // Capture into a local const so the null-narrowing survives into the
+            // nested provider closures below (the module-level binding is a
+            // reassignable `let`, unlike herobids' const, so TS can't keep the
+            // narrowing across capture-by-reference).
+            const registry = sharedMarketDataRegistry;
+            const marketData = config.marketData;
+            if (!registry || !marketData) {
+              return null;
+            }
+            const canonicalResolver: CanonicalResolver = {
+              resolve: (symbol, net) => {
+                const policy = resolveTokenSafetyPolicyConfig(marketData);
+                return lookupCanonical(symbol, net, policy.canonicalTokens);
+              },
+            };
+            const dexScreenerProvider: DexScreenerProvider = {
+              search: (addr) => registry.dexscreener.search(addr),
+            };
+            const result = await resolveSwapTokenData(
+              dexScreenerProvider, network, tokenAddress, canonicalResolver,
+            );
+            if (!result) return null;
+            // Enrich with discovery data when pool creation timestamp is missing
+            // from the DexScreener result (handled by the resolver for canonical
+            // synthetic fallback, needed only for live DexScreener matches).
+            if (!result.poolCreatedAt && result.hasRealMarketData) {
+              return enrichTokenWithDiscovery(registry, network, result.address, result);
+            }
+            return result;
+          },
+        })
+      : undefined;
 
     const deps: TradingActorDeps = {
       strategy,
@@ -638,16 +695,7 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
       shadowPollIntervalMs: config_.shadowPollIntervalMs ?? config.execution.shadowPollIntervalMs,
       shadowQuoteSlippageBps: config.execution.shadowQuoteSlippageBps,
       credentialId: resolvedCredentialId,
-      // swapTokenSafety: DEFERRED — the copied token-safety adapter's resolveTokenData
-      // closure depends on the herobids inline helper `enrichTokenWithDiscovery`
-      // (index.ts:93), which was not copied. Reproducing it here is non-wiring
-      // authoring, so it is deferred. The dep is optional; undefined preserves
-      // adapter behaviour for orderbook/paper bots — affects swap-venue bots ONLY,
-      // which must not run live until this is resolved. The paired 1inch swapNetwork
-      // fail-closed guard (herobids index.ts:2043–2047) is dropped for the same
-      // reason. See the "swap-venue token-safety gating" rows in
-      // docs/001-parity-ledger.md + docs/003-anomalies-and-deviations.md.
-      swapTokenSafety: undefined,
+      swapTokenSafety,
       feeConfig: config.simulation,
       maxConsecutiveVenueErrors: config.liveRollout.maxConsecutiveVenueErrors,
       slippageAlertBps: config.liveRollout.slippageAlertBps,

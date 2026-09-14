@@ -1029,3 +1029,16 @@ Net: no network fetch, no provider instance in the herobids process. cacheOnly n
 **Pre-existing property confirmed (NOT a new degrade):** on `main` the agent's own `check_watches` tool AND the monitor both advanced `lastConditionMet` on ONE shared local store; after B3 they both advance the ONE Traderton store — identical two-caller topology. Settled by parity.
 
 **§9.3 gate:** Q1 internal seam (settled within rules, matches precedent); Q2 reproduces main's reset-clear across the boundary (settled by parity; prevents a degrade; adds a parity-preserving contract field recorded in 005/006, Traderton-first); Q3 enforces the top objective + reproduces main's wake machinery (settled within rules). **SETTLED — no human escalation, no ratification.**
+
+
+## C1 — swap-venue token-safety gating (2026-09-12, decision agent; SETTLED BY PARITY, no ratification)
+
+**Context.** Ledger Item B left the trading composition root's per-bot `swapTokenSafety` `undefined` + dropped the 1inch `swapNetwork` fail-closed guard, deferred because reproducing herobids' `enrichTokenWithDiscovery` was framed as "non-wiring authoring."
+
+**Ruling.** SUPERSEDED that framing: `enrichTokenWithDiscovery` (herobids `main` `apps/worker/src/index.ts:93-152`) is a self-contained market-data helper; copying it VERBATIM is copy-faithful (008 §9.1), NOT authoring. Every symbol it references (`ProviderRegistry.dexscreener.search`/`discovery.discover`, `TokenInfo`, `ResolvedSwapTokenData`) already exists in traderton; the token-safety adapter (`createSwapTokenSafetyAdapter`) + resolver (`resolveSwapTokenData`, `CanonicalResolver`, `DexScreenerProvider`) + override repo are already copied. So C1 = (1) copy the helper verbatim, (2) wire `swapTokenSafety` via the adapter + the herobids `resolveTokenData` closure (index.ts:243-268) in `create-trading-runtime.ts`, (3) re-add the 1inch guard (index.ts:2043-2047). Runs in the traderton worker/composition process where `sharedMarketDataRegistry` legitimately lives (no isolation conflict).
+
+**Sequencing: land NOW** (not deferred). Restores a live parity gap on a cutover-blocking ledger row; harmless while swap execution is inert (C2: null candles); "must not run live until resolved" argues FOR doing it now while there's no live traffic to regress. Orderbook/paper bots unaffected (guard leaves `swapTokenSafety` undefined without marketData+registry).
+
+**§9.3 gate:** parity check — copies herobids source verbatim + wires copied infra, reproducing herobids behaviour exactly. Violation check — restores parity, degrades nothing, drops nothing. **SETTLED BY PARITY. No ratification.** Ledger Item B → RESOLVED.
+
+**Not-fixed (parity-preserving):** CodeReviewer MEDIUM-2 flagged the guard fail-opens (swapTokenSafety undefined) if the ActorFactory ran before start()/registry-assign — but that invariant holds (factory runs after start), and a defensive throw would be behaviour-changing vs herobids, so NOT added (parity). MEDIUM-1 (composition seam test) WAS added.
