@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { and, asc, eq, inArray, sql, sum } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lte, sql, sum } from 'drizzle-orm';
 import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig } from '@traderton/domain';
 import type { Database } from '@traderton/db';
-import { fills, journalEvents, bots, venueAccounts, FillRepository, PositionRepository, PgJournal } from '@traderton/db';
+import { fills, journalEvents, positions, bots, venueAccounts, FillRepository, PositionRepository, PgJournal } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
 import { createLogger } from '../logger.js';
 
@@ -1027,6 +1027,266 @@ const getAgentVenueBindingTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- Owner-scoped export read-wave (c4.2-tools) ────────────────────────────
+//
+// Boundary READ tools the herobids export/views seam consumes to read trading
+// state over the boundary instead of local tables. Each returns RAW rows the
+// seam maps with toFillRow / toPositionRow / toJournalRow.
+//
+// The query bodies are COPIED from the herobids export routes
+// (apps/api/src/routes/exports.ts): the single-bot tools reproduce
+// /bots/:id/export/trades and /export/report; the owner-wide tools reproduce
+// /export/trades and /export/bundle. The ONLY adaptation is re-keying the
+// ownership check from herobids' local `bots where(id, userId)` /
+// `bots where(userId)` lookups to the owner-scoped repo methods
+// getBotByIdForOwner(botId, ctx.ownerId) and getBotsByOwner(ctx.ownerId) — the
+// same methods list_owner_bots and get_owner_bot_status use — so no divergent
+// query is authored. Aggregation stays copy-faithful; these tools author only
+// the thin wrapper + guards + ISO→Date param parse.
+//
+// Guards mirror get_owner_bot_costs (fault:false): botRepo absent →
+// 'direct db access not available'; ownerId absent → 'owner scope not
+// available'; db absent → 'direct db access not available'. Single-bot tools
+// resolve+authorize via getBotByIdForOwner → absent → not_found.resource
+// (fault:false), identical to the get_owner_bot_* family. category
+// read-database → the boundary resolver short-circuits venue resolution.
+
+// --- get_owner_bot_fills ---
+//
+// Reproduces herobids /bots/:id/export/trades (exports.ts): fills where
+// actorType='bot' AND actorId=id, with optional filledAt >= from / <= to.
+
+const GetOwnerBotFillsParamsSchema = z.object({
+  botId: z.string().min(1).describe('ID of the bot to query'),
+  from: z.string().optional().describe('ISO date — only include fills at or after this time'),
+  to: z.string().optional().describe('ISO date — only include fills at or before this time'),
+});
+
+const getOwnerBotFillsTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_bot_fills',
+  description: 'Get all fills for a specific bot, optionally time-filtered. Only works for bots owned by this owner.',
+  parametersSchema: GetOwnerBotFillsParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerBotFillsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botId, from, to } = params as z.infer<typeof GetOwnerBotFillsParamsSchema>;
+
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const bot = await ctx.botRepo.getBotByIdForOwner(botId, ctx.ownerId);
+    if (!bot) {
+      return { success: false, fault: false, errorCode: 'not_found.resource', error: `bot ${botId} not found or not owned by this owner` };
+    }
+
+    const db = ctx.db as Database;
+
+    // Copied from herobids /bots/:id/export/trades: actorType='bot' actorId=id,
+    // optional filledAt ± bounds.
+    const conditions = [eq(fills.actorType, 'bot'), eq(fills.actorId, botId)];
+    if (from) conditions.push(gte(fills.filledAt, new Date(from)));
+    if (to) conditions.push(lte(fills.filledAt, new Date(to)));
+
+    const fillRows = await db.select().from(fills).where(and(...conditions));
+
+    return { success: true, data: { ok: true, botId, fills: fillRows } };
+  },
+};
+
+// --- get_owner_bot_positions ---
+//
+// Reproduces herobids /bots/:id/export/report positions read (exports.ts):
+// positions where actorType='bot' AND actorId=id — ALL positions (open +
+// closed), no closedAt filter.
+
+const GetOwnerBotPositionsParamsSchema = z.object({
+  botId: z.string().min(1).describe('ID of the bot to query'),
+});
+
+const getOwnerBotPositionsTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_bot_positions',
+  description: 'Get all positions (open and closed) for a specific bot. Only works for bots owned by this owner.',
+  parametersSchema: GetOwnerBotPositionsParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerBotPositionsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { botId } = params as z.infer<typeof GetOwnerBotPositionsParamsSchema>;
+
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const bot = await ctx.botRepo.getBotByIdForOwner(botId, ctx.ownerId);
+    if (!bot) {
+      return { success: false, fault: false, errorCode: 'not_found.resource', error: `bot ${botId} not found or not owned by this owner` };
+    }
+
+    const db = ctx.db as Database;
+
+    // Copied from herobids /bots/:id/export/report: actorType='bot' actorId=id,
+    // ALL positions (no closedAt filter).
+    const positionRows = await db
+      .select()
+      .from(positions)
+      .where(and(eq(positions.actorType, 'bot'), eq(positions.actorId, botId)));
+
+    return { success: true, data: { ok: true, botId, positions: positionRows } };
+  },
+};
+
+// --- get_owner_fills ---
+//
+// Reproduces herobids /export/trades (exports.ts): resolve ALL bots owned by the
+// user, then fills where actorType='bot' AND actorId IN ownerBotIds, optional
+// filledAt ± bounds. Empty ownerBotIds short-circuits to []. Owner-bots
+// resolution reuses getBotsByOwner (the same method list_owner_bots uses).
+
+const GetOwnerFillsParamsSchema = z.object({
+  from: z.string().optional().describe('ISO date — only include fills at or after this time'),
+  to: z.string().optional().describe('ISO date — only include fills at or before this time'),
+});
+
+const getOwnerFillsTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_fills',
+  description: 'Get all fills across every bot owned by this owner, optionally time-filtered. Only returns this owner\'s own data.',
+  parametersSchema: GetOwnerFillsParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerFillsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { from, to } = params as z.infer<typeof GetOwnerFillsParamsSchema>;
+
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const ownerBots = await ctx.botRepo.getBotsByOwner(ctx.ownerId);
+    const ownerBotIds = ownerBots.map((b) => b.id);
+
+    // Copied from herobids /export/trades: no owned bots → empty result.
+    if (ownerBotIds.length === 0) {
+      return { success: true, data: { ok: true, fills: [] } };
+    }
+
+    const db = ctx.db as Database;
+
+    const conditions = [eq(fills.actorType, 'bot'), inArray(fills.actorId, ownerBotIds)];
+    if (from) conditions.push(gte(fills.filledAt, new Date(from)));
+    if (to) conditions.push(lte(fills.filledAt, new Date(to)));
+
+    const fillRows = await db.select().from(fills).where(and(...conditions));
+
+    return { success: true, data: { ok: true, fills: fillRows } };
+  },
+};
+
+// --- get_owner_positions ---
+//
+// Reproduces herobids /export/bundle positions read (exports.ts): resolve ALL
+// bots owned by the user, then positions where actorType='bot' AND actorId IN
+// ownerBotIds. Empty ownerBotIds short-circuits to [].
+
+const GetOwnerPositionsParamsSchema = z.object({});
+
+const getOwnerPositionsTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_positions',
+  description: 'Get all positions across every bot owned by this owner. Only returns this owner\'s own data.',
+  parametersSchema: GetOwnerPositionsParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerPositionsParamsSchema),
+  category: 'read-database',
+  async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const ownerBots = await ctx.botRepo.getBotsByOwner(ctx.ownerId);
+    const ownerBotIds = ownerBots.map((b) => b.id);
+
+    // Copied from herobids /export/bundle: no owned bots → empty result.
+    if (ownerBotIds.length === 0) {
+      return { success: true, data: { ok: true, positions: [] } };
+    }
+
+    const db = ctx.db as Database;
+
+    const positionRows = await db
+      .select()
+      .from(positions)
+      .where(and(eq(positions.actorType, 'bot'), inArray(positions.actorId, ownerBotIds)));
+
+    return { success: true, data: { ok: true, positions: positionRows } };
+  },
+};
+
+// --- get_owner_journal ---
+//
+// Reproduces herobids /export/bundle journal read (exports.ts): resolve ALL bots
+// owned by the user, then journalEvents where actorId IN ownerBotIds. Empty
+// ownerBotIds short-circuits to []. The account bundle needs this owner-wide
+// journal read alongside get_owner_fills / get_owner_positions.
+
+const GetOwnerJournalParamsSchema = z.object({});
+
+const getOwnerJournalTool: AgentTool<TradingToolContext> = {
+  name: 'get_owner_journal',
+  description: 'Get all journal events across every bot owned by this owner. Only returns this owner\'s own data.',
+  parametersSchema: GetOwnerJournalParamsSchema,
+  parameters: convertZodToJsonSchema(GetOwnerJournalParamsSchema),
+  category: 'read-database',
+  async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    if (!ctx.botRepo) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const ownerBots = await ctx.botRepo.getBotsByOwner(ctx.ownerId);
+    const ownerBotIds = ownerBots.map((b) => b.id);
+
+    // Copied from herobids /export/bundle: no owned bots → empty result.
+    if (ownerBotIds.length === 0) {
+      return { success: true, data: { ok: true, events: [] } };
+    }
+
+    const db = ctx.db as Database;
+
+    const eventRows = await db
+      .select()
+      .from(journalEvents)
+      .where(inArray(journalEvents.actorId, ownerBotIds));
+
+    return { success: true, data: { ok: true, events: eventRows } };
+  },
+};
+
 export const botManagementTools: AgentTool[] = [
   createBotTool,
   listBotsTool,
@@ -1045,4 +1305,9 @@ export const botManagementTools: AgentTool[] = [
   getAgentJournalEventsTool,
   getAgentPositionsTool,
   getAgentVenueBindingTool,
+  getOwnerBotFillsTool,
+  getOwnerBotPositionsTool,
+  getOwnerFillsTool,
+  getOwnerPositionsTool,
+  getOwnerJournalTool,
 ];

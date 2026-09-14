@@ -17,6 +17,11 @@ const getAgentFillsTool = botManagementTools.find((t) => t.name === 'get_agent_f
 const getAgentJournalEventsTool = botManagementTools.find((t) => t.name === 'get_agent_journal_events')!;
 const getAgentPositionsTool = botManagementTools.find((t) => t.name === 'get_agent_positions')!;
 const getAgentVenueBindingTool = botManagementTools.find((t) => t.name === 'get_agent_venue_binding')!;
+const getOwnerBotFillsTool = botManagementTools.find((t) => t.name === 'get_owner_bot_fills')!;
+const getOwnerBotPositionsTool = botManagementTools.find((t) => t.name === 'get_owner_bot_positions')!;
+const getOwnerFillsTool = botManagementTools.find((t) => t.name === 'get_owner_fills')!;
+const getOwnerPositionsTool = botManagementTools.find((t) => t.name === 'get_owner_positions')!;
+const getOwnerJournalTool = botManagementTools.find((t) => t.name === 'get_owner_journal')!;
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -1155,5 +1160,369 @@ describe('get_agent_venue_binding — agent-scoped venue binding read', () => {
     expect(result.success).toBe(false);
     expect(result.fault).toBe(false);
     expect(result.error).toContain('agent scope');
+  });
+});
+
+// ── Owner-scoped export read-wave (c4.2-tools) ──────────────────────────────
+//
+// Boundary READ tools the herobids export/views seam consumes. Single-bot tools
+// mirror the get_owner_bot_* pattern (owner-scoped not-found via
+// getBotByIdForOwner, raw-row payload, ISO date params → filledAt filter).
+// Owner-wide tools resolve owned bots via getBotsByOwner (the same method
+// list_owner_bots uses) and return [] when the owner has no bots.
+
+describe('get_owner_bot_fills — owner-scoped bot fills read', () => {
+  it('is registered read-database', () => {
+    expect(getOwnerBotFillsTool).toBeDefined();
+    expect(getOwnerBotFillsTool.category).toBe('read-database');
+  });
+
+  it('resolves via getBotByIdForOwner and returns the raw fill rows', async () => {
+    const fillRows = [{ id: 'f-1' }, { id: 'f-2' }];
+    const getBotByIdForOwner = vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1' }));
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([fillRows]),
+    });
+
+    const result = await getOwnerBotFillsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(getBotByIdForOwner).toHaveBeenCalledWith('bot-1', 'owner-1');
+    expect(result.data).toEqual({ ok: true, botId: 'bot-1', fills: fillRows });
+  });
+
+  it('parses ISO from/to into Date and threads them into the fills query', async () => {
+    const selectSpy = vi.fn(() => {
+      const chain: Record<string, unknown> = {
+        then: (resolve: (v: unknown) => unknown) => Promise.resolve([]).then(resolve),
+      };
+      for (const m of ['from', 'where', 'orderBy', 'limit', 'offset']) chain[m] = () => chain;
+      return chain;
+    });
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1' })) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    // from/to are ISO strings that must round-trip to Date without throwing.
+    const result = await getOwnerBotFillsTool.execute(
+      { botId: 'bot-1', from: '2024-01-01T00:00:00.000Z', to: '2024-02-01T00:00:00.000Z' },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    // Both bounds present → the query builder was driven (select called once).
+    expect(selectSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns not_found.resource for an absent/unowned bot (never queries fills)', async () => {
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => null) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerBotFillsTool.execute({ botId: 'bot-x' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('not_found.resource');
+    expect(result.error).toContain('not found or not owned');
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('fails fault:false when the owner scope is unavailable', async () => {
+    const ctx = makeCtx({
+      botRepo: { getBotByIdForOwner: vi.fn() } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerBotFillsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('owner scope');
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ ownerId: 'owner-1' });
+
+    const result = await getOwnerBotFillsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+});
+
+describe('get_owner_bot_positions — owner-scoped bot positions read', () => {
+  it('is registered read-database', () => {
+    expect(getOwnerBotPositionsTool).toBeDefined();
+    expect(getOwnerBotPositionsTool.category).toBe('read-database');
+  });
+
+  it('resolves via getBotByIdForOwner and returns all raw position rows', async () => {
+    const positionRows = [{ id: 'p-open' }, { id: 'p-closed' }];
+    const getBotByIdForOwner = vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1' }));
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([positionRows]),
+    });
+
+    const result = await getOwnerBotPositionsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(getBotByIdForOwner).toHaveBeenCalledWith('bot-1', 'owner-1');
+    expect(result.data).toEqual({ ok: true, botId: 'bot-1', positions: positionRows });
+  });
+
+  it('returns not_found.resource for an absent/unowned bot (never queries positions)', async () => {
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner: vi.fn(async () => null) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerBotPositionsTool.execute({ botId: 'bot-x' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('not_found.resource');
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('fails fault:false when the owner scope is unavailable', async () => {
+    const ctx = makeCtx({
+      botRepo: { getBotByIdForOwner: vi.fn() } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerBotPositionsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('owner scope');
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ ownerId: 'owner-1' });
+
+    const result = await getOwnerBotPositionsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+});
+
+describe('get_owner_fills — owner-wide fills read', () => {
+  it('is registered read-database', () => {
+    expect(getOwnerFillsTool).toBeDefined();
+    expect(getOwnerFillsTool.category).toBe('read-database');
+  });
+
+  it('resolves owned bots via getBotsByOwner and returns the raw fill rows', async () => {
+    const fillRows = [{ id: 'f-1' }, { id: 'f-2' }];
+    const getBotsByOwner = vi.fn(async () => [{ id: 'bot-1' }, { id: 'bot-2' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([fillRows]),
+    });
+
+    const result = await getOwnerFillsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(getBotsByOwner).toHaveBeenCalledWith('owner-1');
+    expect(result.data).toEqual({ ok: true, fills: fillRows });
+  });
+
+  it('returns { fills: [] } when the owner has no bots (never queries fills)', async () => {
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => []) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerFillsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, fills: [] });
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('parses ISO from/to into Date without throwing', async () => {
+    const selectSpy = vi.fn(() => {
+      const chain: Record<string, unknown> = {
+        then: (resolve: (v: unknown) => unknown) => Promise.resolve([]).then(resolve),
+      };
+      for (const m of ['from', 'where', 'orderBy', 'limit', 'offset']) chain[m] = () => chain;
+      return chain;
+    });
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerFillsTool.execute(
+      { from: '2024-01-01T00:00:00.000Z', to: '2024-02-01T00:00:00.000Z' },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(selectSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails fault:false when the owner scope is unavailable', async () => {
+    const ctx = makeCtx({
+      botRepo: { getBotsByOwner: vi.fn() } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerFillsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('owner scope');
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ ownerId: 'owner-1' });
+
+    const result = await getOwnerFillsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+});
+
+describe('get_owner_positions — owner-wide positions read', () => {
+  it('is registered read-database', () => {
+    expect(getOwnerPositionsTool).toBeDefined();
+    expect(getOwnerPositionsTool.category).toBe('read-database');
+  });
+
+  it('resolves owned bots via getBotsByOwner and returns the raw position rows', async () => {
+    const positionRows = [{ id: 'p-1' }];
+    const getBotsByOwner = vi.fn(async () => [{ id: 'bot-1' }, { id: 'bot-2' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([positionRows]),
+    });
+
+    const result = await getOwnerPositionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(getBotsByOwner).toHaveBeenCalledWith('owner-1');
+    expect(result.data).toEqual({ ok: true, positions: positionRows });
+  });
+
+  it('returns { positions: [] } when the owner has no bots (never queries positions)', async () => {
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => []) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerPositionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, positions: [] });
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('fails fault:false when the owner scope is unavailable', async () => {
+    const ctx = makeCtx({
+      botRepo: { getBotsByOwner: vi.fn() } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerPositionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('owner scope');
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ ownerId: 'owner-1' });
+
+    const result = await getOwnerPositionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+});
+
+describe('get_owner_journal — owner-wide journal read', () => {
+  it('is registered read-database', () => {
+    expect(getOwnerJournalTool).toBeDefined();
+    expect(getOwnerJournalTool.category).toBe('read-database');
+  });
+
+  it('resolves owned bots via getBotsByOwner and returns the raw event rows', async () => {
+    const eventRows = [{ id: 'ev-1' }];
+    const getBotsByOwner = vi.fn(async () => [{ id: 'bot-1' }, { id: 'bot-2' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([eventRows]),
+    });
+
+    const result = await getOwnerJournalTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(getBotsByOwner).toHaveBeenCalledWith('owner-1');
+    expect(result.data).toEqual({ ok: true, events: eventRows });
+  });
+
+  it('returns { events: [] } when the owner has no bots (never queries the journal)', async () => {
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => []) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerJournalTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, events: [] });
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('fails fault:false when the owner scope is unavailable', async () => {
+    const ctx = makeCtx({
+      botRepo: { getBotsByOwner: vi.fn() } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerJournalTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('owner scope');
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ ownerId: 'owner-1' });
+
+    const result = await getOwnerJournalTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
   });
 });

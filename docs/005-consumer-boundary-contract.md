@@ -417,6 +417,41 @@ caller-supplied id can widen scope.
 - **`agent_runtime_sessions` is NOT here** — it is a herobids PLATFORM table
   (agent-lifecycle-written, not a trading table); the sessions read stays local.
 
+### `get_owner_bot_fills` / `get_owner_bot_positions` / `get_owner_fills` / `get_owner_positions` / `get_owner_journal` (read-only) — c4.2
+
+Owner-scoped raw-row reads used by the herobids PLATFORM export routes
+(`/bots/:id/export/*`, `/export/*`) and views (`/bots/:botId/positions`, `/journal`)
+to source trading rows over the boundary so the herobids-local trading tables can
+be retired. `read-database` category (read-only; venue resolution
+short-circuited). These return RAW rows the herobids seam maps with
+`toFillRow`/`toPositionRow`/`toJournalRow` (same as the c1 agent reads). Copied
+verbatim from the herobids export route queries; ownership re-keyed to the
+owner-scoped repo methods (`getBotByIdForOwner` / `getBotsByOwner`, the same the
+`list_owner_bots` / `get_owner_bot_status` family uses).
+
+- **`get_owner_bot_fills`** — payload `{ botId, from?: string(ISO), to?: string(ISO) }`;
+  result `{ ok: true, botId, fills: FillRow[] }`. Single OWNED bot (gated on
+  `getBotByIdForOwner` → `not_found.resource` if absent/unowned); `fills` where
+  `actorType='bot' AND actorId=botId` (+ optional `filledAt` ± bounds). Parity with
+  herobids `/bots/:id/export/trades`.
+- **`get_owner_bot_positions`** — payload `{ botId }`; result
+  `{ ok: true, botId, positions: PositionRow[] }`. Single owned bot; ALL positions
+  (open + closed, no `closedAt` filter). Parity with `/bots/:id/export/report`.
+- **`get_owner_fills`** — payload `{ from?, to? }`; result `{ ok: true, fills: FillRow[] }`.
+  ALL bots owned by the subject owner (`getBotsByOwner`); `fills` where
+  `actorType='bot' AND actorId IN ownerBotIds` (+ optional bounds); empty owner-bots
+  → `[]`. Parity with `/export/trades`.
+- **`get_owner_positions`** — payload `{}`; result `{ ok: true, positions: PositionRow[] }`.
+  ALL owner bots; `positions` where `actorType='bot' AND actorId IN ownerBotIds`.
+  Parity with `/export/bundle` positions read.
+- **`get_owner_journal`** — payload `{}`; result `{ ok: true, events: JournalRow[] }`.
+  ALL owner bots; `journalEvents` where `actorId IN ownerBotIds` (no `actorType`
+  filter — matches source). Parity with `/export/bundle` journal read.
+
+Scope is the SUBJECT owner (`ownerId`); no caller-supplied id can widen scope
+(single-bot tools gate on ownership first; owner-wide tools scope by the owner's
+resolved bot set, empty → empty result, never an unscoped query).
+
 ## Deployment And Health
 
 Health semantics are fixed:
