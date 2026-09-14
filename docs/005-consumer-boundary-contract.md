@@ -377,6 +377,32 @@ the same `idempotencyKey` yields one persisted invocation and one set of rows.
   the platform `connections` table (the consumer links
   `resolvedVenueAccountId` to the returned `venueAccountId` itself).
 
+### `get_agent_fills` / `get_agent_journal_events` / `get_agent_positions` (read-only) — D1-c1
+
+Agent-scoped evidence reads used by the herobids PLATFORM agent-evaluation
+subsystem (and the agent-scoped `/agents/:id/export/*` routes) to source an
+agent's own trading audit trail over the boundary — so the herobids-local
+trading tables can be retired. `read-database` category (read-only; venue
+resolution short-circuited). Scope is the SUBJECT agent (`actor.type='agent'`,
+`actor.id`) — agent-native rows PLUS agent-owned-bot rows (bots where
+`creatorType='agent' AND creatorId=agentId`), resolved SERVER-SIDE. No
+caller-supplied id can widen scope.
+
+- **`get_agent_fills`** — payload `{ from?: string(ISO), to?: string(ISO) }`;
+  result `{ ok: true, fills: FillRow[] }` (full rows; time-filtered on `filledAt`).
+- **`get_agent_journal_events`** — payload `{ from?, to? }`; result
+  `{ ok: true, events: JournalRow[] }` (time-filtered on `createdAt`).
+- **`get_agent_positions`** — payload `{ from?, to?, at?: string(ISO) }`; result
+  `{ ok: true, positions: PositionRow[] }`. `at` is a point-in-time snapshot
+  (openedAt ≤ at AND (closedAt null OR closedAt > at)).
+- **Full rows, verbatim** — evaluation analyses raw rows (redaction, per-fill
+  timing, security-scan); no derivation suffices. Rows carry trading STATE only,
+  NEVER credentials/secrets (those live in `user_credentials`/`venue_accounts`).
+  This is the accepted full-row-for-evaluation carve-out (004 "D1-c1"), distinct
+  from the market-data derived-only rule; grounded in the A2 raw-journal precedent.
+- **`agent_runtime_sessions` is NOT here** — it is a herobids PLATFORM table
+  (agent-lifecycle-written, not a trading table); the sessions read stays local.
+
 ## Deployment And Health
 
 Health semantics are fixed:
