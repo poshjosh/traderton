@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gte, inArray, lte, or, sql, sum } from 'drizzle-orm
 import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig } from '@traderton/domain';
 import type { Database } from '@traderton/db';
-import { fills, journalEvents, positions, bots, venueAccounts, FillRepository, PositionRepository, PgJournal, ReconciliationEventRepository } from '@traderton/db';
+import { fills, journalEvents, positions, bots, venueAccounts, FillRepository, PositionRepository, PgJournal, ReconciliationEventRepository, DecisionRepository, DecisionFailureRepository } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
 import { createLogger } from '../logger.js';
 
@@ -969,6 +969,101 @@ const getAgentPositionsTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- get_agent_decisions ---
+//
+// Agent-scoped boundary READ of the agent's decisions (agent-native + agent-owned
+// bots), each annotated with the derived latest-execution-plan `status`. Re-points
+// the herobids `GET /agents/:id/decisions` route off its local `decisions` +
+// `execution_plans` reads. The two-part fold + status derivation live in the copied
+// `DecisionRepository.loadAgentDecisions` loader; this tool authors nothing but
+// guards + ISO→Date param parse + delegation. Scope invariant matches get_agent_fills:
+// NO botIds param — agent-owned bot resolution stays context-derived so a caller
+// cannot widen scope. Guards mirror get_agent_fills (fault:false).
+
+const GetAgentDecisionsParamsSchema = z.object({
+  from: z.string().optional().describe('ISO date — only include decisions at or after this time'),
+  to: z.string().optional().describe('ISO date — only include decisions at or before this time'),
+  limit: z.coerce.number().int().positive().optional().describe('Max decisions to return (default 50)'),
+});
+
+const getAgentDecisionsTool: AgentTool<TradingToolContext> = {
+  name: 'get_agent_decisions',
+  description: 'Get all decisions attributable to this agent (agent-native + agent-owned bots), each with its latest execution-plan status, optionally time-filtered. Only returns this agent\'s own data.',
+  parametersSchema: GetAgentDecisionsParamsSchema,
+  parameters: convertZodToJsonSchema(GetAgentDecisionsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { from, to, limit } = params as z.infer<typeof GetAgentDecisionsParamsSchema>;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.agentId) {
+      return { success: false, error: 'agent scope not available', fault: false };
+    }
+
+    const db = ctx.db as Database;
+    // Scope invariant: NEVER pass botIds — agent-owned bot resolution stays
+    // context-derived (loadAgentBotIds) so a caller cannot widen scope. Only the
+    // time filters + limit cross from params.
+    const decisionRows = await new DecisionRepository(db).loadAgentDecisions(ctx.agentId, {
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      limit,
+    });
+
+    return { success: true, data: { ok: true, decisions: decisionRows } };
+  },
+};
+
+// --- get_agent_decision_failures ---
+//
+// Agent-scoped boundary READ of the agent's decision failures. Re-points the
+// herobids `GET /agents/:id/decision-failures` route off its local
+// `decision_failures` read (and the telegram-command-handlers read). It exposes
+// the EXISTING `DecisionFailureRepository.query` method (authors no new query),
+// scoped to actorType='agent' + actorId=ctx.agentId. The herobids route filters
+// actorId only; an agent's own failures are inserted with actorType='agent', and
+// agent ids are unique, so actorType='agent' + actorId is equivalent to the
+// route's actorId-only predicate (and is the correct agent scope — an agent's
+// bot's failures carry actorType='bot' and are out of this agent-native scope).
+// Guards mirror get_agent_fills (fault:false).
+
+const GetAgentDecisionFailuresParamsSchema = z.object({
+  since: z.string().optional().describe('ISO date — only include failures at or after this time'),
+  limit: z.coerce.number().int().positive().optional().describe('Max failures to return (default 100)'),
+});
+
+const getAgentDecisionFailuresTool: AgentTool<TradingToolContext> = {
+  name: 'get_agent_decision_failures',
+  description: 'Get the decision failures attributable to this agent (actorType=agent), optionally filtered to failures at or after a given time. Only returns this agent\'s own data.',
+  parametersSchema: GetAgentDecisionFailuresParamsSchema,
+  parameters: convertZodToJsonSchema(GetAgentDecisionFailuresParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { since, limit } = params as z.infer<typeof GetAgentDecisionFailuresParamsSchema>;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.agentId) {
+      return { success: false, error: 'agent scope not available', fault: false };
+    }
+
+    const db = ctx.db as Database;
+    // Scope invariant: actorType='agent' + actorId=ctx.agentId — the agent scope
+    // is context-derived; only `since`/`limit` cross from params.
+    const failureRows = await new DecisionFailureRepository(db).query({
+      actorType: 'agent',
+      actorId: ctx.agentId,
+      since: since ? new Date(since) : undefined,
+      limit,
+    });
+
+    return { success: true, data: { ok: true, failures: failureRows } };
+  },
+};
+
 // --- get_agent_venue_binding ---
 //
 // Agent-scoped boundary READ of the agent's venue binding (D1-c2). Replaces the
@@ -1536,6 +1631,8 @@ export const botManagementTools: AgentTool[] = [
   getAgentFillsTool,
   getAgentJournalEventsTool,
   getAgentPositionsTool,
+  getAgentDecisionsTool,
+  getAgentDecisionFailuresTool,
   getAgentVenueBindingTool,
   getOwnerBotFillsTool,
   getOwnerBotPositionsTool,

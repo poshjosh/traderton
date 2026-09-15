@@ -191,6 +191,7 @@ describe('deprovision_venue_account tool', () => {
  */
 
 const countTool = provisioningTools.find((t) => t.name === 'count_bots_by_venue_account')!;
+const countByBlueprintTool = provisioningTools.find((t) => t.name === 'count_bots_by_blueprint')!;
 const getVenueAccountTool = provisioningTools.find((t) => t.name === 'get_venue_account')!;
 
 interface CountMockDbOpts {
@@ -422,6 +423,134 @@ describe('get_venue_account tool', () => {
     const result = await getVenueAccountTool.execute(
       { venueAccountId: VA_ID },
       makeGetVaCtx({ account: { venueAccountRef: 'x', venue: 'jupiter', label: 'L' } }, { ownerId: '' }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.fault).toBe(false);
+      expect(result.error).toBe('owner scope not available');
+    }
+  });
+});
+
+/**
+ * Tool-level tests for `count_bots_by_blueprint` — the owner-scoped blueprint
+ * dependency-count READ tool. Mirrors count_bots_by_venue_account, keyed on
+ * `bots.blueprintId` and narrowed to the owner's bots (INTENTIONAL DIVERGENCE
+ * from the old cross-owner herobids SQL). Every REQUESTED blueprintId is seeded
+ * with an empty array; owner-scope narrowing happens IN the single bots query
+ * (blueprintId IN ids AND ownerId=owner), so unowned/other-owner bots never
+ * surface. Read-tool guard style (fault:false).
+ */
+
+const BP_ID = 'bp-1';
+
+interface CountBpMockDbOpts {
+  /** Bot rows returned by the owner-scoped bots-by-blueprint select. */
+  bots?: Array<{ id: string; blueprintId: string }>;
+}
+
+function buildCountBpMockDb(opts: CountBpMockDbOpts) {
+  return {
+    select: vi.fn().mockImplementation(() => ({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockImplementation(() => Promise.resolve(opts.bots ?? [])),
+      }),
+    })),
+  } as unknown as TradingToolContext['db'];
+}
+
+function makeCountBpCtx(dbOpts: CountBpMockDbOpts, overrides: Partial<TradingToolContext> = {}): TradingToolContext {
+  return {
+    agentId: 'agent-1',
+    sessionId: 'session-1',
+    ownerId: OWNER_ID,
+    executionMode: 'paper',
+    authorizationMode: 'direct',
+    redis: {} as unknown as TradingToolContext['redis'],
+    publishToInbound: vi.fn(async () => undefined),
+    db: buildCountBpMockDb(dbOpts),
+    ...overrides,
+  };
+}
+
+describe('count_bots_by_blueprint tool', () => {
+  it('is registered read-database', () => {
+    expect(countByBlueprintTool).toBeDefined();
+    expect(countByBlueprintTool.category).toBe('read-database');
+  });
+
+  it('returns bot ids per blueprint with referencing bots (single id)', async () => {
+    const result = await countByBlueprintTool.execute(
+      { blueprintIds: [BP_ID] },
+      makeCountBpCtx({
+        bots: [
+          { id: 'bot-a', blueprintId: BP_ID },
+          { id: 'bot-b', blueprintId: BP_ID },
+        ],
+      }),
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, byBlueprint: { [BP_ID]: ['bot-a', 'bot-b'] } });
+  });
+
+  it('returns an empty array entry for a requested blueprint with no owner bots', async () => {
+    const result = await countByBlueprintTool.execute(
+      { blueprintIds: [BP_ID] },
+      makeCountBpCtx({ bots: [] }),
+    );
+    expect(result.success).toBe(true);
+    // Every requested id gets an explicit "zero bots" entry.
+    expect(result.data).toEqual({ ok: true, byBlueprint: { [BP_ID]: [] } });
+  });
+
+  it('seeds empty entries for all requested ids in a mixed batch', async () => {
+    const result = await countByBlueprintTool.execute(
+      { blueprintIds: [BP_ID, 'bp-2', 'bp-3'] },
+      makeCountBpCtx({
+        bots: [
+          { id: 'bot-a', blueprintId: BP_ID },
+          { id: 'bot-c', blueprintId: 'bp-3' },
+        ],
+      }),
+    );
+    expect(result.success).toBe(true);
+    // bp-2 has no owner bot → empty array; every requested id is present.
+    expect(result.data).toEqual({
+      ok: true,
+      byBlueprint: { [BP_ID]: ['bot-a'], 'bp-2': [], 'bp-3': ['bot-c'] },
+    });
+  });
+
+  it('ignores a returned bot whose blueprintId was not requested (defensive)', async () => {
+    const result = await countByBlueprintTool.execute(
+      { blueprintIds: [BP_ID] },
+      makeCountBpCtx({
+        bots: [
+          { id: 'bot-a', blueprintId: BP_ID },
+          { id: 'bot-x', blueprintId: 'bp-unrequested' },
+        ],
+      }),
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, byBlueprint: { [BP_ID]: ['bot-a'] } });
+  });
+
+  it('fails read-tool style when direct db access is missing', async () => {
+    const result = await countByBlueprintTool.execute(
+      { blueprintIds: [BP_ID] },
+      makeCountBpCtx({}, { db: undefined }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.fault).toBe(false);
+      expect(result.error).toBe('direct db access not available');
+    }
+  });
+
+  it('fails read-tool style when owner scope is missing', async () => {
+    const result = await countByBlueprintTool.execute(
+      { blueprintIds: [BP_ID] },
+      makeCountBpCtx({}, { ownerId: '' }),
     );
     expect(result.success).toBe(false);
     if (!result.success) {

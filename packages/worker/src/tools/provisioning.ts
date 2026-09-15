@@ -544,6 +544,79 @@ const countBotsByVenueAccountTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// AUTHORED SEAM (L3) — the `count_bots_by_blueprint` boundary READ tool.
+//
+// Owner-scoped, read-database counterpart of a blueprint-delete dependency guard:
+// for each requested blueprintId it returns which of THIS OWNER'S bots reference
+// it, so herobids can re-point its blueprint-delete dep-check (and any
+// Delete-button count) off a LOCAL bots read. VERBATIM mirror of
+// count_bots_by_venue_account, re-keyed on `bots.blueprintId`.
+//
+// ⚠ INTENTIONAL DIVERGENCE (scope narrowing) — the herobids raw SQL dep-check was
+// `SELECT COUNT(*) FROM bots WHERE blueprint_id = id` with NO owner filter, so it
+// counted bots across ALL owners (a cross-tenant count). This boundary version
+// narrows to `bots.ownerId = ctx.ownerId` (owner-scope safety — blueprints may be
+// public/other-owned, but a caller must never learn about another owner's bots).
+// A blueprint delete is performed by the blueprint's author, whose blocking bots
+// are their own; a different owner's bot referencing a public blueprint should not
+// block the author's delete (that would be a cross-tenant leak). The owner-scoped
+// count is therefore arguably MORE correct; the narrowing is flagged here as the
+// one behavioural divergence from the old cross-owner SQL.
+//
+// Owner-scope safety mirrors count_bots_by_venue_account: every REQUESTED
+// blueprintId is seeded with an empty array so callers get an explicit "zero bots"
+// signal, then filled from the owner-scoped bots query. Read-tool guard style
+// (fault:false): db absent → 'direct db access not available'; ownerId absent →
+// 'owner scope not available'.
+const CountBotsByBlueprintParamsSchema = z.object({
+  blueprintIds: z.array(z.string().min(1)).min(1)
+    .describe('Blueprint ids to count referencing bots for. A single-blueprint caller passes a 1-element array.'),
+});
+
+type CountBotsByBlueprintParams = z.infer<typeof CountBotsByBlueprintParamsSchema>;
+
+const countBotsByBlueprintTool: AgentTool<TradingToolContext> = {
+  name: 'count_bots_by_blueprint',
+  description:
+    "For one or more blueprints, return which of this owner's bots reference each blueprint (the any-bot, no-status-filter dependency predicate for a blueprint-delete guard). Use this to power a blueprint teardown guard or a Delete-button count without reading the local bots table. Only this owner's bots are counted; every requested blueprintId gets an entry (empty array when none reference it).",
+  parametersSchema: CountBotsByBlueprintParamsSchema,
+  parameters: convertZodToJsonSchema(CountBotsByBlueprintParamsSchema),
+  category: 'read-database',
+  async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { blueprintIds } = rawParams as CountBotsByBlueprintParams;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    const db = ctx.db as Database;
+    const ownerId = ctx.ownerId;
+
+    // Seed an empty array for every requested id so callers get an explicit
+    // "zero bots" signal for a blueprint no owner bot references.
+    const byBlueprint: Record<string, string[]> = {};
+    for (const id of blueprintIds) {
+      byBlueprint[id] = [];
+    }
+
+    // Owner-scoped dependency predicate: ANY bot owned by this owner referencing
+    // one of the requested blueprints, no status filter. Batched via inArray.
+    const referencingBots = await db
+      .select({ id: bots.id, blueprintId: bots.blueprintId })
+      .from(bots)
+      .where(and(inArray(bots.blueprintId, blueprintIds), eq(bots.ownerId, ownerId)));
+    for (const bot of referencingBots) {
+      if (bot.blueprintId != null && byBlueprint[bot.blueprintId] != null) {
+        byBlueprint[bot.blueprintId]!.push(bot.id);
+      }
+    }
+
+    return { success: true, data: { ok: true, byBlueprint } };
+  },
+};
+
 // AUTHORED SEAM (L3) — the `get_venue_account` boundary READ tool.
 //
 // Owner-scoped, read-database display-metadata read: returns a venue account's
@@ -621,5 +694,6 @@ export const provisioningTools: AgentTool<TradingToolContext>[] = [
   provisionVenueAccountTool,
   deprovisionVenueAccountTool,
   countBotsByVenueAccountTool,
+  countBotsByBlueprintTool,
   getVenueAccountTool,
 ];

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FillRepository, PositionRepository } from '../repositories.js';
+import { FillRepository, PositionRepository, DecisionRepository } from '../repositories.js';
 import { PgJournal } from '../journal-pg.js';
-import { bots, fills, positions, journalEvents } from '../schema/index.js';
+import { bots, fills, positions, journalEvents, decisions, executionPlans } from '../schema/index.js';
 
 /**
  * AUTHORED unit tests for the agent-scoped evidence loaders. The loader BODIES are
@@ -32,12 +32,16 @@ function buildMockDb(rowsByTable: {
   fills?: Row[];
   positions?: Row[];
   journalEvents?: Row[];
+  decisions?: Row[];
+  executionPlans?: Row[];
 }) {
   const routeFor = (table: unknown): Row[] => {
     if (table === bots) return rowsByTable.bots ?? [];
     if (table === fills) return rowsByTable.fills ?? [];
     if (table === positions) return rowsByTable.positions ?? [];
     if (table === journalEvents) return rowsByTable.journalEvents ?? [];
+    if (table === decisions) return rowsByTable.decisions ?? [];
+    if (table === executionPlans) return rowsByTable.executionPlans ?? [];
     return [];
   };
 
@@ -222,5 +226,93 @@ describe('PgJournal.loadAgentJournalEvents — copied union loader', () => {
     const rows = await journal.loadAgentJournalEvents('agent-1', { botIds: ['bot-99'] });
 
     expect(rows).toHaveLength(2);
+  });
+});
+
+describe('DecisionRepository.loadAgentDecisions — copied union loader + ep-status attach', () => {
+  it('unions agent-native + agent-owned-bot decisions', async () => {
+    const { db } = buildMockDb({
+      bots: [{ id: 'bot-1' }],
+      // Same set returned for both arms; assert both arms are concatenated.
+      decisions: [{ id: 'd-a', createdAt: new Date('2024-01-01T00:00:00.000Z') }],
+      executionPlans: [],
+    });
+    const repo = new DecisionRepository(db as never);
+
+    const rows = await repo.loadAgentDecisions('agent-1');
+
+    // agentBotIds non-empty → bot arm runs; the union has both arms' rows.
+    expect(rows).toHaveLength(2);
+    // No matching execution plan → status is null.
+    expect(rows[0]!.status).toBeNull();
+  });
+
+  it('empty botIds → only the agent-native arm runs (bot arm short-circuits to [])', async () => {
+    const { db } = buildMockDb({
+      bots: [],
+      decisions: [{ id: 'd-a', createdAt: new Date('2024-01-01T00:00:00.000Z') }],
+      executionPlans: [],
+    });
+    const repo = new DecisionRepository(db as never);
+
+    const rows = await repo.loadAgentDecisions('agent-1');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe('d-a');
+  });
+
+  it('orders the union by createdAt desc and applies the limit', async () => {
+    const { db } = buildMockDb({
+      bots: [], // agent-native arm only → single-sourced row set
+      decisions: [
+        { id: 'old', createdAt: new Date('2024-01-01T00:00:00.000Z') },
+        { id: 'new', createdAt: new Date('2024-03-01T00:00:00.000Z') },
+        { id: 'mid', createdAt: new Date('2024-02-01T00:00:00.000Z') },
+      ],
+      executionPlans: [],
+    });
+    const repo = new DecisionRepository(db as never);
+
+    const rows = await repo.loadAgentDecisions('agent-1', { limit: 2 });
+
+    // Most-recent first, capped at the limit.
+    expect(rows.map((r) => r.id)).toEqual(['new', 'mid']);
+  });
+
+  it('attaches the latest execution-plan status per decision (batch, latest-by-createdAt)', async () => {
+    const { db } = buildMockDb({
+      bots: [],
+      decisions: [
+        { id: 'd-1', createdAt: new Date('2024-01-01T00:00:00.000Z') },
+        { id: 'd-2', createdAt: new Date('2024-01-02T00:00:00.000Z') },
+      ],
+      executionPlans: [
+        // d-1 has two plans — the later one wins.
+        { decisionId: 'd-1', status: 'pending', createdAt: new Date('2024-01-01T00:00:00.000Z') },
+        { decisionId: 'd-1', status: 'completed', createdAt: new Date('2024-01-01T05:00:00.000Z') },
+        // d-2 has one plan.
+        { decisionId: 'd-2', status: 'failed', createdAt: new Date('2024-01-02T00:00:00.000Z') },
+      ],
+    });
+    const repo = new DecisionRepository(db as never);
+
+    const rows = await repo.loadAgentDecisions('agent-1');
+    const byId = new Map(rows.map((r) => [r.id, r.status]));
+
+    expect(byId.get('d-1')).toBe('completed');
+    expect(byId.get('d-2')).toBe('failed');
+  });
+
+  it('returns [] and skips the execution-plans query when there are no decisions', async () => {
+    const { db } = buildMockDb({
+      bots: [],
+      decisions: [],
+      executionPlans: [{ decisionId: 'd-x', status: 'completed', createdAt: new Date() }],
+    });
+    const repo = new DecisionRepository(db as never);
+
+    const rows = await repo.loadAgentDecisions('agent-1');
+
+    expect(rows).toEqual([]);
   });
 });

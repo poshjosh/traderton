@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { ToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES } from '@traderton/domain';
-import { FillRepository, PositionRepository, PgJournal } from '@traderton/db';
+import { FillRepository, PositionRepository, PgJournal, DecisionRepository, DecisionFailureRepository } from '@traderton/db';
 import { botManagementTools } from './bots.js';
 
 const createBotTool = botManagementTools.find((t) => t.name === 'create_bot')!;
@@ -16,6 +16,8 @@ const deleteBotTool = botManagementTools.find((t) => t.name === 'delete_bot')!;
 const getAgentFillsTool = botManagementTools.find((t) => t.name === 'get_agent_fills')!;
 const getAgentJournalEventsTool = botManagementTools.find((t) => t.name === 'get_agent_journal_events')!;
 const getAgentPositionsTool = botManagementTools.find((t) => t.name === 'get_agent_positions')!;
+const getAgentDecisionsTool = botManagementTools.find((t) => t.name === 'get_agent_decisions')!;
+const getAgentDecisionFailuresTool = botManagementTools.find((t) => t.name === 'get_agent_decision_failures')!;
 const getAgentVenueBindingTool = botManagementTools.find((t) => t.name === 'get_agent_venue_binding')!;
 const getOwnerBotFillsTool = botManagementTools.find((t) => t.name === 'get_owner_bot_fills')!;
 const getOwnerBotPositionsTool = botManagementTools.find((t) => t.name === 'get_owner_bot_positions')!;
@@ -1087,6 +1089,137 @@ describe('get_agent_positions — agent-scoped positions read', () => {
     (ctx as { agentId?: string }).agentId = undefined;
 
     const result = await getAgentPositionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('agent scope');
+  });
+});
+
+describe('get_agent_decisions — agent-scoped decisions read', () => {
+  it('is registered read-database', () => {
+    expect(getAgentDecisionsTool).toBeDefined();
+    expect(getAgentDecisionsTool.category).toBe('read-database');
+  });
+
+  it('delegates to DecisionRepository.loadAgentDecisions with ctx.agentId and returns { decisions }', async () => {
+    // Rows already carry the derived `status` (attached by the loader).
+    const decisionRows = [
+      { id: 'd-1', status: 'completed' },
+      { id: 'd-2', status: null },
+    ];
+    const spy = vi.spyOn(DecisionRepository.prototype, 'loadAgentDecisions').mockResolvedValue(decisionRows as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    const result = await getAgentDecisionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, decisions: decisionRows });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [agentIdArg, optsArg] = spy.mock.calls[0];
+    expect(agentIdArg).toBe('agent-1');
+    // No from/to/limit provided → all undefined.
+    expect(optsArg).toEqual({ from: undefined, to: undefined, limit: undefined });
+    // Scope invariant: the tool must NEVER thread botIds (that would let a caller
+    // widen scope beyond the context agent).
+    expect(optsArg).not.toHaveProperty('botIds');
+  });
+
+  it('parses ISO from/to into Date and passes limit through to the loader', async () => {
+    const spy = vi.spyOn(DecisionRepository.prototype, 'loadAgentDecisions').mockResolvedValue([] as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    await getAgentDecisionsTool.execute(
+      { from: '2024-01-01T00:00:00.000Z', to: '2024-02-01T00:00:00.000Z', limit: 10 },
+      ctx,
+    );
+
+    const [, optsArg] = spy.mock.calls[0];
+    const opts = optsArg as { from?: Date; to?: Date; limit?: number };
+    expect(opts.from).toBeInstanceOf(Date);
+    expect(opts.to).toBeInstanceOf(Date);
+    expect(opts.from?.toISOString()).toBe('2024-01-01T00:00:00.000Z');
+    expect(opts.to?.toISOString()).toBe('2024-02-01T00:00:00.000Z');
+    expect(opts.limit).toBe(10);
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ agentId: 'agent-1' });
+
+    const result = await getAgentDecisionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+
+  it('fails fault:false when the agent scope is unavailable', async () => {
+    const ctx = makeCtx({ db: stubDb });
+    (ctx as { agentId?: string }).agentId = undefined;
+
+    const result = await getAgentDecisionsTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('agent scope');
+  });
+});
+
+describe('get_agent_decision_failures — agent-scoped decision-failures read', () => {
+  it('is registered read-database', () => {
+    expect(getAgentDecisionFailuresTool).toBeDefined();
+    expect(getAgentDecisionFailuresTool.category).toBe('read-database');
+  });
+
+  it('delegates to DecisionFailureRepository.query with actorType=agent + ctx.agentId and returns { failures }', async () => {
+    const failureRows = [{ id: 'df-1' }];
+    const spy = vi.spyOn(DecisionFailureRepository.prototype, 'query').mockResolvedValue(failureRows as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    const result = await getAgentDecisionFailuresTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, failures: failureRows });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [filterArg] = spy.mock.calls[0];
+    // Agent-scope: actorType='agent' + actorId=ctx.agentId (equivalent to the
+    // herobids route's actorId-only predicate; agent ids are unique).
+    expect(filterArg).toEqual({ actorType: 'agent', actorId: 'agent-1', since: undefined, limit: undefined });
+  });
+
+  it('parses ISO since into Date and passes limit through', async () => {
+    const spy = vi.spyOn(DecisionFailureRepository.prototype, 'query').mockResolvedValue([] as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    await getAgentDecisionFailuresTool.execute(
+      { since: '2024-03-01T00:00:00.000Z', limit: 20 },
+      ctx,
+    );
+
+    const [filterArg] = spy.mock.calls[0];
+    const filter = filterArg as { actorType: string; actorId: string; since?: Date; limit?: number };
+    expect(filter.actorType).toBe('agent');
+    expect(filter.actorId).toBe('agent-1');
+    expect(filter.since).toBeInstanceOf(Date);
+    expect(filter.since?.toISOString()).toBe('2024-03-01T00:00:00.000Z');
+    expect(filter.limit).toBe(20);
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({ agentId: 'agent-1' });
+
+    const result = await getAgentDecisionFailuresTool.execute({}, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+
+  it('fails fault:false when the agent scope is unavailable', async () => {
+    const ctx = makeCtx({ db: stubDb });
+    (ctx as { agentId?: string }).agentId = undefined;
+
+    const result = await getAgentDecisionFailuresTool.execute({}, ctx);
 
     expect(result.success).toBe(false);
     expect(result.fault).toBe(false);

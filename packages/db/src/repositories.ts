@@ -928,6 +928,97 @@ export class DecisionRepository {
       .limit(limit);
   }
 
+  /**
+   * Load all decisions attributable to an agent (agent-native + agent-owned bots),
+   * each annotated with the derived `status` of its latest execution plan.
+   *
+   * Agent-native decisions: `actorType = 'agent'`, `actorId = agentId`.
+   * Bot decisions: `actorType = 'bot'`, `actorId IN agentBotIds`.
+   *
+   * Copied from the herobids `GET /agents/:id/decisions` route
+   * (apps/api/src/routes/agents.ts), re-keyed to Traderton imports. That route
+   * folds agent-native + agent-owned-bot decisions via `or(...)` and derives
+   * `status` per row from the latest `execution_plans.status` by `created_at`.
+   * Here the fold mirrors `loadAgentFills` (two parallel selects then concat),
+   * the `orderBy desc(createdAt)` + `limit` are applied over the union in-code,
+   * and the status is batch-attached (one execution_plans query for all decision
+   * ids, latest-per-decision picked in-code) to avoid the route's per-row
+   * correlated subquery / N+1. The bot-id resolution inlines the same query as
+   * `FillRepository.loadAgentBotIds` (bots where creatorType='agent' AND
+   * creatorId=agentId).
+   */
+  async loadAgentDecisions(
+    agentId: string,
+    opts?: { from?: Date; to?: Date; limit?: number },
+  ): Promise<Array<typeof decisions.$inferSelect & { status: string | null }>> {
+    // Inlined copy of loadAgentBotIds (lives on FillRepository/PositionRepository).
+    // Byte-identical WHERE: bots where creatorType='agent' AND creatorId=agentId.
+    const agentBotIdRows = await this.db
+      .select({ id: bots.id })
+      .from(bots)
+      .where(and(eq(bots.creatorType, 'agent'), eq(bots.creatorId, agentId)));
+    const agentBotIds = agentBotIdRows.map((r) => r.id);
+
+    const [agentRows, botRows] = await Promise.all([
+      this.db
+        .select()
+        .from(decisions)
+        .where(and(
+          eq(decisions.actorType, 'agent'),
+          eq(decisions.actorId, agentId),
+          ...(opts?.from ? [gte(decisions.createdAt, opts.from)] : []),
+          ...(opts?.to ? [lte(decisions.createdAt, opts.to)] : []),
+        )),
+      agentBotIds.length > 0
+        ? this.db
+            .select()
+            .from(decisions)
+            .where(and(
+              eq(decisions.actorType, 'bot'),
+              inArray(decisions.actorId, agentBotIds),
+              ...(opts?.from ? [gte(decisions.createdAt, opts.from)] : []),
+              ...(opts?.to ? [lte(decisions.createdAt, opts.to)] : []),
+            ))
+        : Promise.resolve([]),
+    ]);
+
+    // Order the union by most recent first and apply the limit, reproducing the
+    // route's `orderBy(desc(createdAt)).limit(limit)` over the folded set. The
+    // /agents/decisions route always passes an explicit limit (default 20, cap
+    // 100); the `?? 50` here is only a fallback for callers that omit one.
+    const ordered = [...agentRows, ...botRows]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, opts?.limit ?? 50);
+
+    if (ordered.length === 0) return [];
+
+    // Batch-fetch every execution plan for the selected decisions, then pick the
+    // latest plan per decisionId in-code — the derived `status` the herobids
+    // route computes with a per-row correlated subquery, without the N+1.
+    const decisionIds = ordered.map((d) => d.id);
+    const planRows = await this.db
+      .select({
+        decisionId: executionPlans.decisionId,
+        status: executionPlans.status,
+        createdAt: executionPlans.createdAt,
+      })
+      .from(executionPlans)
+      .where(inArray(executionPlans.decisionId, decisionIds));
+
+    const latestStatusByDecision = new Map<string, { status: string; createdAt: Date }>();
+    for (const plan of planRows) {
+      const current = latestStatusByDecision.get(plan.decisionId);
+      if (!current || plan.createdAt.getTime() > current.createdAt.getTime()) {
+        latestStatusByDecision.set(plan.decisionId, { status: plan.status, createdAt: plan.createdAt });
+      }
+    }
+
+    return ordered.map((d) => ({
+      ...d,
+      status: latestStatusByDecision.get(d.id)?.status ?? null,
+    }));
+  }
+
 }
 
 /**
