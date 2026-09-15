@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { and, asc, desc, eq, gte, inArray, lte, sql, sum } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, or, sql, sum } from 'drizzle-orm';
 import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig } from '@traderton/domain';
 import type { Database } from '@traderton/db';
@@ -1055,21 +1055,31 @@ const getAgentVenueBindingTool: AgentTool<TradingToolContext> = {
 //
 // Reproduces herobids /bots/:id/export/trades (exports.ts): fills where
 // actorType='bot' AND actorId=id, with optional filledAt >= from / <= to.
+//
+// ADDITIVE optional params (same c4.2-analytics pattern as get_owner_journal):
+// `limit`/`offset` paginate; when `limit` is present the query also applies
+// `.orderBy(desc(filledAt))` (newest first). orderBy is tied to limit so the
+// existing no-arg /export/trades caller keeps its unordered/unlimited behaviour
+// EXACTLY. `.offset(offset)` applies only when offset is present. The
+// owner-scoped not_found.resource ownership contract is unchanged.
 
 const GetOwnerBotFillsParamsSchema = z.object({
   botId: z.string().min(1).describe('ID of the bot to query'),
   from: z.string().optional().describe('ISO date — only include fills at or after this time'),
   to: z.string().optional().describe('ISO date — only include fills at or before this time'),
+  // coerce: callers may send numbers as strings
+  limit: z.coerce.number().int().positive().optional().describe('Max fills to return (newest first when set)'),
+  offset: z.coerce.number().int().nonnegative().optional().describe('Number of fills to skip'),
 });
 
 const getOwnerBotFillsTool: AgentTool<TradingToolContext> = {
   name: 'get_owner_bot_fills',
-  description: 'Get all fills for a specific bot, optionally time-filtered. Only works for bots owned by this owner.',
+  description: 'Get fills for a specific bot, optionally time-filtered and paginated with a row limit/offset (newest first when limited). Only works for bots owned by this owner.',
   parametersSchema: GetOwnerBotFillsParamsSchema,
   parameters: convertZodToJsonSchema(GetOwnerBotFillsParamsSchema),
   category: 'read-database',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
-    const { botId, from, to } = params as z.infer<typeof GetOwnerBotFillsParamsSchema>;
+    const { botId, from, to, limit, offset } = params as z.infer<typeof GetOwnerBotFillsParamsSchema>;
 
     if (!ctx.botRepo) {
       return { success: false, error: 'direct db access not available', fault: false };
@@ -1094,7 +1104,15 @@ const getOwnerBotFillsTool: AgentTool<TradingToolContext> = {
     if (from) conditions.push(gte(fills.filledAt, new Date(from)));
     if (to) conditions.push(lte(fills.filledAt, new Date(to)));
 
-    const fillRows = await db.select().from(fills).where(and(...conditions));
+    // orderBy tied to limit (newest first); offset applies only when present.
+    let fillRows;
+    if (limit !== undefined) {
+      const limited = db.select().from(fills).where(and(...conditions))
+        .orderBy(desc(fills.filledAt)).limit(limit);
+      fillRows = offset !== undefined ? await limited.offset(offset) : await limited;
+    } else {
+      fillRows = await db.select().from(fills).where(and(...conditions));
+    }
 
     return { success: true, data: { ok: true, botId, fills: fillRows } };
   },
@@ -1227,20 +1245,51 @@ const getOwnerBotReconciliationEventsTool: AgentTool<TradingToolContext> = {
 // user, then fills where actorType='bot' AND actorId IN ownerBotIds, optional
 // filledAt ± bounds. Empty ownerBotIds short-circuits to []. Owner-bots
 // resolution reuses getBotsByOwner (the same method list_owner_bots uses).
+//
+// ADDITIVE optional params (mirrors get_owner_positions/get_owner_journal, same
+// c4.2-analytics pattern). Each applies ONLY when its param is present, so the
+// existing no-arg /export/trades caller behaves EXACTLY as before (all owner-bot
+// bot-actor fills, no agent fills, no subset, no order, no limit/offset):
+//   - `botIds` subsets the owner-bot set (INTERSECTION with ownerBotIds — a
+//     caller can never widen beyond owner scope), exactly like get_owner_positions.
+//   - `creatorAgentId` restricts the owner bots to those an agent created
+//     (creatorType='agent' AND creatorId=creatorAgentId) BEFORE taking their
+//     bot-actor fills — reproduces herobids' old agentId-mode semantics (fills
+//     stored under the agent's bot actors). Applied on the owner-bot resolution,
+//     so it too can never widen beyond owner scope.
+//   - `agentIds` UNIONS agent-actor fills for the CALLER-supplied agent ids:
+//     the query becomes (actorType='bot' AND actorId IN <in-scope botIds>) OR
+//     (actorType='agent' AND actorId IN agentIds). Traderton has no agents table
+//     (agents are platform), so the caller (herobids, which owns the agents
+//     table) resolves+ownership-verifies the agent ids and passes them here.
+//     Absent/empty → bot fills only (as today).
+//   - `from`/`to` window on `filledAt` (kept).
+//   - `limit`/`offset` paginate; when `limit` is present the query also applies
+//     `.orderBy(desc(filledAt))` (newest first) — orderBy is tied to limit so the
+//     no-arg caller keeps its existing unordered/unlimited behaviour EXACTLY.
+//     `.offset(offset)` applies only when offset is present.
+// The empty short-circuit is preserved: if the in-scope bot set is empty AND no
+// agentIds were supplied, return { fills: [] } without querying.
 
 const GetOwnerFillsParamsSchema = z.object({
+  botIds: z.array(z.string()).optional().describe('Restrict to these bot ids (intersected with the owner\'s bots — cannot widen beyond owner scope)'),
+  creatorAgentId: z.string().optional().describe('Restrict owner bots to those created by this agent (creatorType=agent) before taking their fills'),
+  agentIds: z.array(z.string()).optional().describe('Also include agent-actor fills for these caller-supplied, ownership-verified agent ids (union with the owner bot fills)'),
   from: z.string().optional().describe('ISO date — only include fills at or after this time'),
   to: z.string().optional().describe('ISO date — only include fills at or before this time'),
+  // coerce: callers may send numbers as strings
+  limit: z.coerce.number().int().positive().optional().describe('Max fills to return (newest first when set)'),
+  offset: z.coerce.number().int().nonnegative().optional().describe('Number of fills to skip'),
 });
 
 const getOwnerFillsTool: AgentTool<TradingToolContext> = {
   name: 'get_owner_fills',
-  description: 'Get all fills across every bot owned by this owner, optionally time-filtered. Only returns this owner\'s own data.',
+  description: 'Get fills across bots owned by this owner. Optionally restrict to a subset of bot ids, to bots created by a given agent, union in agent-actor fills for caller-supplied agent ids, apply a filledAt time window, and paginate with a row limit/offset (newest first when limited). Only returns this owner\'s own data.',
   parametersSchema: GetOwnerFillsParamsSchema,
   parameters: convertZodToJsonSchema(GetOwnerFillsParamsSchema),
   category: 'read-database',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
-    const { from, to } = params as z.infer<typeof GetOwnerFillsParamsSchema>;
+    const { botIds, creatorAgentId, agentIds, from, to, limit, offset } = params as z.infer<typeof GetOwnerFillsParamsSchema>;
 
     if (!ctx.botRepo) {
       return { success: false, error: 'direct db access not available', fault: false };
@@ -1253,20 +1302,61 @@ const getOwnerFillsTool: AgentTool<TradingToolContext> = {
     }
 
     const ownerBots = await ctx.botRepo.getBotsByOwner(ctx.ownerId);
-    const ownerBotIds = ownerBots.map((b) => b.id);
+    let inScopeBots = ownerBots;
 
-    // Copied from herobids /export/trades: no owned bots → empty result.
-    if (ownerBotIds.length === 0) {
+    // Restrict to bots an agent created — reproduces herobids' old agentId mode
+    // (fills stored under the agent's bot actors). On the owner-bot set, so it
+    // cannot widen beyond owner scope.
+    if (creatorAgentId) {
+      inScopeBots = inScopeBots.filter((b) => b.creatorType === 'agent' && b.creatorId === creatorAgentId);
+    }
+
+    let ownerBotIds = inScopeBots.map((b) => b.id);
+
+    // INTERSECT with the requested subset when provided — never widen beyond the
+    // owner's bots, so a caller cannot read another owner's rows via botIds.
+    if (botIds) {
+      const requested = new Set(botIds);
+      ownerBotIds = ownerBotIds.filter((id) => requested.has(id));
+    }
+
+    const hasAgentIds = Array.isArray(agentIds) && agentIds.length > 0;
+
+    // Copied from herobids /export/trades: no in-scope bots AND no agent ids →
+    // empty result (never query).
+    if (ownerBotIds.length === 0 && !hasAgentIds) {
       return { success: true, data: { ok: true, fills: [] } };
     }
 
     const db = ctx.db as Database;
 
-    const conditions = [eq(fills.actorType, 'bot'), inArray(fills.actorId, ownerBotIds)];
+    // Actor scope: union bot-actor fills (in-scope bots) with agent-actor fills
+    // (caller-supplied agent ids). Each half is added only when it has ids.
+    const actorClauses = [];
+    if (ownerBotIds.length > 0) {
+      actorClauses.push(and(eq(fills.actorType, 'bot'), inArray(fills.actorId, ownerBotIds)));
+    }
+    if (hasAgentIds) {
+      actorClauses.push(and(eq(fills.actorType, 'agent'), inArray(fills.actorId, agentIds)));
+    }
+    const actorScope = actorClauses.length === 1 ? actorClauses[0] : or(...actorClauses);
+
+    const conditions = [actorScope];
     if (from) conditions.push(gte(fills.filledAt, new Date(from)));
     if (to) conditions.push(lte(fills.filledAt, new Date(to)));
 
-    const fillRows = await db.select().from(fills).where(and(...conditions));
+    // orderBy is tied to limit: only the limited path orders (newest first), so
+    // the no-arg caller keeps its unordered/unlimited behaviour. When limited,
+    // apply offset only when present. (Mirrors get_owner_journal's limit-tied
+    // orderBy; the offset branch extends that shape.)
+    let fillRows;
+    if (limit !== undefined) {
+      const limited = db.select().from(fills).where(and(...conditions))
+        .orderBy(desc(fills.filledAt)).limit(limit);
+      fillRows = offset !== undefined ? await limited.offset(offset) : await limited;
+    } else {
+      fillRows = await db.select().from(fills).where(and(...conditions));
+    }
 
     return { success: true, data: { ok: true, fills: fillRows } };
   },

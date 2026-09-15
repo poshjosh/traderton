@@ -1534,13 +1534,14 @@ describe('get_owner_journal — owner-wide journal read', () => {
 // args) so the tests can assert the DB-side subset/window/limit/order — proving
 // the filters are applied at the query, NOT moved in-app.
 function makeRecordingDb(result: unknown) {
-  const calls = { where: undefined as unknown, limit: undefined as unknown, orderByFired: false };
+  const calls = { where: undefined as unknown, limit: undefined as unknown, offset: undefined as unknown, orderByFired: false };
   const chain: Record<string, unknown> = {
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
     from: () => chain,
     where: (arg: unknown) => { calls.where = arg; return chain; },
     orderBy: () => { calls.orderByFired = true; return chain; },
     limit: (arg: unknown) => { calls.limit = arg; return chain; },
+    offset: (arg: unknown) => { calls.offset = arg; return chain; },
   };
   const db = { select: vi.fn(() => chain) } as unknown as ToolContext['db'];
   return { db, calls };
@@ -1676,6 +1677,211 @@ describe('get_owner_journal — optional subset / window / limit (c4.2)', () => 
     expect(result.success).toBe(true);
     expect(calls.limit).toBeUndefined();
     expect(calls.orderByFired).toBe(false);
+  });
+});
+
+// ── get_owner_fills additive params: subset / creatorAgentId / agentIds union /
+//    window / pagination (mirrors the get_owner_positions + get_owner_journal
+//    c4.2 blocks). The no-arg caller (the /export/trades parity) MUST stay
+//    unchanged: bot-actor fills only, unordered, unlimited.
+describe('get_owner_fills — optional subset / creatorAgentId / agentIds / pagination', () => {
+  it('intersects botIds with the owner bots (an unowned botId is excluded)', async () => {
+    const fillRows = [{ id: 'f-1' }];
+    // Owner owns bot-1 + bot-2; caller asks for bot-2 + bot-99 (not owned).
+    const getBotsByOwner = vi.fn(async () => [{ id: 'bot-1' }, { id: 'bot-2' }]);
+    const { db, calls } = makeRecordingDb(fillRows);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerFillsTool.execute({ botIds: ['bot-2', 'bot-99'] }, ctx);
+
+    expect(result.success).toBe(true);
+    // Non-empty intersection (bot-2) is queried; bot-99 (unowned) never reaches it.
+    expect(result.data).toEqual({ ok: true, fills: fillRows });
+    expect(calls.where).toBeDefined();
+  });
+
+  it('short-circuits to [] when the requested subset shares no bot with the owner (and no agentIds)', async () => {
+    const selectSpy = vi.fn();
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerFillsTool.execute({ botIds: ['bot-99'] }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, fills: [] });
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('creatorAgentId restricts owner bots to those the agent created before taking their fills', async () => {
+    const fillRows = [{ id: 'f-1' }];
+    // Owner owns two bots; only bot-1 was created by agent-7.
+    const getBotsByOwner = vi.fn(async () => [
+      { id: 'bot-1', creatorType: 'agent', creatorId: 'agent-7' },
+      { id: 'bot-2', creatorType: 'user', creatorId: 'owner-1' },
+    ]);
+    const { db, calls } = makeRecordingDb(fillRows);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerFillsTool.execute({ creatorAgentId: 'agent-7' }, ctx);
+
+    expect(result.success).toBe(true);
+    // bot-1 is in scope → the query runs; the agent's non-bot no-match short-circuit
+    // is covered by the next test.
+    expect(result.data).toEqual({ ok: true, fills: fillRows });
+    expect(calls.where).toBeDefined();
+  });
+
+  it('short-circuits to [] when creatorAgentId matches no owner bot (and no agentIds)', async () => {
+    const selectSpy = vi.fn();
+    const getBotsByOwner = vi.fn(async () => [
+      { id: 'bot-2', creatorType: 'user', creatorId: 'owner-1' },
+    ]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner } as unknown as ToolContext['botRepo'],
+      db: { select: selectSpy } as unknown as ToolContext['db'],
+    });
+
+    const result = await getOwnerFillsTool.execute({ creatorAgentId: 'agent-nobody' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, fills: [] });
+    expect(selectSpy).not.toHaveBeenCalled();
+  });
+
+  it('unions agent-actor fills when agentIds is present (queries even with no owner bots)', async () => {
+    const fillRows = [{ id: 'f-agent-1' }];
+    // Owner has NO bots — the agentIds union must still query (agent-actor fills).
+    const getBotsByOwner = vi.fn(async () => []);
+    const { db, calls } = makeRecordingDb(fillRows);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerFillsTool.execute({ agentIds: ['agent-1'] }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, fills: fillRows });
+    // The union half fired a query despite zero owner bots.
+    expect(calls.where).toBeDefined();
+  });
+
+  it('applies limit + offset + orderBy(desc(filledAt)) when limit is present', async () => {
+    const { db, calls } = makeRecordingDb([{ id: 'f-1' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerFillsTool.execute(
+      { from: '2026-01-01T00:00:00.000Z', to: '2026-02-01T00:00:00.000Z', limit: 50, offset: 100 },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(calls.limit).toBe(50);
+    expect(calls.offset).toBe(100);
+    expect(calls.orderByFired).toBe(true);
+  });
+
+  it('applies limit + orderBy but NOT offset when offset is absent', async () => {
+    const { db, calls } = makeRecordingDb([{ id: 'f-1' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerFillsTool.execute({ limit: 50 }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(calls.limit).toBe(50);
+    expect(calls.orderByFired).toBe(true);
+    expect(calls.offset).toBeUndefined();
+  });
+
+  it('the no-arg caller (/export/trades parity) stays bot-actor fills only, unordered, unlimited', async () => {
+    const { db, calls } = makeRecordingDb([{ id: 'f-1' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner: vi.fn(async () => [{ id: 'bot-1' }]) } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerFillsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(calls.limit).toBeUndefined();
+    expect(calls.offset).toBeUndefined();
+    expect(calls.orderByFired).toBe(false);
+  });
+});
+
+// ── get_owner_bot_fills additive pagination (limit/offset/desc tied to limit).
+//    The no-arg caller (/bots/:id/export/trades parity) stays unordered/unlimited.
+describe('get_owner_bot_fills — optional pagination (limit/offset/desc)', () => {
+  it('applies limit + offset + orderBy(desc(filledAt)) when limit is present', async () => {
+    const getBotByIdForOwner = vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1' }));
+    const { db, calls } = makeRecordingDb([{ id: 'f-1' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerBotFillsTool.execute({ botId: 'bot-1', limit: 50, offset: 100 }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(getBotByIdForOwner).toHaveBeenCalledWith('bot-1', 'owner-1');
+    expect(calls.limit).toBe(50);
+    expect(calls.offset).toBe(100);
+    expect(calls.orderByFired).toBe(true);
+  });
+
+  it('the no-arg caller stays unordered/unlimited', async () => {
+    const getBotByIdForOwner = vi.fn(async () => makeBotRecord({ id: 'bot-1', ownerId: 'owner-1' }));
+    const { db, calls } = makeRecordingDb([{ id: 'f-1' }]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner } as unknown as ToolContext['botRepo'],
+      db,
+    });
+
+    const result = await getOwnerBotFillsTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(calls.limit).toBeUndefined();
+    expect(calls.offset).toBeUndefined();
+    expect(calls.orderByFired).toBe(false);
+  });
+
+  it('returns not_found.resource for an unowned/absent bot (unchanged)', async () => {
+    const getBotByIdForOwner = vi.fn(async () => null);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotByIdForOwner } as unknown as ToolContext['botRepo'],
+      db: makeReadDb([[]]),
+    });
+
+    const result = await getOwnerBotFillsTool.execute({ botId: 'nope', limit: 10 }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('not_found.resource');
   });
 });
 
