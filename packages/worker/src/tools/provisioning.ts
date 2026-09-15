@@ -24,7 +24,7 @@
 import { z } from 'zod';
 import crypto from 'node:crypto';
 import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domain';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { Database } from '@traderton/db';
 import { userCredentials, venueAccounts, bots } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
@@ -467,7 +467,159 @@ const deprovisionVenueAccountTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// AUTHORED SEAM (L3) — the `count_bots_by_venue_account` boundary READ tool.
+//
+// Owner-scoped, read-database counterpart of the deprovision guard: it exposes
+// the SAME authoritative "any bot referencing the account (no status filter)"
+// predicate deprovision blocks on, so herobids can re-point its
+// connection/venue-account teardown guard + the Delete-button display count off
+// LOCAL trading-table reads. It authors NO new trading logic — the bots-by-
+// venue-account predicate is copied verbatim from deprovision.
+//
+// Owner-scope safety: a caller must NEVER learn about another owner's
+// accounts/bots, so the requested ids are first narrowed to the owner's
+// in-scope set; out-of-scope/unowned ids are simply OMITTED from the result
+// (never leaked). Read-tool guard style (fault:false) mirrors the owner-scoped
+// read tools in bots.ts: db absent → 'direct db access not available'; ownerId
+// absent → 'owner scope not available'.
+const CountBotsByVenueAccountParamsSchema = z.object({
+  venueAccountIds: z.array(z.string().min(1)).min(1)
+    .describe('Venue account ids to count referencing bots for. A single-account caller passes a 1-element array.'),
+});
+
+type CountBotsByVenueAccountParams = z.infer<typeof CountBotsByVenueAccountParamsSchema>;
+
+const countBotsByVenueAccountTool: AgentTool<TradingToolContext> = {
+  name: 'count_bots_by_venue_account',
+  description:
+    'For one or more venue accounts owned by this owner, return which bots reference each account (the same any-bot, no-status-filter predicate that blocks deprovision). Use this to power a connection/venue-account teardown guard or a Delete-button count without reading the local bots table. Out-of-scope/unowned account ids are omitted from the result.',
+  parametersSchema: CountBotsByVenueAccountParamsSchema,
+  parameters: convertZodToJsonSchema(CountBotsByVenueAccountParamsSchema),
+  category: 'read-database',
+  async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { venueAccountIds } = rawParams as CountBotsByVenueAccountParams;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    const db = ctx.db as Database;
+    const ownerId = ctx.ownerId;
+
+    // Narrow the requested ids to the owner's in-scope set (owner-scope safety —
+    // never reveal another owner's accounts/bots).
+    const inScopeRows = await db
+      .select({ id: venueAccounts.id })
+      .from(venueAccounts)
+      .where(and(inArray(venueAccounts.id, venueAccountIds), eq(venueAccounts.ownerId, ownerId)));
+    const inScopeIds = inScopeRows.map((r) => r.id);
+
+    // No in-scope accounts → nothing to query; return an empty breakdown.
+    if (inScopeIds.length === 0) {
+      return { success: true, data: { ok: true, byVenueAccount: {} } };
+    }
+
+    // Seed an empty array for every in-scope id so callers get an explicit
+    // "zero bots" signal (vs. an omitted, unowned id).
+    const byVenueAccount: Record<string, string[]> = {};
+    for (const id of inScopeIds) {
+      byVenueAccount[id] = [];
+    }
+
+    // The authoritative predicate, copied verbatim from deprovision: ANY bot
+    // referencing the account, no status filter. Batched via inArray.
+    const blockingBots = await db
+      .select({ id: bots.id, venueAccountId: bots.venueAccountId })
+      .from(bots)
+      .where(inArray(bots.venueAccountId, inScopeIds));
+    for (const bot of blockingBots) {
+      if (bot.venueAccountId != null && byVenueAccount[bot.venueAccountId] != null) {
+        byVenueAccount[bot.venueAccountId]!.push(bot.id);
+      }
+    }
+
+    return { success: true, data: { ok: true, byVenueAccount } };
+  },
+};
+
+// AUTHORED SEAM (L3) — the `get_venue_account` boundary READ tool.
+//
+// Owner-scoped, read-database display-metadata read: returns a venue account's
+// funding address (`venueAccountRef` — a PUBLIC subaccount/wallet ref) plus its
+// venue + label, so herobids' connection view can display it WITHOUT reading the
+// local venue_accounts table. It authors NO trading logic — the owner-scoped
+// load mirrors deprovision's account load; absent/unowned → not_found.resource
+// (fault:false), identical to deprovision. NEVER returns credentialId or the
+// venueProfile secret cache — only the public display fields are selected.
+//
+// SINGLE-id (not batch): the count tool already provides the batch shape, and a
+// batch variant here would add per-id owner-scope narrowing + omission logic for
+// no benefit — herobids can call this per-account or use the count tool's
+// pattern. (Spec: prefer the single-id tool if batching adds complexity.)
+const GetVenueAccountParamsSchema = z.object({
+  venueAccountId: z.string().min(1).describe('Venue account id to load display metadata for'),
+});
+
+type GetVenueAccountParams = z.infer<typeof GetVenueAccountParamsSchema>;
+
+const getVenueAccountTool: AgentTool<TradingToolContext> = {
+  name: 'get_venue_account',
+  description:
+    "Get a venue account's display metadata (funding address, venue, label) for this owner's connection view, without reading the local venue_accounts table. Returns not_found if the account is absent or not owned by this owner. Never returns secrets.",
+  parametersSchema: GetVenueAccountParamsSchema,
+  parameters: convertZodToJsonSchema(GetVenueAccountParamsSchema),
+  category: 'read-database',
+  async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { venueAccountId } = rawParams as GetVenueAccountParams;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    const db = ctx.db as Database;
+    const ownerId = ctx.ownerId;
+
+    // Owner-scoped load — select ONLY the public display fields (never
+    // credentialId / venueProfile). Absent/unowned → not_found, mirroring
+    // deprovision's owner-scoped account load.
+    const [account] = await db
+      .select({
+        venueAccountRef: venueAccounts.venueAccountRef,
+        venue: venueAccounts.venue,
+        label: venueAccounts.label,
+      })
+      .from(venueAccounts)
+      .where(and(eq(venueAccounts.id, venueAccountId), eq(venueAccounts.ownerId, ownerId)));
+
+    if (!account) {
+      return {
+        success: false,
+        fault: false,
+        error: `Venue account not found: ${venueAccountId}`,
+        errorCode: 'not_found.resource',
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        ok: true,
+        venueAccountId,
+        venueAccountRef: account.venueAccountRef ?? null,
+        venue: account.venue,
+        label: account.label,
+      },
+    };
+  },
+};
+
 export const provisioningTools: AgentTool<TradingToolContext>[] = [
   provisionVenueAccountTool,
   deprovisionVenueAccountTool,
+  countBotsByVenueAccountTool,
+  getVenueAccountTool,
 ];

@@ -176,3 +176,257 @@ describe('deprovision_venue_account tool', () => {
     }
   });
 });
+
+/**
+ * Tool-level tests for the owner-scoped READ tools that expose the deprovision
+ * guard predicate + venue-account display metadata to herobids WITHOUT it
+ * reading the local trading tables:
+ *   - `count_bots_by_venue_account` (batch-capable) — the "any bot referencing
+ *     the account, no status filter" predicate, copied from deprovision, keyed
+ *     to the owner's in-scope venue accounts (out-of-scope ids omitted).
+ *   - `get_venue_account` (single-id) — owner-scoped display metadata
+ *     (funding address / venue / label); absent/unowned → not_found.resource.
+ * Read-tool guard style (fault:false): db absent → 'direct db access not
+ * available'; ownerId absent → 'owner scope not available'.
+ */
+
+const countTool = provisioningTools.find((t) => t.name === 'count_bots_by_venue_account')!;
+const getVenueAccountTool = provisioningTools.find((t) => t.name === 'get_venue_account')!;
+
+interface CountMockDbOpts {
+  /** Venue-account ids that ARE owned by the owner (the in-scope set). */
+  inScopeIds?: string[];
+  /** Bot rows returned by the bots-by-venue-account select. */
+  bots?: Array<{ id: string; venueAccountId: string }>;
+}
+
+// True when a bots query ran (used to assert we skip it on an empty in-scope set).
+let botsQueried: boolean;
+
+function buildCountMockDb(opts: CountMockDbOpts) {
+  botsQueried = false;
+  let selectCall = 0;
+  return {
+    select: vi.fn().mockImplementation(() => ({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockImplementation(() => {
+          const call = selectCall++;
+          if (call === 0) {
+            // in-scope venue-account narrowing
+            return Promise.resolve((opts.inScopeIds ?? []).map((id) => ({ id })));
+          }
+          // bots-by-venue-account
+          botsQueried = true;
+          return Promise.resolve(opts.bots ?? []);
+        }),
+      }),
+    })),
+  } as unknown as TradingToolContext['db'];
+}
+
+function makeCountCtx(dbOpts: CountMockDbOpts, overrides: Partial<TradingToolContext> = {}): TradingToolContext {
+  return {
+    agentId: 'agent-1',
+    sessionId: 'session-1',
+    ownerId: OWNER_ID,
+    executionMode: 'paper',
+    authorizationMode: 'direct',
+    redis: {} as unknown as TradingToolContext['redis'],
+    publishToInbound: vi.fn(async () => undefined),
+    db: buildCountMockDb(dbOpts),
+    ...overrides,
+  };
+}
+
+describe('count_bots_by_venue_account tool', () => {
+  it('is registered read-database', () => {
+    expect(countTool).toBeDefined();
+    expect(countTool.category).toBe('read-database');
+  });
+
+  it('returns bot ids per in-scope account with blocking bots (single id)', async () => {
+    const result = await countTool.execute(
+      { venueAccountIds: [VA_ID] },
+      makeCountCtx({
+        inScopeIds: [VA_ID],
+        bots: [
+          { id: 'bot-a', venueAccountId: VA_ID },
+          { id: 'bot-b', venueAccountId: VA_ID },
+        ],
+      }),
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, byVenueAccount: { [VA_ID]: ['bot-a', 'bot-b'] } });
+  });
+
+  it('returns an empty array entry for an in-scope account with no bots', async () => {
+    const result = await countTool.execute(
+      { venueAccountIds: [VA_ID] },
+      makeCountCtx({ inScopeIds: [VA_ID], bots: [] }),
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, byVenueAccount: { [VA_ID]: [] } });
+  });
+
+  it('omits an unowned/out-of-scope id (never leaked)', async () => {
+    // Requested id is not in the owner's in-scope set → in-scope set empty.
+    const result = await countTool.execute(
+      { venueAccountIds: ['va-other-owner'] },
+      makeCountCtx({ inScopeIds: [], bots: [] }),
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, byVenueAccount: {} });
+  });
+
+  it('returns only owned accounts for a mixed owned/unowned batch', async () => {
+    const result = await countTool.execute(
+      { venueAccountIds: [VA_ID, 'va-other-owner', 'va-2'] },
+      makeCountCtx({
+        inScopeIds: [VA_ID, 'va-2'], // only these two belong to the owner
+        bots: [{ id: 'bot-a', venueAccountId: VA_ID }],
+      }),
+    );
+    expect(result.success).toBe(true);
+    // 'va-other-owner' omitted; va-2 present with an empty array.
+    expect(result.data).toEqual({
+      ok: true,
+      byVenueAccount: { [VA_ID]: ['bot-a'], 'va-2': [] },
+    });
+  });
+
+  it('short-circuits without a bots query when the in-scope set is empty', async () => {
+    const result = await countTool.execute(
+      { venueAccountIds: ['va-other-owner'] },
+      makeCountCtx({ inScopeIds: [], bots: [] }),
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, byVenueAccount: {} });
+    expect(botsQueried).toBe(false);
+  });
+
+  it('fails read-tool style when direct db access is missing', async () => {
+    const result = await countTool.execute(
+      { venueAccountIds: [VA_ID] },
+      makeCountCtx({ inScopeIds: [VA_ID] }, { db: undefined }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.fault).toBe(false);
+      expect(result.error).toBe('direct db access not available');
+    }
+  });
+
+  it('fails read-tool style when owner scope is missing', async () => {
+    const result = await countTool.execute(
+      { venueAccountIds: [VA_ID] },
+      makeCountCtx({ inScopeIds: [VA_ID] }, { ownerId: '' }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.fault).toBe(false);
+      expect(result.error).toBe('owner scope not available');
+    }
+  });
+});
+
+interface GetVaMockDbOpts {
+  /** The account display row (undefined = not found / unowned). */
+  account?: { venueAccountRef: string | null; venue: string; label: string };
+}
+
+function buildGetVaMockDb(opts: GetVaMockDbOpts) {
+  return {
+    select: vi.fn().mockImplementation(() => ({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockImplementation(() => Promise.resolve(opts.account ? [opts.account] : [])),
+      }),
+    })),
+  } as unknown as TradingToolContext['db'];
+}
+
+function makeGetVaCtx(dbOpts: GetVaMockDbOpts, overrides: Partial<TradingToolContext> = {}): TradingToolContext {
+  return {
+    agentId: 'agent-1',
+    sessionId: 'session-1',
+    ownerId: OWNER_ID,
+    executionMode: 'paper',
+    authorizationMode: 'direct',
+    redis: {} as unknown as TradingToolContext['redis'],
+    publishToInbound: vi.fn(async () => undefined),
+    db: buildGetVaMockDb(dbOpts),
+    ...overrides,
+  };
+}
+
+describe('get_venue_account tool', () => {
+  it('is registered read-database', () => {
+    expect(getVenueAccountTool).toBeDefined();
+    expect(getVenueAccountTool.category).toBe('read-database');
+  });
+
+  it('returns the funding address + venue + label for an owned account', async () => {
+    const result = await getVenueAccountTool.execute(
+      { venueAccountId: VA_ID },
+      makeGetVaCtx({ account: { venueAccountRef: 'SoLwAlLeT111', venue: 'jupiter', label: 'My Jup' } }),
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      ok: true,
+      venueAccountId: VA_ID,
+      venueAccountRef: 'SoLwAlLeT111',
+      venue: 'jupiter',
+      label: 'My Jup',
+    });
+  });
+
+  it('returns null venueAccountRef when the account has none', async () => {
+    const result = await getVenueAccountTool.execute(
+      { venueAccountId: VA_ID },
+      makeGetVaCtx({ account: { venueAccountRef: null, venue: 'hyperliquid', label: 'HL Main' } }),
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      ok: true,
+      venueAccountId: VA_ID,
+      venueAccountRef: null,
+      venue: 'hyperliquid',
+      label: 'HL Main',
+    });
+  });
+
+  it('returns not_found for an absent/unowned venue account', async () => {
+    const result = await getVenueAccountTool.execute(
+      { venueAccountId: 'nope' },
+      makeGetVaCtx({ account: undefined }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.fault).toBe(false);
+      expect(result.errorCode).toBe('not_found.resource');
+    }
+  });
+
+  it('fails read-tool style when direct db access is missing', async () => {
+    const result = await getVenueAccountTool.execute(
+      { venueAccountId: VA_ID },
+      makeGetVaCtx({ account: { venueAccountRef: 'x', venue: 'jupiter', label: 'L' } }, { db: undefined }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.fault).toBe(false);
+      expect(result.error).toBe('direct db access not available');
+    }
+  });
+
+  it('fails read-tool style when owner scope is missing', async () => {
+    const result = await getVenueAccountTool.execute(
+      { venueAccountId: VA_ID },
+      makeGetVaCtx({ account: { venueAccountRef: 'x', venue: 'jupiter', label: 'L' } }, { ownerId: '' }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.fault).toBe(false);
+      expect(result.error).toBe('owner scope not available');
+    }
+  });
+});
