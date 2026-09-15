@@ -22,6 +22,7 @@ import {
   BacktestingRepository,
   BotRepository,
   TokenSafetyOverrideRepository,
+  InstrumentRepository,
 } from '@traderton/db';
 import { MarkSelector, createFillFirstMarkSource } from '@traderton/engine';
 import {
@@ -40,6 +41,7 @@ import { MechanicalStrategy, DcaStrategy } from '@traderton/strategy';
 import { MarketDataRecorder } from '@traderton/backtesting';
 
 import { createLogger } from '../logger.js';
+import { populateInstrumentsFromVenues } from '../instrument-population.js';
 import { createIdGen } from './id-gen.js';
 import { InstanceLease } from '../instance-lease.js';
 import {
@@ -365,6 +367,18 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
   // from herobids index.ts:1690 / :1706 / :1721.
   const venueSymbolProviders: VenueSymbolProvider[] = [];
 
+  // g3 (c4.9g follow-up): instrument-table population reuses the SAME
+  // credential-less orderbook/perp adapters built here for the symbol cache
+  // (fetchMarketMetadata is a public loadMarkets read — no account/credentials).
+  // Traced verbatim to herobids index.ts:1745-1758 (Hyperliquid + Bybit only;
+  // Jupiter/1inch are swap venues with no instrument metadata). Populated once
+  // at start(), non-blocking. This makes Traderton own instrument population now
+  // that the herobids-worker writer was removed at c4.9g.
+  const instrumentAdapters: Array<{
+    venue: string;
+    fetchMarketMetadata: () => ReturnType<HyperliquidAdapter['fetchMarketMetadata']>;
+  }> = [];
+
   if (config.venues['hyperliquid']) {
     const hlTestnet = config.venues['hyperliquid'].testnet ?? false;
     const adapter = new HyperliquidAdapter({
@@ -379,6 +393,7 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
         return result.data;
       },
     });
+    instrumentAdapters.push({ venue: 'hyperliquid', fetchMarketMetadata: () => adapter.fetchMarketMetadata() });
   }
 
   if (config.venues['bybit']) {
@@ -395,6 +410,7 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
         return result.data;
       },
     });
+    instrumentAdapters.push({ venue: 'bybit', fetchMarketMetadata: () => adapter.fetchMarketMetadata() });
   }
 
   if (config.venues['jupiter']) {
@@ -821,6 +837,17 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
       // per-venue fetch failure internally, so it must not crash the runtime.
       await instrumentCache.warmup(venueSymbolProviders);
       instrumentCache.startPeriodicRefresh(venueSymbolProviders, 60 * 60 * 1000);
+      // g3: populate the `instruments` table from venue market metadata (once,
+      // non-blocking) so find_instrument resolves instrumentIds. Traderton owns
+      // this now (the herobids-worker writer was removed at c4.9g). Best-effort:
+      // populateInstrumentsFromVenues swallows per-venue failures internally, and
+      // the outer guard ensures a population failure never crashes runtime boot
+      // (symbol validation still works via the in-memory VenueInstrumentCache).
+      try {
+        await populateInstrumentsFromVenues(new InstrumentRepository(db), logger, instrumentAdapters);
+      } catch (err) {
+        logger.warn({ err }, 'Instrument table population failed — continuing without instrument data');
+      }
       await runtime.start();
     },
     shutdown: async () => {
