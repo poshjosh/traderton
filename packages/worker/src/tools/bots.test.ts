@@ -13,6 +13,7 @@ const getOwnerBotSessionsTool = botManagementTools.find((t) => t.name === 'get_o
 const getOwnerBotJournalSummaryTool = botManagementTools.find((t) => t.name === 'get_owner_bot_journal_summary')!;
 const getOwnerBotJournalTool = botManagementTools.find((t) => t.name === 'get_owner_bot_journal')!;
 const deleteBotTool = botManagementTools.find((t) => t.name === 'delete_bot')!;
+const instantiateBotTool = botManagementTools.find((t) => t.name === 'instantiate_bot')!;
 const getAgentFillsTool = botManagementTools.find((t) => t.name === 'get_agent_fills')!;
 const getAgentJournalEventsTool = botManagementTools.find((t) => t.name === 'get_agent_journal_events')!;
 const getAgentPositionsTool = botManagementTools.find((t) => t.name === 'get_agent_positions')!;
@@ -2123,5 +2124,226 @@ describe('get_owner_bot_reconciliation_events — owner-scoped reconciliation re
     expect(result.success).toBe(false);
     expect(result.fault).toBe(false);
     expect(result.error).toContain('direct db access');
+  });
+});
+
+// ── instantiate_bot — stopped-create from a blueprint (c4.9d-FG) ────────────
+//
+// The STOPPED-CREATE contract: persists a caller-supplied id + blueprint lineage
+// via insertStoppedBot, creatorType 'user', creatorId = the subject user id
+// (ctx.ownerId), status 'stopped'. NEVER marks running, NEVER enqueues a start.
+// Runs the copied trading-domain guards (capability, config, mode, swap-symbol)
+// and the owner-scoped venue-account ownership check.
+
+describe('instantiate_bot — stopped-create contract', () => {
+  const validConfig = {
+    symbol: 'BTC-USDC',
+    strategy: { type: 'momentum', decisionMode: 'mechanical' },
+    execution: { mode: 'paper' },
+    venue: 'hyperliquid',
+    venueType: 'orderbook',
+  };
+
+  const lineage = {
+    blueprintId: 'bp-1',
+    blueprintRevisionId: 'rev-1',
+    configSnapshot: { source: 'blueprint-payload' },
+  };
+
+  function makeInstantiateCtx(insertStoppedBot: ReturnType<typeof vi.fn>, venueRows: unknown[] = [{ id: 'va-1' }]) {
+    return makeCtx({
+      ownerId: 'owner-1',
+      executionMode: 'live', // owner allows up to live so paper/shadow bots pass mode-escalation
+      db: makeReadDb([venueRows]),
+      botRepo: { insertStoppedBot } as unknown as ToolContext['botRepo'],
+    });
+  }
+
+  it('is registered write-database and ownerScopedNoVenue (side-effecting, no venue)', () => {
+    expect(instantiateBotTool).toBeDefined();
+    expect(instantiateBotTool.category).toBe('write-database');
+    expect(instantiateBotTool.ownerScopedNoVenue).toBe(true);
+  });
+
+  it('persists a stopped bot with id===actorId, creatorType user, creatorId=owner, venueAccount + lineage', async () => {
+    const insertStoppedBot = vi.fn(async () => ({ botId: 'actor-123' }));
+    const ctx = makeInstantiateCtx(insertStoppedBot);
+
+    const result = await instantiateBotTool.execute(
+      {
+        actorId: 'actor-123',
+        venueAccountId: 'va-1',
+        config: validConfig,
+        ...lineage,
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ botId: 'actor-123', status: 'stopped' });
+
+    expect(insertStoppedBot).toHaveBeenCalledTimes(1);
+    const spec = insertStoppedBot.mock.calls[0]![0] as Record<string, unknown>;
+    // caller-supplied id persisted (NOT generated)
+    expect(spec.id).toBe('actor-123');
+    expect(spec.creatorType).toBe('user');
+    // creatorId = the subject user id (ctx.ownerId), NOT 'agent'/agentId
+    expect(spec.creatorId).toBe('owner-1');
+    expect(spec.ownerId).toBe('owner-1');
+    // the specified venue account is honoured (not a default)
+    expect(spec.venueAccountId).toBe('va-1');
+    // lineage persisted
+    expect(spec.blueprintId).toBe('bp-1');
+    expect(spec.blueprintRevisionId).toBe('rev-1');
+    expect(spec.configSnapshot).toEqual({ source: 'blueprint-payload' });
+  });
+
+  it('drives NO mark-running and NO lifecycle start enqueue', async () => {
+    const insertStoppedBot = vi.fn(async () => ({ botId: 'actor-123' }));
+    const markBotRunning = vi.fn(async () => undefined);
+    const publishToInbound = vi.fn(async () => undefined);
+    const enqueueLifecycle = vi.fn(async () => undefined);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      executionMode: 'live',
+      publishToInbound,
+      db: makeReadDb([[{ id: 'va-1' }]]),
+      botRepo: { insertStoppedBot, markBotRunning } as unknown as ToolContext['botRepo'],
+    });
+
+    const result = await instantiateBotTool.execute(
+      { actorId: 'actor-123', venueAccountId: 'va-1', config: validConfig, ...lineage },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    // the deleted start steps: never mark running, never enqueue/publish a start
+    expect(markBotRunning).not.toHaveBeenCalled();
+    expect(publishToInbound).not.toHaveBeenCalled();
+    expect(enqueueLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('rejects a venue account not owned by the caller (not_found.resource, never persists)', async () => {
+    const insertStoppedBot = vi.fn(async () => ({ botId: 'actor-123' }));
+    // Empty venue-account rows → the owner-scoped ownership check fails.
+    const ctx = makeInstantiateCtx(insertStoppedBot, []);
+
+    const result = await instantiateBotTool.execute(
+      { actorId: 'actor-123', venueAccountId: 'va-other', config: validConfig, ...lineage },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('not_found.resource');
+    expect(insertStoppedBot).not.toHaveBeenCalled();
+  });
+
+  it('maps a paper+swap capability rejection to fault:false with the dedicated code (never persists)', async () => {
+    const insertStoppedBot = vi.fn(async () => ({ botId: 'actor-123' }));
+    const ctx = makeInstantiateCtx(insertStoppedBot);
+    const swapConfig = {
+      symbol: 'ETH/USDC',
+      strategy: { type: 'momentum', decisionMode: 'mechanical' },
+      execution: { mode: 'paper' },
+      venue: 'jupiter',
+      venueType: 'swap',
+      swapAssets: { baseAsset: 'ETH', quoteAsset: 'USDC' },
+    };
+
+    const result = await instantiateBotTool.execute(
+      { actorId: 'actor-123', venueAccountId: 'va-1', config: swapConfig, ...lineage },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('execution_capability.paper_swap_not_supported');
+    expect(insertStoppedBot).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid config (schema guard, never persists)', async () => {
+    const insertStoppedBot = vi.fn(async () => ({ botId: 'actor-123' }));
+    const ctx = makeInstantiateCtx(insertStoppedBot);
+    // Missing strategy → BotConfigSchema rejects.
+    const badConfig = { symbol: 'BTC-USDC', execution: { mode: 'paper' }, venue: 'hyperliquid', venueType: 'orderbook' };
+
+    const result = await instantiateBotTool.execute(
+      { actorId: 'actor-123', venueAccountId: 'va-1', config: badConfig, ...lineage },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('validation.invalid_payload');
+    expect(result.error).toMatch(/bot config is invalid/i);
+    expect(insertStoppedBot).not.toHaveBeenCalled();
+  });
+
+  it('rejects a mode escalation beyond the owner mode (never persists)', async () => {
+    const insertStoppedBot = vi.fn(async () => ({ botId: 'actor-123' }));
+    // Owner is paper; a live bot escalates.
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      executionMode: 'paper',
+      db: makeReadDb([[{ id: 'va-1' }]]),
+      botRepo: { insertStoppedBot } as unknown as ToolContext['botRepo'],
+    });
+    const liveConfig = { ...validConfig, execution: { mode: 'live' } };
+
+    const result = await instantiateBotTool.execute(
+      { actorId: 'actor-123', venueAccountId: 'va-1', config: liveConfig, ...lineage },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toMatch(/execution mode/i);
+    expect(insertStoppedBot).not.toHaveBeenCalled();
+  });
+
+  it('rejects a swap venue with a malformed symbol (swap-symbol guard, never persists)', async () => {
+    const insertStoppedBot = vi.fn(async () => ({ botId: 'actor-123' }));
+    const ctx = makeInstantiateCtx(insertStoppedBot);
+    // shadow mode on swap passes the capability guard + BotConfigSchema (symbol is
+    // a plain string there), so the swap-symbol FORMAT guard is the one that runs.
+    // A raw-address symbol passes the slash split but trips the address check.
+    const swapConfig = {
+      symbol: '0x1111111111111111111111111111111111111111/USDC',
+      strategy: { type: 'momentum', decisionMode: 'mechanical' },
+      execution: { mode: 'shadow' },
+      venue: 'jupiter',
+      venueType: 'swap',
+      swapAssets: { baseAsset: 'ETH', quoteAsset: 'USDC', baseDecimals: 18, quoteDecimals: 6 },
+    };
+
+    const result = await instantiateBotTool.execute(
+      { actorId: 'actor-123', venueAccountId: 'va-1', config: swapConfig, ...lineage },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.errorCode).toBe('validation.invalid_payload');
+    expect(result.error).toMatch(/raw token address/i);
+    expect(insertStoppedBot).not.toHaveBeenCalled();
+  });
+
+  it('fails closed (fault:true) when the owner scope is unavailable', async () => {
+    const insertStoppedBot = vi.fn(async () => ({ botId: 'actor-123' }));
+    const ctx = makeCtx({
+      db: makeReadDb([[{ id: 'va-1' }]]),
+      botRepo: { insertStoppedBot } as unknown as ToolContext['botRepo'],
+    });
+
+    const result = await instantiateBotTool.execute(
+      { actorId: 'actor-123', venueAccountId: 'va-1', config: validConfig, ...lineage },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(true);
+    expect(result.errorCode).toBe('bot.owner_unavailable');
+    expect(insertStoppedBot).not.toHaveBeenCalled();
   });
 });

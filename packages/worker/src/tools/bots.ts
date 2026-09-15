@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, inArray, lte, or, sql, sum } from 'drizzle-orm';
 import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
-import { AGENT_MESSAGE_TYPES, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig } from '@traderton/domain';
+import { AGENT_MESSAGE_TYPES, BotConfigSchema, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig, validateExecutionCapability } from '@traderton/domain';
 import type { Database } from '@traderton/db';
 import { fills, journalEvents, positions, bots, venueAccounts, FillRepository, PositionRepository, PgJournal, ReconciliationEventRepository, DecisionRepository, DecisionFailureRepository } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
@@ -843,6 +843,218 @@ const deleteBotTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- instantiate_bot ---
+//
+// AUTHORED SEAM (c4.9d-FG) — the blueprint-instantiate BOT write, moved over the
+// boundary. It is the STOPPED-CREATE counterpart of `create_bot` (create-and-start,
+// agent-scoped, self-id): instantiate_bot is owner/user-scoped, persists a
+// caller-supplied id + blueprint lineage, and does NOT start the bot (no
+// mark-running, no lifecycle enqueue). The herobids blueprint-instantiate route
+// (apps/api/src/routes/blueprints.ts, BOT branch) calls this over REST instead of
+// doing a local `tx.insert(bots)`.
+//
+// COPY, NEVER AUTHOR: the trading-domain guards below are copied faithfully from
+// `create_bot`'s drive path (composition/drive-target.ts `createAndStart`) — the
+// execution-capability guard (paper+swap → dedicated `execution_capability.<code>`),
+// the `BotConfigSchema` parse, the mode-escalation guard, and the swap-symbol-format
+// guard. The persist is the copy-faithful `insertStoppedBot` (the source
+// `tx.insert(bots)` behind a repo method, minus the decision-13 connectionId).
+//
+// ATOMICITY SPLIT (docs/003, "instantiate atomicity-split"): the herobids source
+// wrapped the insert + local idempotency/usage rows in one db.transaction. Under
+// the boundary that single tx is intentionally split — herobids does its local
+// idempotency/binding reads, calls this tool over REST, then writes its local
+// platform rows on success. The inert stopped-orphan divergence on a
+// boundary-success/local-fail crash is an accepted bounded divergence (003/001);
+// the caller-supplied `actorId` id makes a retry converge on the same row.
+//
+// Classification: `write-database` (side-effecting per getCategoryOperation) +
+// `ownerScopedNoVenue` (owner-scoped write that drives no executor — venue
+// coordinates come from the payload config, not a default resolver), mirroring
+// `delete_bot`.
+
+const InstantiateBotParamsSchema = z.object({
+  actorId: z.string().min(1).describe('Caller-supplied bot id to persist (enables idempotent convergence).'),
+  venueAccountId: z.string().min(1).describe('Venue account to bind the bot to. Must belong to the owner.'),
+  config: BotConfigInputSchema.describe('Bot configuration (strategy, symbol, risk, venue/venueType).'),
+  blueprintId: z.string().min(1).describe('Blueprint this bot is instantiated from (lineage).'),
+  blueprintRevisionId: z.string().min(1).describe('Blueprint revision this bot is instantiated from (lineage).'),
+  configSnapshot: z.record(z.unknown()).describe('Snapshot of the blueprint revision payload at instantiation time (lineage).'),
+});
+
+type InstantiateBotParams = z.infer<typeof InstantiateBotParamsSchema>;
+
+const instantiateBotTool: AgentTool<TradingToolContext> = {
+  name: 'instantiate_bot',
+  // Owner-scoped write (persists an owner-owned bot from the payload venueAccountId);
+  // drives no executor (stopped-create). No venue resolution — venue/venueType come
+  // from the payload config, not the default-venue resolver.
+  ownerScopedNoVenue: true,
+  description:
+    'Instantiate a STOPPED bot from a blueprint for this owner, bound to a specific venue account, persisting blueprint lineage. Does not start the bot. Returns { botId, status: "stopped" }.',
+  parametersSchema: InstantiateBotParamsSchema,
+  parameters: convertZodToJsonSchema(InstantiateBotParamsSchema),
+  category: 'write-database',
+  async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { actorId, venueAccountId, config, blueprintId, blueprintRevisionId, configSnapshot } =
+      rawParams as InstantiateBotParams;
+
+    // (a) Context guards — owner/repo/db unavailable is an internal readiness fault
+    //     (fault:true), mirroring delete_bot's owner_unavailable/db_unavailable.
+    if (!ctx.botRepo) {
+      return {
+        success: false,
+        fault: true,
+        error: 'Database access not available in this context',
+        errorCode: 'bot.db_unavailable',
+      };
+    }
+    if (!ctx.db) {
+      return {
+        success: false,
+        fault: true,
+        error: 'Database access not available in this context',
+        errorCode: 'bot.db_unavailable',
+      };
+    }
+    if (!ctx.ownerId || !ctx.ownerId.trim()) {
+      return {
+        success: false,
+        fault: true,
+        error: 'Owner identity not available in this context',
+        errorCode: 'bot.owner_unavailable',
+      };
+    }
+    const ownerId = ctx.ownerId;
+    const db = ctx.db as Database;
+
+    // (b) Owner-scoped venue-account ownership check (A-iii). A caller must not bind
+    //     another owner's account. Mirrors get_venue_account's owner-narrow load;
+    //     absent/unowned → not_found.resource (fault:false).
+    const [account] = await db
+      .select({ id: venueAccounts.id })
+      .from(venueAccounts)
+      .where(and(eq(venueAccounts.id, venueAccountId), eq(venueAccounts.ownerId, ownerId)));
+    if (!account) {
+      return {
+        success: false,
+        fault: false,
+        error: `Venue account not found: ${venueAccountId}`,
+        errorCode: 'not_found.resource',
+      };
+    }
+
+    // (c) Trading-domain guards — COPIED from createAndStart (drive-target.ts). The
+    //     venue/venueType used by the capability + swap-symbol guards come from the
+    //     PAYLOAD config (the source built botConfig with venue/venueType), NOT an
+    //     injected default resolver. The bot is stopped, so no venue coordinates are
+    //     injected for an executor.
+    const rawConfig = config as Record<string, unknown>;
+    const payloadVenueType = rawConfig['venueType'] as 'orderbook' | 'swap' | undefined;
+
+    // Execution-capability guard (paper+swap → dedicated execution_capability.<code>).
+    // Gated on an explicit mode being present + a resolvable venueType, mirroring the
+    // source route's `if (botVenueType && botExecutionMode)`. Surfaced as fault:false
+    // carrying the dedicated code so the boundary maps it to a 400 (parity with
+    // create_bot's capability-error mapping).
+    const requestedMode = (rawConfig['execution'] as Record<string, unknown> | undefined)?.['mode'] as
+      | 'paper'
+      | 'shadow'
+      | 'live'
+      | undefined;
+    if (requestedMode && payloadVenueType) {
+      const capCheck = validateExecutionCapability({
+        actorType: 'bot',
+        executionMode: requestedMode,
+        venueType: payloadVenueType,
+      });
+      if (!capCheck.ok) {
+        return {
+          success: false,
+          fault: false,
+          error: capCheck.error.message,
+          errorCode: `execution_capability.${capCheck.error.code}`,
+        };
+      }
+    }
+
+    // Full config schema validation (herobids broker parity).
+    const validation = BotConfigSchema.safeParse(rawConfig);
+    if (!validation.success) {
+      const issues = validation.error.issues
+        .map((i) => `${i.path.join('.') || 'root'}: ${i.message}`)
+        .join('; ');
+      return {
+        success: false,
+        fault: false,
+        error: `Bot config is invalid: ${issues}`,
+        errorCode: 'validation.invalid_payload',
+      };
+    }
+    const validatedConfig = validation.data;
+
+    // Mode-escalation guard: bot execution mode must not exceed the owner's own.
+    const botMode = validatedConfig.execution.mode ?? 'paper';
+    const modeCheck = checkModeEscalation(botMode, ctx.executionMode, 'create');
+    if (!modeCheck.allowed) {
+      return { success: false, fault: false, error: modeCheck.error, errorCode: 'validation.invalid_payload' };
+    }
+
+    // Swap-venue symbol-format guard — copied VERBATIM from createAndStart, gated on
+    // the payload venueType === 'swap'.
+    if (payloadVenueType === 'swap' && validatedConfig.symbol) {
+      const symbol = validatedConfig.symbol;
+      if (typeof symbol !== 'string') {
+        return {
+          success: false,
+          fault: false,
+          error: `Invalid symbol type. Expected a string BASE/QUOTE format (e.g. "ETH/USDC"), got ${typeof symbol}.`,
+          errorCode: 'validation.invalid_payload',
+        };
+      }
+      const parts = symbol.split('/');
+      if (parts.length !== 2 || !parts[0] || !parts[1]) {
+        return {
+          success: false,
+          fault: false,
+          error:
+            `Invalid symbol format "${symbol}". ` +
+            `Swap venues require BASE/QUOTE format (e.g. "ETH/USDC" for 1inch on Base).`,
+          errorCode: 'validation.invalid_payload',
+        };
+      }
+      const looksLikeAddress = (s: string) => s.startsWith('0x') || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s);
+      if (looksLikeAddress(parts[0]!) || looksLikeAddress(parts[1]!)) {
+        return {
+          success: false,
+          fault: false,
+          error:
+            `Symbol "${symbol}" looks like a raw token address. ` +
+            `Use a human-readable symbol (e.g. "ETH/USDC"), not a contract address.`,
+          errorCode: 'validation.invalid_payload',
+        };
+      }
+    }
+
+    // (d) Persist the STOPPED bot with the caller-supplied id + lineage. creatorType
+    //     'user', creatorId = the subject user id (ctx.ownerId). No mark-running, no
+    //     lifecycle enqueue — the stopped-create deletion of the start steps.
+    const { botId } = await ctx.botRepo.insertStoppedBot({
+      id: actorId,
+      ownerId,
+      venueAccountId,
+      config: validatedConfig as unknown as Record<string, unknown>,
+      creatorType: 'user',
+      creatorId: ownerId,
+      blueprintId,
+      blueprintRevisionId,
+      configSnapshot,
+    });
+
+    return { success: true, data: { botId, status: 'stopped' } };
+  },
+};
+
 // --- Agent-scoped evidence read-wave (D1-c1 Sub-step 2) ────────────────────
 //
 // AUTHOR thin seams only. Unlike the get_owner_bot_* family (botId-scoped via
@@ -1628,6 +1840,7 @@ export const botManagementTools: AgentTool[] = [
   startBotTool,
   adjustBotConfigTool,
   deleteBotTool,
+  instantiateBotTool,
   getAgentFillsTool,
   getAgentJournalEventsTool,
   getAgentPositionsTool,

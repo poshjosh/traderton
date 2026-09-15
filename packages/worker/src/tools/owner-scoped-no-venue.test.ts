@@ -32,6 +32,10 @@ describe('ownerScopedNoVenue flag', () => {
     // delete_bot is an owner-scoped write that drives no executor (deletes the row
     // directly via botRepo) — it skips venue resolution like deprovision (Wave A1).
     [botManagementTools, 'delete_bot'],
+    // instantiate_bot is an owner-scoped write that drives no executor (inserts a
+    // stopped bot directly via botRepo; venue/venueType come from the payload
+    // config) — it skips venue resolution like delete_bot (c4.9d-FG).
+    [botManagementTools, 'instantiate_bot'],
   ];
 
   for (const [tools, name] of flagged) {

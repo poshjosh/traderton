@@ -1261,6 +1261,53 @@ export class BotRepository {
     });
   }
 
+  /**
+   * Insert a STOPPED bot with a CALLER-SUPPLIED id + blueprint lineage columns.
+   *
+   * Copy-faithful extraction of the herobids blueprint-instantiate BOT-branch
+   * write (apps/api/src/routes/blueprints.ts `tx.insert(bots)`): a plain insert
+   * of a `status:'stopped'` row carrying `blueprintId`/`blueprintRevisionId`/
+   * `configSnapshot`. It does NOT enforce the running-bot limit (the source
+   * instantiate write did not — the limit is a RUNNING-slot limit enforced at
+   * start; instantiation creates a stopped bot). This is the reason it is NOT a
+   * call to `tryCreateBotWithLimit` (which self-generates the id, enforces the
+   * running limit, and persists no lineage — see docs/003, the instantiate
+   * atomicity-split entry). Authors NO trading logic — the columns/values are the
+   * exact source insert minus the decision-13 `connectionId`.
+   *
+   * The caller-supplied id is REQUIRED for idempotent convergence: the boundary
+   * four-tuple dedups on the same key, and a boundary-success/local-fail retry
+   * re-issues with the same id so the persisted row and the retry converge.
+   */
+  async insertStoppedBot(params: {
+    id: string;
+    ownerId: string;
+    venueAccountId: string;
+    config: Record<string, unknown>;
+    creatorType: string;
+    creatorId: string;
+    blueprintId: string;
+    blueprintRevisionId: string;
+    configSnapshot: Record<string, unknown>;
+  }): Promise<{ botId: string }> {
+    const now = new Date();
+    await this.db.insert(bots).values({
+      id: params.id,
+      ownerId: params.ownerId,
+      venueAccountId: params.venueAccountId,
+      config: params.config,
+      blueprintId: params.blueprintId,
+      blueprintRevisionId: params.blueprintRevisionId,
+      configSnapshot: params.configSnapshot,
+      status: 'stopped',
+      creatorType: params.creatorType,
+      creatorId: params.creatorId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { botId: params.id };
+  }
+
   /** Update bot config JSON in place. */
   async updateBotConfig(botId: string, config: Record<string, unknown>): Promise<void> {
     await this.db

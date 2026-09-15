@@ -180,6 +180,23 @@ export interface TradingToolContext {
     getBotByIdForOwner: (botId: string, ownerId: string) => Promise<ToolBotRecord | null>;
     /** Owner-scoped hard delete — returns whether a row was deleted (false when absent/unowned). */
     deleteBotByIdForOwner: (botId: string, ownerId: string) => Promise<boolean>;
+    /**
+     * Insert a STOPPED bot with a caller-supplied id + blueprint lineage. Drives
+     * the `instantiate_bot` boundary tool (the copy-faithful blueprint-instantiate
+     * write). Does NOT enforce the running-bot limit (instantiation creates a
+     * stopped bot). See docs/003 (instantiate atomicity-split).
+     */
+    insertStoppedBot: (params: {
+      id: string;
+      ownerId: string;
+      venueAccountId: string;
+      config: Record<string, unknown>;
+      creatorType: string;
+      creatorId: string;
+      blueprintId: string;
+      blueprintRevisionId: string;
+      configSnapshot: Record<string, unknown>;
+    }) => Promise<{ botId: string }>;
     markBotStopped: (botId: string) => Promise<void>;
     markBotRunning: (botId: string) => Promise<void>;
     restoreBotRuntimeState: (state: { botId: string; status: string; startedAt: Date | null; stoppedAt: Date | null }) => Promise<void>;

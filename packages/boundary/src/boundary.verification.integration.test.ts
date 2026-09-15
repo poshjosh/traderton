@@ -203,6 +203,11 @@ describe.skipIf(SKIP)('boundary 005 required verification (integration)', () => 
         redis: {} as TradingToolContext['redis'],
         publishToInbound,
         botRepo: botRepo as unknown as TradingToolContext['botRepo'],
+        // Owner scope + raw db handle for owner-scoped tools (instantiate_bot's
+        // owner-narrow venue-account check + insertStoppedBot). create_bot ignores
+        // these — it drives the publishToInbound path.
+        ownerId: request.ownerId,
+        db: db as unknown as TradingToolContext['db'],
       } satisfies TradingToolContext;
     };
 
@@ -380,6 +385,48 @@ describe.skipIf(SKIP)('boundary 005 required verification (integration)', () => 
       expect(await countInvocations()).toBe(1);
       // The create path enqueued exactly one start job (the first run only).
       expect(enqueued.filter((e) => e.command === 'start').length).toBe(1);
+      await app.close();
+    });
+
+    // c4.9d-FG: the same idempotency proof for instantiate_bot (stopped-create).
+    // Downstream effect is exactly ONE persisted STOPPED bot row via
+    // insertStoppedBot with the caller-supplied actorId. A same-key retry replays
+    // the stored terminal result → ONE bot row + ONE invocation, NO second insert,
+    // and (critically) NO start job (stopped-create has no start step).
+    it('firing the same signed instantiate_bot twice persists exactly ONE stopped bot row and ONE invocation', async () => {
+      const app = buildApp();
+      const actorId = `actor-${Math.random().toString(36).slice(2)}`;
+      const envelope = validEnvelope({
+        toolName: 'instantiate_bot',
+        payload: {
+          actorId,
+          venueAccountId: VENUE_ACCOUNT_ID,
+          config: {
+            symbol: 'BTC-USDC',
+            strategy: { type: 'momentum', decisionMode: 'mechanical' },
+            execution: { mode: 'paper' },
+            venue: 'hyperliquid',
+            venueType: 'orderbook',
+          },
+          blueprintId: 'bp-verif',
+          blueprintRevisionId: 'rev-verif',
+          configSnapshot: { source: 'verif' },
+        },
+      });
+
+      const first = await invoke(app, envelope);
+      const firstBody = first.json();
+      expect(firstBody.outcome.kind).toBe('success');
+      expect(firstBody.outcome.payload).toMatchObject({ botId: actorId, status: 'stopped' });
+
+      // Same envelope → replay of the stored terminal result (no second insert).
+      const second = await invoke(app, envelope);
+      expect(second.json().outcome.kind).toBe('success');
+
+      expect(await countBots()).toBe(1);
+      expect(await countInvocations()).toBe(1);
+      // Stopped-create never enqueues a start job.
+      expect(enqueued.filter((e) => e.command === 'start').length).toBe(0);
       await app.close();
     });
   });
