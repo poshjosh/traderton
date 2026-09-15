@@ -214,7 +214,7 @@ const ListOwnerBotsParamsSchema = z.object({
 
 const listOwnerBotsTool: AgentTool<TradingToolContext> = {
   name: 'list_owner_bots',
-  description: 'List all bots owned by this owner, regardless of which actor created them. Optionally filter by creation date (days). Returns bot ID, status, strategy preset, and symbol.',
+  description: 'List all bots owned by this owner, regardless of which actor created them. Optionally filter by creation date (days). Returns bot ID, status, strategy preset, symbol, venueAccountId, startedAt, and stoppedAt.',
   parametersSchema: ListOwnerBotsParamsSchema,
   parameters: convertZodToJsonSchema(ListOwnerBotsParamsSchema),
   category: 'read-database',
@@ -245,6 +245,13 @@ const listOwnerBotsTool: AgentTool<TradingToolContext> = {
           // each bot. The agent-scoped list_bots stays UNCHANGED.
           creatorType: b.creatorType,
           creatorId: b.creatorId,
+          // Owner-scoped ADDITIVE divergence (004 ruling 4): surface the bot's
+          // venue account + lifecycle timestamps (columns on the same bot row)
+          // so the owner dashboard can map bot→venueAccount and show startedAt
+          // without reading a local bots table. list_bots stays UNCHANGED.
+          venueAccountId: b.venueAccountId,
+          startedAt: b.startedAt?.toISOString() ?? null,
+          stoppedAt: b.stoppedAt?.toISOString() ?? null,
         })),
       },
     };
@@ -263,7 +270,7 @@ const GetOwnerBotStatusParamsSchema = z.object({
 
 const getOwnerBotStatusTool: AgentTool<TradingToolContext> = {
   name: 'get_owner_bot_status',
-  description: 'Get detailed status for a specific bot. Returns configuration, runtime state, and timestamps. Only works for bots owned by this owner.',
+  description: 'Get detailed status for a specific bot. Returns configuration, runtime state, venueAccountId, and timestamps. Only works for bots owned by this owner.',
   parametersSchema: GetOwnerBotStatusParamsSchema,
   parameters: convertZodToJsonSchema(GetOwnerBotStatusParamsSchema),
   category: 'read-database',
@@ -297,6 +304,10 @@ const getOwnerBotStatusTool: AgentTool<TradingToolContext> = {
         // the bot. The agent-scoped get_bot_status stays UNCHANGED.
         creatorType: bot.creatorType,
         creatorId: bot.creatorId,
+        // Owner-scoped ADDITIVE divergence (004 ruling 4): surface the bot's
+        // venue account (a column on the same bot row) so the owner dashboard
+        // can map bot→venueAccount. get_bot_status stays UNCHANGED.
+        venueAccountId: bot.venueAccountId,
       },
     };
   },

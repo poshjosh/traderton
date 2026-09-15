@@ -89,6 +89,7 @@ export interface ToolBotRecord {
   id: string;
   status: string;
   config: Record<string, unknown>;
+  venueAccountId: string;
   creatorType: string;
   creatorId: string | null;
   startedAt: Date | null;

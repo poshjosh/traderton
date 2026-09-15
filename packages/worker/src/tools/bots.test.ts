@@ -46,6 +46,7 @@ function makeBotRecord(overrides: Partial<{
   id: string;
   status: string;
   config: Record<string, unknown>;
+  venueAccountId: string;
   creatorType: string;
   creatorId: string;
   ownerId: string;
@@ -57,6 +58,7 @@ function makeBotRecord(overrides: Partial<{
     id: 'bot-1',
     status: 'running',
     config: { execution: { mode: 'paper' }, symbol: 'SOL/USDC' },
+    venueAccountId: 'va-1',
     creatorType: 'agent',
     creatorId: 'agent-1',
     ownerId: 'owner-1',
@@ -345,10 +347,11 @@ describe('list_owner_bots — owner-scoped list', () => {
     expect(data.ok).toBe(true);
     expect(data.bots).toHaveLength(2);
     // Owner-scoped shape (C): the list_bots parity fields PLUS the additive
-    // creatorType + creatorId (the intentional divergence from agent-scoped
-    // list_bots — 004 ruling 4).
+    // creatorType + creatorId AND the additive venueAccountId + startedAt +
+    // stoppedAt (the intentional divergence from agent-scoped list_bots —
+    // 004 ruling 4).
     expect(Object.keys(data.bots[0]).sort()).toEqual(
-      ['createdAt', 'creatorId', 'creatorType', 'id', 'status', 'strategyPreset', 'symbol'].sort(),
+      ['createdAt', 'creatorId', 'creatorType', 'id', 'startedAt', 'status', 'stoppedAt', 'strategyPreset', 'symbol', 'venueAccountId'].sort(),
     );
     expect(data.bots[0].id).toBe('bot-a');
     expect(data.bots[0].creatorType).toBe('agent');
@@ -357,6 +360,12 @@ describe('list_owner_bots — owner-scoped list', () => {
     // Owner-scoping does NOT filter by creatorType — a user-created bot surfaces
     // its own creatorType.
     expect(data.bots[1].creatorType).toBe('user');
+    // The additive columns map straight from the bot record (makeBotRecord sets
+    // venueAccountId: 'va-1', startedAt/stoppedAt: null). startedAt/stoppedAt are
+    // ISO strings or null (matching the createdAt convention on the same map).
+    expect(data.bots[0].venueAccountId).toBe('va-1');
+    expect(data.bots[0].startedAt).toBeNull();
+    expect(data.bots[0].stoppedAt).toBeNull();
   });
 
   it('passes a since date derived from days', async () => {
@@ -372,6 +381,26 @@ describe('list_owner_bots — owner-scoped list', () => {
     const [ownerArg, sinceArg] = getBotsByOwner.mock.calls[0];
     expect(ownerArg).toBe('owner-1');
     expect(sinceArg).toBeInstanceOf(Date);
+  });
+
+  it('renders non-null startedAt/stoppedAt as ISO strings (matching createdAt)', async () => {
+    const startedAt = new Date('2024-01-01T00:00:00.000Z');
+    const stoppedAt = new Date('2024-01-02T00:00:00.000Z');
+    const getBotsByOwner = vi.fn(async () => [
+      makeBotRecord({ id: 'bot-a', ownerId: 'owner-1', venueAccountId: 'va-9', startedAt, stoppedAt }),
+    ]);
+    const ctx = makeCtx({
+      ownerId: 'owner-1',
+      botRepo: { getBotsByOwner } as unknown as ToolContext['botRepo'],
+    });
+
+    const result = await listOwnerBotsTool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    const data = result.data as { bots: Array<Record<string, unknown>> };
+    expect(data.bots[0].venueAccountId).toBe('va-9');
+    expect(data.bots[0].startedAt).toBe(startedAt.toISOString());
+    expect(data.bots[0].stoppedAt).toBe(stoppedAt.toISOString());
   });
 
   it('fails when the owner scope is unavailable', async () => {
@@ -410,14 +439,16 @@ describe('get_owner_bot_status — owner-scoped status', () => {
     expect(getBotByIdForOwner).toHaveBeenCalledWith('bot-1', 'owner-1');
     const data = result.data as Record<string, unknown>;
     // Owner-scoped shape (C): the get_bot_status parity fields PLUS the additive
-    // creatorType + creatorId (the intentional divergence from agent-scoped
-    // get_bot_status — 004 ruling 4).
+    // creatorType + creatorId AND the additive venueAccountId (the intentional
+    // divergence from agent-scoped get_bot_status — 004 ruling 4).
     expect(Object.keys(data).sort()).toEqual(
-      ['config', 'creatorId', 'creatorType', 'id', 'ok', 'startedAt', 'status', 'stoppedAt', 'strategyPreset', 'symbol'].sort(),
+      ['config', 'creatorId', 'creatorType', 'id', 'ok', 'startedAt', 'status', 'stoppedAt', 'strategyPreset', 'symbol', 'venueAccountId'].sort(),
     );
     expect(data.id).toBe('bot-1');
     expect(data.creatorType).toBe('agent');
     expect(data.creatorId).toBe('agent-1');
+    // The additive venueAccountId maps straight from the bot record.
+    expect(data.venueAccountId).toBe('va-1');
   });
 
   it('rejects when the bot does not belong to the owner (repo returns null)', async () => {
