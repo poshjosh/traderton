@@ -417,6 +417,31 @@ caller-supplied id can widen scope.
 - **`agent_runtime_sessions` is NOT here** — it is a herobids PLATFORM table
   (agent-lifecycle-written, not a trading table); the sessions read stays local.
 
+### `scan_trade_events` / `get_events_by_ids` / `get_event_by_id` (read-only) — c4.9j
+
+Cross-owner trade/lifecycle journal reads used by the herobids `AlertDispatcher`
+to source Traderton-owned trade events (`risk.*` / `execution.failure` /
+`instance.*` / `stream.disconnect` / `reconciliation.*`) over the boundary — so
+the herobids-local `journal_events` reader (`PgJournal`) can be retired. All
+three are `read-database` (read-only; non-idempotent — no idempotency wrap on the
+read path; venue resolution short-circuited). Unlike the agent-scoped reads
+above, these apply **NO owner/actor filter** (deliberate cross-owner): the
+consumer supplies `typePrefixes` as the only narrowing filter. Invoked under a
+`system` subject (`actor.type='system'`, `id='alert-dispatcher'`), fenced by the
+consumer's `allowedActorTypes:['system']` grant (there is no per-tool allow-list
+in the boundary config surface — c4.9j OQ-2).
+
+- **`scan_trade_events`** — payload `{ cursor?: { createdAt: string(ISO),
+  seenIds: string[] }, typePrefixes?: string[], limit: number }`; result
+  `{ ok: true, events: JournalRow[] }`. Cursor-based global scan ordered ascending
+  (`createdAt, id`), returning events strictly after the cursor. The consumer
+  advances the cursor to the last returned row's `(createdAt, id)`; `createdAt`
+  survives Date→ISO (payload) and ISO→Date (rows) round-trips.
+- **`get_events_by_ids`** — payload `{ ids: string[] }`; result
+  `{ ok: true, events: JournalRow[] }` (empty `ids` → empty array).
+- **`get_event_by_id`** — payload `{ id: string }`; result
+  `{ ok: true, event: JournalRow | null }` (`event` is null when absent).
+
 ### `get_owner_bot_fills` / `get_owner_bot_positions` / `get_owner_fills` / `get_owner_positions` / `get_owner_journal` (read-only) — c4.2
 
 Owner-scoped raw-row reads used by the herobids PLATFORM export routes

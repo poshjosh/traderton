@@ -584,6 +584,102 @@ const getOwnerBotJournalTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// --- scan_trade_events / get_events_by_ids / get_event_by_id ---
+//
+// Cross-owner polled reads over the copied @traderton/db PgJournal, thin
+// pass-throughs mirroring get_owner_bot_journal (new PgJournal(ctx.db).X).
+// These deliberately apply NO owner/actor filter — PgJournal.scanAfter is
+// already cross-owner (orders by asc(createdAt, id), filters only on
+// cursor + typePrefixes). The consumer (herobids AlertDispatcher) supplies
+// its own typePrefixes as the only narrowing filter.
+//
+// By convention these cross-owner tools are reachable only under a `system`
+// subject (actor.type='system') fenced via the boundary consumer's
+// allowedActorTypes:['system'] grant — matching the existing market-intel
+// system-read precedent. There is no per-tool allow-list in the boundary
+// config surface (c4.9j OQ-2), so the fence is actor-type-only.
+
+const ScanTradeEventsParamsSchema = z.object({
+  cursor: z
+    .object({
+      createdAt: z.string().describe('ISO date of the cursor boundary timestamp'),
+      seenIds: z.array(z.string()).describe('IDs already processed at the boundary timestamp'),
+    })
+    .optional()
+    .describe('Cursor pair — omit to start from the beginning'),
+  typePrefixes: z.array(z.string()).optional().describe('Only include events whose type starts with one of these prefixes'),
+  limit: z.number().int().positive().describe('Max events to return'),
+});
+
+const scanTradeEventsTool: AgentTool<TradingToolContext> = {
+  name: 'scan_trade_events',
+  description: 'Cursor-based global scan of trade/lifecycle journal events, ordered ascending (oldest first). Cross-owner; the caller supplies typePrefixes as the only filter. System-subject only.',
+  parametersSchema: ScanTradeEventsParamsSchema,
+  parameters: convertZodToJsonSchema(ScanTradeEventsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { cursor, typePrefixes, limit } = params as z.infer<typeof ScanTradeEventsParamsSchema>;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const events = await new PgJournal(ctx.db as Database).scanAfter({
+      cursor: cursor ? { createdAt: new Date(cursor.createdAt), seenIds: cursor.seenIds } : undefined,
+      typePrefixes,
+      limit,
+    });
+
+    return { success: true, data: { ok: true, events } };
+  },
+};
+
+const GetEventsByIdsParamsSchema = z.object({
+  ids: z.array(z.string()).describe('Journal event IDs to fetch'),
+});
+
+const getEventsByIdsTool: AgentTool<TradingToolContext> = {
+  name: 'get_events_by_ids',
+  description: 'Fetch trade/lifecycle journal events by their IDs. Cross-owner; system-subject only.',
+  parametersSchema: GetEventsByIdsParamsSchema,
+  parameters: convertZodToJsonSchema(GetEventsByIdsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { ids } = params as z.infer<typeof GetEventsByIdsParamsSchema>;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const events = await new PgJournal(ctx.db as Database).getByIds(ids);
+
+    return { success: true, data: { ok: true, events } };
+  },
+};
+
+const GetEventByIdParamsSchema = z.object({
+  id: z.string().min(1).describe('Journal event ID to fetch'),
+});
+
+const getEventByIdTool: AgentTool<TradingToolContext> = {
+  name: 'get_event_by_id',
+  description: 'Fetch a single trade/lifecycle journal event by its ID, or null when absent. Cross-owner; system-subject only.',
+  parametersSchema: GetEventByIdParamsSchema,
+  parameters: convertZodToJsonSchema(GetEventByIdParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { id } = params as z.infer<typeof GetEventByIdParamsSchema>;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const event = await new PgJournal(ctx.db as Database).getById(id);
+
+    return { success: true, data: { ok: true, event } };
+  },
+};
+
 // --- stop_bot ---
 
 const StopBotParamsSchema = z.object({
@@ -1836,6 +1932,9 @@ export const botManagementTools: AgentTool[] = [
   getOwnerBotSessionsTool,
   getOwnerBotJournalSummaryTool,
   getOwnerBotJournalTool,
+  scanTradeEventsTool,
+  getEventsByIdsTool,
+  getEventByIdTool,
   stopBotTool,
   startBotTool,
   adjustBotConfigTool,

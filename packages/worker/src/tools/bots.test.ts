@@ -12,6 +12,9 @@ const getOwnerBotCostsTool = botManagementTools.find((t) => t.name === 'get_owne
 const getOwnerBotSessionsTool = botManagementTools.find((t) => t.name === 'get_owner_bot_sessions')!;
 const getOwnerBotJournalSummaryTool = botManagementTools.find((t) => t.name === 'get_owner_bot_journal_summary')!;
 const getOwnerBotJournalTool = botManagementTools.find((t) => t.name === 'get_owner_bot_journal')!;
+const scanTradeEventsTool = botManagementTools.find((t) => t.name === 'scan_trade_events')!;
+const getEventsByIdsTool = botManagementTools.find((t) => t.name === 'get_events_by_ids')!;
+const getEventByIdTool = botManagementTools.find((t) => t.name === 'get_event_by_id')!;
 const deleteBotTool = botManagementTools.find((t) => t.name === 'delete_bot')!;
 const instantiateBotTool = botManagementTools.find((t) => t.name === 'instantiate_bot')!;
 const getAgentFillsTool = botManagementTools.find((t) => t.name === 'get_agent_fills')!;
@@ -2345,5 +2348,143 @@ describe('instantiate_bot — stopped-create contract', () => {
     expect(result.fault).toBe(true);
     expect(result.errorCode).toBe('bot.owner_unavailable');
     expect(insertStoppedBot).not.toHaveBeenCalled();
+  });
+});
+
+// ── Cross-owner trade-event feed reads (c4.9j) ──────────────────────────────
+//
+// scan_trade_events / get_events_by_ids / get_event_by_id are thin pass-throughs
+// over PgJournal.scanAfter/getByIds/getById. They apply NO owner/actor filter
+// (deliberate cross-owner). Tests spy on the PgJournal prototype to assert
+// pass-through, the ISO→Date cursor parse, read-database category, and the
+// ctx.db-absent guard. `stubDb` + afterEach(restoreAllMocks) are defined above.
+
+describe('scan_trade_events — cross-owner cursor-based scan', () => {
+  it('is registered read-database', () => {
+    expect(scanTradeEventsTool).toBeDefined();
+    expect(scanTradeEventsTool.category).toBe('read-database');
+  });
+
+  it('threads cursor (ISO→Date) / typePrefixes / limit through to PgJournal.scanAfter and returns { ok, events }', async () => {
+    const eventRows = [{ id: 'ev-1' }, { id: 'ev-2' }];
+    const spy = vi.spyOn(PgJournal.prototype, 'scanAfter').mockResolvedValue(eventRows as never);
+    const ctx = makeCtx({ db: stubDb });
+
+    const result = await scanTradeEventsTool.execute(
+      {
+        cursor: { createdAt: '2024-05-01T00:00:00.000Z', seenIds: ['a', 'b'] },
+        typePrefixes: ['risk.', 'execution.failure'],
+        limit: 200,
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, events: eventRows });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [optsArg] = spy.mock.calls[0];
+    const opts = optsArg as { cursor?: { createdAt: Date; seenIds: string[] }; typePrefixes?: string[]; limit: number };
+    // Cursor createdAt reaches scanAfter as a Date (ISO→Date parsed).
+    expect(opts.cursor?.createdAt).toBeInstanceOf(Date);
+    expect(opts.cursor?.createdAt.toISOString()).toBe('2024-05-01T00:00:00.000Z');
+    // seenIds passes verbatim; typePrefixes + limit thread through unchanged.
+    expect(opts.cursor?.seenIds).toEqual(['a', 'b']);
+    expect(opts.typePrefixes).toEqual(['risk.', 'execution.failure']);
+    expect(opts.limit).toBe(200);
+  });
+
+  it('passes cursor: undefined when omitted', async () => {
+    const spy = vi.spyOn(PgJournal.prototype, 'scanAfter').mockResolvedValue([] as never);
+    const ctx = makeCtx({ db: stubDb });
+
+    await scanTradeEventsTool.execute({ limit: 50 }, ctx);
+
+    const [optsArg] = spy.mock.calls[0];
+    const opts = optsArg as { cursor?: unknown; limit: number };
+    expect(opts.cursor).toBeUndefined();
+    expect(opts.limit).toBe(50);
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({});
+    (ctx as { db?: unknown }).db = undefined;
+
+    const result = await scanTradeEventsTool.execute({ limit: 10 }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+});
+
+describe('get_events_by_ids — cross-owner batch fetch by id', () => {
+  it('is registered read-database', () => {
+    expect(getEventsByIdsTool).toBeDefined();
+    expect(getEventsByIdsTool.category).toBe('read-database');
+  });
+
+  it('threads ids through to PgJournal.getByIds and returns { ok, events }', async () => {
+    const eventRows = [{ id: 'ev-1' }];
+    const spy = vi.spyOn(PgJournal.prototype, 'getByIds').mockResolvedValue(eventRows as never);
+    const ctx = makeCtx({ db: stubDb });
+
+    const result = await getEventsByIdsTool.execute({ ids: ['ev-1', 'ev-2'] }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, events: eventRows });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0]).toEqual(['ev-1', 'ev-2']);
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({});
+    (ctx as { db?: unknown }).db = undefined;
+
+    const result = await getEventsByIdsTool.execute({ ids: ['ev-1'] }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+});
+
+describe('get_event_by_id — cross-owner single fetch by id', () => {
+  it('is registered read-database', () => {
+    expect(getEventByIdTool).toBeDefined();
+    expect(getEventByIdTool.category).toBe('read-database');
+  });
+
+  it('threads id through to PgJournal.getById and returns { ok, event }', async () => {
+    const eventRow = { id: 'ev-1', type: 'risk.breach' };
+    const spy = vi.spyOn(PgJournal.prototype, 'getById').mockResolvedValue(eventRow as never);
+    const ctx = makeCtx({ db: stubDb });
+
+    const result = await getEventByIdTool.execute({ id: 'ev-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, event: eventRow });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0]).toBe('ev-1');
+  });
+
+  it('returns { ok, event: null } when the row is absent', async () => {
+    vi.spyOn(PgJournal.prototype, 'getById').mockResolvedValue(null as never);
+    const ctx = makeCtx({ db: stubDb });
+
+    const result = await getEventByIdTool.execute({ id: 'missing' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, event: null });
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({});
+    (ctx as { db?: unknown }).db = undefined;
+
+    const result = await getEventByIdTool.execute({ id: 'ev-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
   });
 });
