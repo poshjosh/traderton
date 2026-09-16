@@ -83,7 +83,7 @@ venues:
     # local default is disabled. Set JUPITER_API_KEY + flip this to true to enable
     # platform-managed wallet creation. See docs/003.
     walletGeneration:
-      enabled: false
+      enabled: true
   1inch:
     baseUrl: https://api.1inch.dev/swap/v6.0/8453
     rpcUrl: https://mainnet.base.org
@@ -95,7 +95,7 @@ venues:
     # F2c trim divergence (see jupiter above): disabled as the safe local default.
     # Set ONEINCH_API_KEY + flip this to true to enable. See docs/003.
     walletGeneration:
-      enabled: false
+      enabled: true
 
 execution:
   defaultSlippageBps: 50
@@ -228,13 +228,13 @@ marketData:
       maxConcurrentScans: 4        # per-worker max concurrent scanner agents
       maxCandidates: 20            # max entry candidates per scan (open-position exits always preserved)
   birdeye:
-    enabled: false            # F2c: safe local default disabled (source is true + requires BIRDEYE_API_KEY)
+    enabled: true            # F2c: safe local default disabled (source is true + requires BIRDEYE_API_KEY)
     baseUrl: "https://public-api.birdeye.so"
     requestsPerMinute: 60
     apiKey: ""                # override: BIRDEYE_API_KEY — required when birdeye.enabled is true
     cacheTtlMs: 3600000
   coinMarketCap:
-    enabled: false            # F2c: safe local default disabled (source is true + requires COINMARKETCAP_API_KEY)
+    enabled: true             # F2c: safe local default disabled (source is true + requires COINMARKETCAP_API_KEY)
     baseUrl: "https://pro-api.coinmarketcap.com"
     requestsPerMinute: 30
     apiKey: ""                # override: COINMARKETCAP_API_KEY — required when coinMarketCap.enabled is true
