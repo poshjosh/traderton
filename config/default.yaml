@@ -244,6 +244,12 @@ marketData:
     geckoTerminalExtraPages: 1      # Set to 1 to fetch page 2 of GT trending + top pools
     antistalenessCooldownHours: 4   # Hours before a token can re-appear at top of discovery. 0 = disabled.
     antistalenessTokenTtlHours: 24  # How long to track a seen address before pruning it
+  # 1:1 with source (herobids default.yaml): used by the boundary's economic-calendar
+  # acquisition (ForexFactory scrape via Scrapfly). Kept verbatim.
+  scrapfly:
+    baseUrl: "https://api.scrapfly.io/scrape"
+    asp: true
+    requestTimeoutMs: 60000
   # 1:1 with source (herobids default.yaml): a trading key in AppConfigSchema
   # (marketData.economicCalendar). NOT apiKey-gated — the source `true` parses
   # cleanly, so it is kept verbatim rather than silently dropped to the schema
@@ -254,4 +260,92 @@ marketData:
     minImpact: medium
     currencies: []
     cacheTtlMs: 43200000            # 12 hours — shared across all agents via Redis
+    maxEventsInContext: 5
+    refreshIntervalMs: 21600000     # 6 hours — background cache refresh cadence
+    forexFactory:
+      baseUrl: "https://www.forexfactory.com"
+      requestTimeoutMs: 120000
+      requestsPerMinute: 1
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+  # 1:1 with source (herobids default.yaml): DEX token-safety gating (defaults,
+  # trade guard, canonical-token map). Kept verbatim.
+  tokenSafety:
+    enabled: true
+    defaults:
+      minLiquidityUsd: 25000
+      minVolume24hUsd: 25000
+      minTokenAgeHours: 24
+      deadPoolMinAgeHours: 720
+      deadPoolMaxVolume24hUsd: 1000
+      preferCanonical: true
+      requireCanonicalForKnownSymbols: true
+      includeBlockedSearchResults: false
+    tradeGuard:
+      enabled: true
+      liquidityMultiplier: 200
+      allowOverrides: true
+      overrideTtlMs: 300000
+    canonicalTokens:
+      solana:
+        SOL:
+          address: So11111111111111111111111111111111111111112
+          name: Wrapped SOL
+          aliases: [WSOL]
+        USDC:
+          address: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+          name: USD Coin
+          aliases: []
+        USDT:
+          address: Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
+          name: Tether USD
+          aliases: []
+        JUP:
+          address: JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN
+          name: Jupiter
+          aliases: []
+        BONK:
+          address: DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
+          name: Bonk
+          aliases: []
+        RAY:
+          address: 4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R
+          name: Raydium
+          aliases: []
+      base:
+        WETH:
+          address: "0x4200000000000000000000000000000000000006"
+          name: Wrapped Ether
+          aliases: [ETH]
+        USDC:
+          address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+          name: USD Coin
+          aliases: []
+        USDT:
+          address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2"
+          name: Bridged Tether USD
+          aliases: []
+        DAI:
+          address: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb"
+          name: Dai Stablecoin
+          aliases: []
+        WBTC:
+          address: "0x0555E30da8f98308EdB960aa94C0Db47230d2B9c"
+          name: Wrapped Bitcoin
+          aliases: [BTC]
+        cbBTC:
+          address: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"
+          name: Coinbase Wrapped BTC
+          aliases: []
+        LINK:
+          address: "0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196"
+          name: Chainlink
+          aliases: []
+        AAVE:
+          address: "0x63706e401c06ac8513145b7687A14804d17f814b"
+          name: Aave
+          aliases: []
+        UNI:
+          address: "0xc3De830EA07524a0761646a6a4e4be0e114a3C83"
+          name: Uniswap
+          aliases: []
   timeoutMs: 5000
