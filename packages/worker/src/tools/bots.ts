@@ -36,27 +36,48 @@ const BotConfigInputSchema = z.object({
     slippageBps: z.coerce.number().optional(),
   }).optional(),
   risk: z.record(z.unknown()).optional(),
+  // Explicit swap asset identifiers — REQUIRED by the engine's BotConfigSchema
+  // for swap venues (venueType 'swap'), which rejects a config without them.
+  // Mirrors the domain BotConfigSchema.swapAssets shape (packages/domain config
+  // schema). Must be declared here or Zod strips it during tool-param parsing,
+  // and the engine then fails "swapAssets is required when venueType is swap".
+  swapAssets: z.object({
+    baseAsset: z.string(),
+    quoteAsset: z.string(),
+    baseDecimals: z.number().int().min(0).max(18),
+    quoteDecimals: z.number().int().min(0).max(18),
+  }).optional(),
   // venue and venueType are omitted — injected from the trading connection by the broker
 });
 
 // --- create_bot ---
 
 const CreateBotParamsSchema = z.object({
-  connectionId: z.string().optional().transform(v => v === '' ? undefined : v).describe('Connection ID to use. You can find this in the Capability Readiness section as "connection=<id>". Omit to use your default trading connection.'),
-  config: BotConfigInputSchema.optional().describe('Bot configuration (strategy, symbol, risk params). venue is resolved from your trading connection automatically.'),
+  venueAccountId: z.string().optional().transform(v => v === '' ? undefined : v).describe('Explicit venue account ID to trade on. Omit to use your default venue account (used only when you have exactly one, or an operator default is set).'),
+  config: BotConfigInputSchema.optional().describe('Bot configuration (strategy, symbol, risk params). venue is resolved from your venue account automatically.'),
   rationale: z.string().max(500).optional().describe('Brief rationale for creating this bot. Used for audit.'),
+  // autostart: whether to start the bot immediately after creating it.
+  //   undefined/true → create_and_start (persist + mark-running + enqueue start).
+  //   false           → create only (persist STOPPED); the caller starts it later.
+  // WHY the flag exists: the ORIGINAL herobids USER route created a bot STOPPED and
+  // returned 201, then the user drove an explicit POST /bots/:id/start (create-then-
+  // start). The migration collapsed this into create_and_start, which auto-started
+  // and made the user's explicit start a no-op (200 already_running). The USER route
+  // now passes autostart:false to restore create-then-start; AGENTS keep the default
+  // (create_and_start) — an agent delegates a bot precisely to have it running.
+  autostart: z.boolean().optional().describe('If false, create the bot without starting it (it persists stopped; start it later). Defaults to true (create and start).'),
   dryRun: z.boolean().optional().describe('If true, validates the bot config without creating it. Returns a preview of what would be sent.'),
 });
 
 const createBotTool: AgentTool<TradingToolContext> = {
   name: 'create_bot',
-  description: 'Create and start a new trading bot. The bot will run independently with its own strategy and risk parameters. Use when you want to delegate a trading opportunity to an automated bot.',
+  description: 'Create and start a new trading bot. The bot will run independently with its own strategy and risk parameters. Use when you want to delegate a trading opportunity to an automated bot. By default the bot is created AND started (autostart=true); pass autostart=false to create it stopped and start it later.',
   parametersSchema: CreateBotParamsSchema,
   parameters: convertZodToJsonSchema(CreateBotParamsSchema),
   category: 'execute-trade',
   promptGuidance: 'dryRun=true previews the bot config without creating it. Use find_instrument to look up the correct config.symbol (use the symbol field from the result). get_schema("create_bot.config.strategy") and get_schema("create_bot.config.execution") show available strategy and execution options.',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
-    const { connectionId, config, rationale, dryRun } = params as z.infer<typeof CreateBotParamsSchema>;
+    const { venueAccountId, config, rationale, autostart, dryRun } = params as z.infer<typeof CreateBotParamsSchema>;
 
     // Dry-run: validate and preview without creating.
     // Schema-level validation (shape, types, required fields) has already run
@@ -69,9 +90,13 @@ const createBotTool: AgentTool<TradingToolContext> = {
           ok: true,
           dryRun: true,
           preview: {
-            connectionId: connectionId ?? '(default trading connection)',
+            venueAccountId: venueAccountId ?? '(default venue account)',
             config: config ?? null,
             rationale: rationale ?? null,
+            // autostart=false previews a create-only (bot persists stopped);
+            // otherwise create_and_start (default) is previewed.
+            autostart: autostart ?? true,
+            action: autostart === false ? 'create' : 'create_and_start',
           },
           note: 'Dry run — schema-level validation passed. NOT created. Additional engine validation (strategy params, venue, risk) runs at creation time. Remove dryRun=true to execute.',
         },
@@ -81,8 +106,10 @@ const createBotTool: AgentTool<TradingToolContext> = {
     let result: void | ManageBotResult;
     try {
       result = await ctx.publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, {
-        action: 'create_and_start',
-        connectionId,
+        // autostart:false → create-only (persist STOPPED, no start enqueue), used by
+        // the herobids USER route to restore the original create-then-start flow.
+        // Otherwise create_and_start (default) — the agent path auto-starts.
+        action: autostart === false ? 'create' : 'create_and_start',
         config,
         rationale,
       });
@@ -109,12 +136,17 @@ const createBotTool: AgentTool<TradingToolContext> = {
     // The bot row + its id are persisted SYNCHRONOUSLY by the drive path (A1); only
     // the actor START is deferred. Surface the id so the consumer sees it in
     // data.botId without waiting for the next tick.
+    // create_and_start defers only the actor START (row + id are synchronous, A1);
+    // create-only (autostart=false) persists the bot STOPPED with no pending start.
+    const createdStopped = result?.status === 'stopped';
     return {
       success: true,
       data: {
         ok: true,
         botId: result?.botId,
-        note: 'bot created — the row and id are available now; the bot actor starts on the next tick',
+        note: createdStopped
+          ? 'bot created (stopped) — the row and id are available now; start it explicitly when ready'
+          : 'bot created — the row and id are available now; the bot actor starts on the next tick',
       },
     };
   },
@@ -286,7 +318,13 @@ const getOwnerBotStatusTool: AgentTool<TradingToolContext> = {
 
     const bot = await ctx.botRepo.getBotByIdForOwner(botId, ctx.ownerId);
     if (!bot) {
-      return { success: false, error: `bot ${botId} not found or not owned by this owner`, fault: false };
+      // Owner-scoped existence failure MUST carry errorCode 'not_found.resource'
+      // (fault:false), identical to every sibling owner-scoped bot tool
+      // (start/stop/adjust/delete/instantiate). Without it the boundary maps the
+      // failure to the generic wire code `validation.invalid_payload`, and the
+      // consumer's read handler — which branches on `not_found.resource` → 404 —
+      // falls through to 502. This is the read-after-delete 404 contract.
+      return { success: false, fault: false, errorCode: 'not_found.resource', error: `bot ${botId} not found or not owned by this owner` };
     }
 
     return {

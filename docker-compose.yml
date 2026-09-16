@@ -57,20 +57,30 @@ services:
     build:
       context: .
       target: runtime
+    # All creds + operator keys come from `.env` — mirroring herobids, which
+    # hardcodes NO secrets in compose and feeds its services purely via
+    # `env_file: .env`. `.env` is the single source of truth; `.env.example` is
+    # its committed, documented twin. The HMAC signing identity
+    # (BOUNDARY_CONSUMER_ID/KEY_ID/SIGNING_SECRET) MUST match herobids'
+    # TRADERTON_BOUNDARY_* values; the credential-encryption key
+    # (CREDENTIAL_ENCRYPTION_KEY) and venue/market-data API keys all live in
+    # `.env` too. `required: false` so the stack still boots without a local
+    # `.env` (signing/encryption unset → auth/provisioning fail loudly, which is
+    # the correct signal that an operator must supply `.env`).
+    #
+    # Only the compose-network TOPOLOGY stays inline below (service-name hosts +
+    # bind host/port), because those are container-network facts that differ
+    # from a developer's `.env` localhost values — never secrets. This mirrors
+    # herobids keeping `DATABASE_URL: postgres://…@postgres:5432` inline while
+    # every secret comes from `.env`.
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgres://traderton:traderton@postgres:5432/traderton
       REDIS_URL: redis://redis:6379
       BOUNDARY_PORT: "8080"
       BOUNDARY_HOST: "0.0.0.0"
-      # Dev signing material — the committed dev helper signs against these.
-      # These are LOCAL dev VALUES, not secrets; override for any shared env.
-      BOUNDARY_CONSUMER_ID: dev-consumer
-      BOUNDARY_KEY_ID: dev-key
-      BOUNDARY_SIGNING_SECRET: dev-signing-secret
-      # Credential-encryption key for provision_venue_account (AES-256-GCM, 64
-      # hex = 32 bytes). LOCAL DEV VALUE ONLY — not a secret; override for any
-      # shared env. Without it, provisioning fails `provision.encryption_unavailable`.
-      CREDENTIAL_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
     ports:
       - "8080:8080"
     depends_on:

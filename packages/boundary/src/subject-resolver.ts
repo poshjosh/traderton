@@ -75,6 +75,73 @@ function botIdOf(payload: unknown): string | undefined {
   return undefined;
 }
 
+/** Extract a `venueAccountId` string from a validated tool payload, if the tool names one. */
+function venueAccountIdOf(payload: unknown): string | undefined {
+  if (payload && typeof payload === 'object') {
+    const value = (payload as Record<string, unknown>)['venueAccountId'];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return undefined;
+}
+
+/** Read the requested execution mode from a create-bot payload (`config.execution.mode`), if valid. */
+function requestedModeOf(payload: unknown): 'paper' | 'shadow' | 'live' | undefined {
+  if (payload && typeof payload === 'object') {
+    const config = (payload as Record<string, unknown>)['config'];
+    if (config && typeof config === 'object') {
+      const execution = (config as Record<string, unknown>)['execution'];
+      if (execution && typeof execution === 'object') {
+        const mode = (execution as Record<string, unknown>)['mode'];
+        if (mode === 'paper' || mode === 'shadow' || mode === 'live') return mode;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Resolve `ownerMode` for the no-bot-named path (create_bot / submit_decision).
+ *
+ * `ownerMode` is consumed ONLY as the ceiling for the mode-escalation guard
+ * (`checkModeEscalation` in drive-target). It does NOT drive real execution or
+ * live-readiness — those key off the persisted `config.execution.mode`. So this
+ * only decides "what mode is this actor allowed to CEILING at", nothing more.
+ *
+ * WHY actor-type matters (copy-faithful to herobids):
+ *   - In the source system, the mode-escalation ceiling was AGENT-ONLY — it
+ *     exists so an agent cannot create/adjust a bot beyond the agent's OWN
+ *     configured mode (see mode-rank.ts docstring; herobids applied it solely in
+ *     the agent-message-broker path). The USER bot-create route (pre-boundary
+ *     apps/api/src/routes/bots.ts) applied NO mode-rank at all — the user's
+ *     chosen paper/shadow/live was authoritative, with `live` separately gated
+ *     by the plan-entitlement check (`checkLiveEnabled`), which herobids STILL
+ *     performs on its side before ever calling the boundary.
+ *   - The migration routed user-direct creates through this resolver, which
+ *     defaulted ownerMode to 'paper' (getDefaultOwnerMode is unset for this
+ *     consumer) — spuriously imposing an agent-only ceiling on users and
+ *     rejecting a valid user `shadow` bot. This restores the original semantics.
+ *
+ * Therefore:
+ *   - `agent` → ceiling = the agent's own mode (via getDefaultOwnerMode; unset
+ *     today → falls back to the safe 'paper' until the separate agent-mode
+ *     wiring lands). The agent guard is preserved exactly.
+ *   - `user`/`system`/`bot` → the actor is authoritative; the ceiling is the
+ *     requested mode itself, so checkModeEscalation passes trivially (read
+ *     defensively — missing/invalid falls back to the safe 'paper'). This does
+ *     NOT let a user self-authorize `live`: `live` remains gated upstream by
+ *     herobids' `checkLiveEnabled` before the boundary is called.
+ */
+function resolveNoBotOwnerMode(
+  subject: ResolverSubject,
+  payload: unknown,
+  ports: SubjectResolverPorts,
+): 'paper' | 'shadow' | 'live' {
+  if (subject.actor.type === 'agent') {
+    return ports.getDefaultOwnerMode?.(subject.ownerId) ?? 'paper';
+  }
+  return requestedModeOf(payload) ?? 'paper';
+}
+
 /** Derive `venueType` from a venue name (orderbook by default; swap venues are jupiter/1inch). */
 function venueTypeFor(venue: string, configVenueType?: unknown): 'orderbook' | 'swap' {
   if (configVenueType === 'swap' || configVenueType === 'orderbook') {
@@ -119,11 +186,15 @@ function coordsFromBotConfig(config: Record<string, unknown>): {
  *    subject.ownerId` (ownership; mismatch → `authorization.denied`), and derive
  *    `venueAccountId` (the bot column) + `venue`/`venueType`/`ownerMode` (bot
  *    config). Missing bot → `precondition.not_ready`.
- *  - **No bot named** (e.g. `create_bot`, `submit_decision`): resolve a per-owner
- *    default venue account (exactly one, or an operator-configured default);
- *    derive `venue`/`venueAccountId` from it, `venueType` from the venue,
- *    `ownerMode` from operator config or the safe `paper` default. No account →
- *    `precondition.not_ready`.
+ *  - **No bot named** (e.g. `create_bot`, `submit_decision`): if the payload
+ *    carries an explicit `venueAccountId` (the consumer resolved connection→
+ *    account on its side), honour it deterministically — validate it belongs to
+ *    the owner (mismatch/absent from the owner's accounts → `authorization.denied`),
+ *    then derive `venue`/`venueType`/`ownerMode` from it. Otherwise fall back to
+ *    the per-owner default (exactly one account, or an operator-configured
+ *    default); derive `venue`/`venueAccountId` from it, `venueType` from the
+ *    venue, `ownerMode` from operator config or the safe `paper` default. No
+ *    account → `precondition.not_ready`.
  */
 export async function resolveSubjectInjection(
   subject: ResolverSubject,
@@ -183,8 +254,39 @@ export async function resolveSubjectInjection(
     };
   }
 
-  // No bot named → resolve a per-owner default venue account.
+  // No bot named (e.g. create_bot, submit_decision). The consumer owns the
+  // concrete connection→account mapping and passes the chosen account id as a
+  // per-operation payload arg (`venueAccountId`); the whole subject+payload is
+  // HMAC-signed, so payload placement is integrity-safe. When present we honour
+  // it deterministically (validating ownership against the owner's accounts —
+  // defence in depth). When absent we keep the historical per-owner default
+  // resolution (single account, else operator default, else ambiguous).
   const accounts = await ports.listVenueAccountsByOwner(subject.ownerId);
+  const requestedVenueAccountId = venueAccountIdOf(payload);
+
+  if (requestedVenueAccountId) {
+    const requested = accounts.find((a) => a.id === requestedVenueAccountId);
+    if (!requested) {
+      return {
+        ok: false,
+        code: 'authorization.denied',
+        message: 'venue account not owned by subject',
+      };
+    }
+    const ownerMode = resolveNoBotOwnerMode(subject, payload, ports);
+    return {
+      ok: true,
+      injection: {
+        ownerId: subject.ownerId,
+        actorId: subject.actor.id,
+        ownerMode,
+        venue: requested.venue,
+        venueType: venueTypeFor(requested.venue),
+        venueAccountId: requested.id,
+      },
+    };
+  }
+
   if (accounts.length === 0) {
     return { ok: false, code: 'precondition.not_ready', message: 'no venue account for owner' };
   }
@@ -204,7 +306,7 @@ export async function resolveSubjectInjection(
     };
   }
 
-  const ownerMode = ports.getDefaultOwnerMode?.(subject.ownerId) ?? 'paper';
+  const ownerMode = resolveNoBotOwnerMode(subject, payload, ports);
   return {
     ok: true,
     injection: {

@@ -183,7 +183,7 @@ export type PublishToInbound = (
 
 /** The manage_bot payload shape the copied tools emit (herobids ManageBotPayload). */
 interface ManageBotPayload {
-  action: 'create_and_start' | 'start' | 'stop' | 'restart' | 'adjust_config';
+  action: 'create' | 'create_and_start' | 'start' | 'stop' | 'restart' | 'adjust_config';
   connectionId?: string;
   config?: Record<string, unknown>;
   botId?: string;
@@ -225,6 +225,8 @@ export async function handleManageBot(
   payload: ManageBotPayload,
 ): Promise<void | ManageBotResult> {
   switch (payload.action) {
+    case 'create':
+      return createBot(deps, payload);
     case 'create_and_start':
       return createAndStart(deps, payload);
     case 'start':
@@ -240,8 +242,28 @@ export async function handleManageBot(
   }
 }
 
-async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload): Promise<ManageBotResult> {
-  if (!payload.config) throw new Error('config is required for create_and_start');
+/**
+ * Shared create-and-persist prefix for the `create` and `create_and_start`
+ * actions. Runs the FULL create pipeline herobids ran before its `botStart`
+ * (agent-message-broker.ts :604–718): venue-stamp → execution-capability guard
+ * (B1) → BotConfigSchema parse → mode-escalation guard → swap-symbol guard →
+ * atomic per-`ownerId` limit + persist (`tryCreateBotWithLimit`). Returns the
+ * synchronously-persisted `botId` (the row is inserted `status:'stopped'` by the
+ * limit seam).
+ *
+ * `create` returns here (bot stays STOPPED); `create_and_start` continues with
+ * the mark-running + enqueue-start steps. Extracted so both actions share a
+ * BYTE-IDENTICAL create/validate path — in particular the SAME
+ * `creatorType:'agent', creatorId: deps.actorId` stamp (see WHY on the persist
+ * call below). `actionLabel` only tunes the "config is required" error text to
+ * match the invoking action; every other line is identical for both actions.
+ */
+async function createBotWithLimit(
+  deps: DriveTargetDeps,
+  payload: ManageBotPayload,
+  actionLabel: 'create' | 'create_and_start',
+): Promise<{ botId: string; validatedConfig: Record<string, unknown> }> {
+  if (!payload.config) throw new Error(`config is required for ${actionLabel}`);
 
   // Stamp the INJECTED venue/venueType onto the raw config before validation —
   // agent-provided venue values are discarded (herobids broker :604–606). The
@@ -348,6 +370,15 @@ async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload):
   if (!deps.botLimit) {
     throw new Error('bot_limit_unavailable: limit-enforced bot creation is not configured (item E)');
   }
+  // WHY `creatorType:'agent', creatorId: deps.actorId` for BOTH actions (incl. the
+  // user-originated create-only path): the agent-scoped write guards on start_bot,
+  // stop_bot, and adjust_config (`requireOwnedBot` → creatorType==='agent' &&
+  // creatorId===ctx.agentId) reject any bot NOT stamped this way. The herobids USER
+  // lifecycle (create stopped, then explicit POST /bots/:id/start) works ONLY
+  // because the persisted row carries the agent stamp — so the later start_bot can
+  // find + mark it. Persisting creatorType:'user' here would make that start 404 and
+  // break the whole lifecycle. This stamp is therefore BYTE-IDENTICAL for `create`
+  // and `create_and_start`; only the post-persist steps differ.
   const createResult = await deps.botLimit.tryCreateBotWithLimit({
     ownerId: deps.ownerId,
     venueAccountId: deps.venueAccountId,
@@ -360,6 +391,42 @@ async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload):
   }
   const botId = createResult.botId;
   logger.info({ ownerId: deps.ownerId, botId }, 'Bot created via manage_bot');
+
+  return { botId, validatedConfig: validatedConfig as unknown as Record<string, unknown> };
+}
+
+/**
+ * `create` — create-only (autostart=false). Runs the shared create+validate+persist
+ * prefix and STOPS: the bot row is persisted `status:'stopped'` (the limit seam's
+ * insert default) and NO running slot is claimed, NO start job is enqueued. Mirrors
+ * the ORIGINAL herobids USER route (create-then-start): the route returns 201 with
+ * the botId, and the user later drives an explicit `POST /bots/:id/start`.
+ *
+ * WHY leaving it stopped is safe/correct:
+ *  - `WorkerRuntime.reclaimOrphans` only reloads bots with `status:'running'`, so a
+ *    stopped bot is correctly NOT reclaimed on restart (it has no actor to recover).
+ *  - The explicit `start_bot` on a STOPPED bot runs the non-reclaim path in
+ *    `startBot` (isReclaim = status==='running' is false) which itself does the
+ *    atomic mark-running (`tryMarkBotRunningWithLimit`) → enqueue('start'). So the
+ *    running slot + start job that `create_and_start` claims up-front are simply
+ *    deferred to that explicit start — no step is lost.
+ */
+async function createBot(deps: DriveTargetDeps, payload: ManageBotPayload): Promise<ManageBotResult> {
+  const { botId } = await createBotWithLimit(deps, payload, 'create');
+  // Persisted STOPPED; the running-slot claim + start enqueue are deliberately NOT
+  // run here (that is create_and_start's job). Surface status so the caller/route
+  // can confirm the create-only outcome.
+  return { botId, status: 'stopped' };
+}
+
+async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload): Promise<ManageBotResult> {
+  const { botId, validatedConfig } = await createBotWithLimit(deps, payload, 'create_and_start');
+
+  // `createBotWithLimit` already refused when `deps.botLimit` was absent; re-assert
+  // for the type-narrower (the guard now lives in the shared helper, not this scope).
+  if (!deps.botLimit) {
+    throw new Error('bot_limit_unavailable: limit-enforced bot creation is not configured (item E)');
+  }
 
   // Claim the running slot (create → mark), mirroring the herobids broker
   // (agent-message-broker.ts:738–743): the create inserts `status:'stopped'`, then

@@ -82,6 +82,10 @@ export interface ToolResult {
  */
 export interface ManageBotResult {
   botId: string;
+  // Present on the create-only path (`action:'create'`, autostart=false) so the
+  // caller can see the bot was persisted STOPPED (not create_and_start's running
+  // slot). Absent/omitted for create_and_start (which enqueues a start).
+  status?: string;
 }
 
 /** Bot row shape returned by bot repository queries. */
