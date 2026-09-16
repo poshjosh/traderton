@@ -33,8 +33,10 @@ is not. Nothing in this plan authorizes a `main` merge.
 
 ### What this planning slice establishes
 
-1. The reported `market_assessment_*` ambiguity is already settled by the
-   authoritative c4.9h ruling. Do not re-point, move, or drop those tables.
+1. The prior c4.9h ruling correctly excluded `market_assessment_*` from the
+  completed c4.9f table-drop wave, but the broader legal-isolation ownership
+  question is now open. Current Herobids retention is temporary and requires
+  an 008 reassessment before legal-isolation sign-off.
 2. No complete local trading package is mechanically deletable today. There are
    three stale consumer metadata edges and one obsolete backfill script that can
    be removed independently.
@@ -66,7 +68,7 @@ implementation instruction to change scope unilaterally.
 
 ## 2. Grounding report
 
-### 2a. Loose end A - `market_assessment_*` is a settled platform KEEP
+### 2a. Loose end A - active platform retention; final ownership is open
 
 Reproduce the runtime audit:
 
@@ -112,14 +114,15 @@ The first command finds
 assessment domain types exist in Traderton, but no repository, tool, or runtime
 consumer reads or writes those tables.
 
-#### The apparent documentation contradiction is historical, not open
+#### The apparent table-drop contradiction is historical; capability ownership is now open
 
 The primary documents now agree:
 
-- `docs/001-parity-ledger.md:217` is the authoritative c4.9h ruling: all three
-  tables are "herobids-local PLATFORM tables"; Traderton has `runs` and
-  `artifacts` "schema/types ONLY" with zero runtime access; `requests` was
-  never copied; re-point and Gap-drop are rejected.
+- The former c4.9h ruling excluded the three tables from the c4.9f drop because
+  dropping them would have broken live Herobids worker behavior. That remains
+  correct as a historical table-drop decision. The current `001` row supersedes
+  its final-sounding platform classification with **temporary platform
+  retention—reassessment required before legal-isolation sign-off**.
 - `docs/011-premerge-backlog.md:78` labels the earlier FULL-set inclusion as
   "[historical, RETRACTED]" and records the c4.9h platform-KEEP ruling.
   `docs/011-premerge-backlog.md:185` calls the former omission CRITICAL but
@@ -131,12 +134,30 @@ The primary documents now agree:
   `market_assessment_artifacts -> market_assessment_runs` foreign key. It does
   not make a contrary ownership ruling.
 
-**Decision-brief disposition:** do not write or route a new ownership brief.
-`008` requires the parity-first gate, and this one has already been decided and
-recorded by the authoritative c4.9h decision-agent ruling. The correct outcome
-is **settled by recorded parity ruling**, not a fresh human or agent choice.
-The stale semantic review is non-authoritative and may be deleted without
-losing this finding; the ledger and pre-merge backlog are the durable record.
+**Decision-brief disposition:** do not re-run the old table-drop decision. It
+was resolved correctly for its scope. Do route a new **whole-capability** brief
+under `008` before legal-isolation sign-off. The re-decision covers the request,
+billing/idempotency, Traderton evidence/scoring, LLM ranking, artifacts,
+review/wake workflow, and preset bindings/transitions—not a table family in
+isolation. Current retention preserves behavior pending that ruling. The stale
+semantic review is non-authoritative and may be deleted without losing the
+runtime finding; `001`, `004`, `011`, and `CANONICAL-STATE` are the durable
+records.
+
+#### Temporary-retention guardrails and future options
+
+Until the reassessment, current behavior remains unchanged and the tables stay
+outside the completed c4.9f drop. This does not authorize new local market-data
+providers, local trading execution/state, or new in-process trading-package
+dependencies in Herobids.
+
+The future `008` brief must retain these unranked options:
+
+1. Permanent Herobids retention as an explicit legal-isolation exception.
+2. Complete Traderton ownership of the capability.
+3. A deliberate boundary split with one clear owner for each cache,
+   idempotency key, and state transition.
+4. Removal/deprecation of market-guided preset transitions.
 
 ### 2b. Loose end B - exact residual package import audit
 
@@ -233,9 +254,10 @@ In scope:
 4. Remove the stale venues dependency from `scripts/package.json`.
 5. Refresh the lockfile only as required by those manifest changes.
 
-Out of scope: all `market_assessment_*` runtime/table changes; `setup.ts`'s
-manual Jupiter helper; all non-stale worker references; the rate-limit lab;
-root package references; package directories; Traderton runtime code; `main`.
+Out of scope: all `market_assessment_*` runtime/table changes pending the
+mandatory ownership decision; `setup.ts`'s manual Jupiter helper; all non-stale
+worker references; the rate-limit lab; root package references; package
+directories; Traderton runtime code; `main`.
 
 ### Implementation steps
 
@@ -411,8 +433,8 @@ either branch to `main`.
       edit was made on `main`.
 - [x] All 20 active assessment operations and all 16 production app package
       imports were audited with shell `rg`.
-- [x] The c4.9h ruling was confirmed authoritative; no duplicate ownership brief
-      or new route was created.
+- [x] The historical c4.9h table-drop ruling was confirmed; it is now recorded
+  as temporary retention rather than a final ownership classification.
 - [x] The assessment finding is durable in `001` and `011`; this audit is also
       recorded in `011` below.
 - [x] Plan A identifies only independent deletion/metadata work.
@@ -423,7 +445,7 @@ either branch to `main`.
 ## 6. Outstanding issues
 
 - The label "market data / market assessment" hides two different ownership
-  boundaries. Do not use the c4.9h platform-table ruling to justify moving
+  boundaries. Do not use temporary assessment retention to justify moving
   market-data provider logic back into Herobids.
 - The historic `herobids/docs/features/2026/09/10/001-consume-traderton/004-l3d-plan.md`
   still describes old package-removal terrain. It is historical evidence only;

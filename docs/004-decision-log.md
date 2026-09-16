@@ -91,6 +91,63 @@ or execution-cost attribution may still return later as a Deferred concern.
 Keeping those ideas separate avoids mixing "not owned here" with "owned here,
 but postponed."
 
+## Temporary retention of market assessment pending legal-isolation decision
+
+**Decision date:** 2026-09-16. **Status:** temporary; this is a mandatory
+reassessment before legal-isolation sign-off, not a permanent capability
+classification.
+
+`market_assessment_requests`, `market_assessment_runs`, and
+`market_assessment_artifacts`, together with the request, evidence, ranking,
+review, and preset-transition workflow, currently remain in Herobids. This
+preserves the working agent-preset review behavior while no replacement boundary
+exists. The current c4.9f table-drop exclusion remains correct operationally:
+dropping the tables today would break live worker behavior.
+
+This temporary retention does **not** conclude that market assessment is outside
+Traderton's product/legal boundary. The capability is trading-adjacent: it
+consumes Traderton `check_regime`, `get_volatility`, and `score_candidate` data;
+ranks trading presets for a canonical instrument; and updates an agent preset
+binding used for future entries. It does not currently submit a decision, create
+a bot, execute an order, or alter an existing position. `entries_only` is the
+only supported transition mode; modes that would tighten or fully transition
+existing positions are rejected.
+
+The platform concerns currently interwoven with the capability are agent/user
+identity, agent opt-in and allowed-preset policy, platform billing and usage
+records, agent wakes, platform LLM configuration, and the agent-binding/config
+update lifecycle. Traderton currently carries only `runs`/`artifacts` schema and
+domain types, has no `requests` table, and has no runtime consumer.
+
+### Ownership options retained for the future decision
+
+The future 008 brief must evaluate the complete workflow, not merely its three
+tables. It must include the following unranked options and may derive a better
+one from grounded evidence:
+
+1. **Permanent Herobids retention.** Treat it as platform agent-reasoning and
+  record an explicit legal-isolation exception for a trading-adjacent
+  capability.
+2. **Complete Traderton ownership.** Move request lifecycle, assessment state,
+  evidence/scoring, ranking, and artifacts behind the boundary; Herobids
+  becomes a consumer and retains only platform-facing concerns that the
+  resulting contract deliberately accepts.
+3. **Deliberate boundary split.** Traderton owns canonical market identity,
+  evidence, scoring, artifacts, and their cache/idempotency; Herobids retains
+  platform billing, agent policy, review scheduling/wakes, and application of
+  an approved preset. The decision must define exactly one owner for each
+  cache, idempotency key, and state transition.
+4. **Removal/deprecation.** Remove market-guided preset transitions rather than
+  migrating them. This is a product/parity reduction and requires explicit
+  treatment as such.
+
+Until that decision, no new local market-data provider, trading execution,
+trading-state access, or in-process trading package dependency may be added to
+Herobids under the temporary-retention label. The mandatory trigger is the
+legal-isolation sign-off / final cutover approval, or an earlier dedicated
+assessment-ownership slice. Record the ruling in this log and its status in 001
+and 011.
+
 ## Why bots are mechanical (the cyclical tension, resolved)
 
 The old model let bots use LLM intelligence and let agents run the mechanical

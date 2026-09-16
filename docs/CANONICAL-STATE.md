@@ -134,6 +134,22 @@ verification & consumption roadmap [024](./024-verification-and-consumption-road
 is L1 (done) → L2 (skipped) → **F (done)** → **L3 (herobids consumes over REST → cutover)**. L3 is the next
 milestone. See §5 for the ownership-rule change L3 forces.
 
+### Open decision — market-assessment ownership (2026-09-16)
+
+`market_assessment_requests`/`_runs`/`_artifacts` and their Herobids worker
+orchestration are **temporarily retained in Herobids**. This preserves a working
+agent-preset review path and the completed c4.9f table drop remains correctly
+scoped: the three tables are not part of that drop.
+
+This is **not** a final determination that the capability is outside the legal
+trading boundary. Market assessment consumes Traderton market/scoring evidence
+and chooses an agent preset used for future entries. Before legal-isolation
+sign-off / final cutover approval, an 008 decision brief must decide the whole
+workflow: permanent Herobids retention as an explicit exception, complete
+Traderton ownership, a deliberate split, or removal/deprecation. See
+[004](./004-decision-log.md), [001](./001-parity-ledger.md), and
+[011](./011-premerge-backlog.md).
+
 ### 3.1 L3 plan (herobids consumes over REST) — decisions locked 2026-09-08
 
 The investigation + proposal are in **herobids** on branch `consume-traderton` (the working spec lives where
