@@ -147,3 +147,25 @@ loop. Keep work on a branch (branch-per-level / per-milestone) and ask.
 
 Keep durable production fixes SEPARATE from scaffolding so a keep-forever change
 is never entangled with an undecided/temporary one in the same merge.
+
+## Environment files — `.example` twins are the committed source of truth
+
+Every `.env*` file has a committed `.example` twin (same variable keys, real
+secret values replaced with safe placeholders or left blank, one inline `#`
+comment per var explaining it). Real `.env*` files are gitignored; the `.example`
+files are the committed, self-documenting record of what an operator must set to
+run the process (e.g. the boundary's HMAC signing creds, `DATABASE_URL`,
+`SCRAPFLY_API_KEY`, `LLM_*`). This is how a reader of the repo knows which `.env`
+to create and with what keys.
+
+Rules for authoring/implementing agents:
+- When you ADD or CHANGE an environment variable, update the matching `.example`
+  in the SAME change. Never let the `.example` drift from what the code reads
+  (`process.env.*`).
+- When you introduce a NEW `.env` variant, create its `.example` immediately and
+  add a `!.env.<name>.example` un-ignore line to `.gitignore` (real `.env*` stay
+  ignored).
+- `.example` files carry NO real secrets — placeholders/blanks only.
+- Scope: `.example` documents **operator/deploy-time env inputs** only. It is NOT
+  a second home for trading/instance config that lives elsewhere (config schema /
+  DB). See [docs/best-practices/configuration.md](./docs/best-practices/configuration.md).
