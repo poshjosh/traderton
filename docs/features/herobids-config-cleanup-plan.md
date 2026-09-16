@@ -46,3 +46,35 @@ things (bot INSTANCE config `config.risk`, message-type strings, blueprint prese
 4. This is a herobids `consume-traderton` branch change; nothing merges to `main`.
 5. `backtesting` — present in both files; herobids still exposes backtesting (KEEP unless a
    separate audit shows the backtest runtime is also extracted).
+
+---
+
+## Outstanding Issues (post-implementation, non-blocking)
+
+Recorded after executing the 7-block delete (herobids `consume-traderton`). No CRITICAL/HIGH
+remain (the one HIGH — dead `LIVE_ROLLOUT_*` refs in `.env.example` — was fixed in the same slice).
+
+**[Slice 1 — 7-block delete]**
+- **LOW:** The plan's KEEP list named `backtesting` as a block to protect, but no `backtesting`
+  config block or schema field actually exists in herobids `config/default.yaml` / `AppConfigSchema`
+  (nothing to protect, nothing touched). Treat the plan's KEEP list as indicative, not exhaustive.
+- **Note (not a defect):** the delete was extended beyond the literal 7 YAML blocks to complete the
+  cleanup the build demanded — dead worker `live-gate.ts` (+test) that still imported
+  `LiveRolloutConfig` (no production caller), dead `ENV_OVERRIDES` entries, `production.yaml`/
+  `staging.yaml` `liveRollout` overlay overrides, and orphaned sub-schemas
+  (`LiveRolloutConfigSchema`, `ReconciliationConfigSchema`, `StreamConfigSchema`,
+  `MarkingConfigSchema`, `MarketDataRecordingConfigSchema`, `PublicStreamConfigSchema`,
+  `SUPPORTED_LIVE_VENUES`, `SupportedLiveVenue`). All verified orphaned via ripgrep before removal.
+
+**[Slice 2 — herobids env-example drift-check mirror]**
+- Added `herobids/apps/worker/src/env-example-drift.test.ts` (mirrors traderton's guard; scans BOTH
+  `apps/worker/src/config.ts` AND `apps/api/src/config.ts` ENV_OVERRIDES maps + `process.env['X']`
+  literals across `apps/*/src` + `packages/*/src`). Resolved pre-existing drift by documenting the
+  missing operator vars in `.env.example` (incl. the `TRADERTON_BOUNDARY_*` cutover set) and adding
+  `llm.serverCostUsdPerHour: 0.02` to `default.yaml`. 4/4 guard cases pass; `pnpm lint` clean.
+- **No CRITICAL/HIGH.** Two MEDIUM findings (ignore-set accuracy) were FIXED in-slice: `DATASETS_DIR`
+  (real API operator input, not deferred/dev), `RUNTIME_BACKEND` + `NOMAD_AGENT_IMAGE` (documented
+  deploy overrides) moved from IGNORED → documented in `.env.example`.
+- **LOW (accepted, documented):** `SOLANA_RPC_URL` (no live reader) and `BASE_RPC_URL` (test-only
+  reader) remain in `.env.example` as operator RPC docs and are stale-exempted in the guard — optional
+  future cleanup if those doc entries are confirmed dead.
