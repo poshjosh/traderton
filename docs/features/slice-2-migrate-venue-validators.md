@@ -1,6 +1,8 @@
 # Slice 2 — Migrate venue-launch validators to traderton
 
-**Status:** PLAN — not yet implemented. Hand to an implementing agent.
+**Status:** DONE — implemented on traderton `l3-integration` (commit `b0e866e`) +
+herobids `consume-traderton` (commit `61d67fda`). Live-venue `--execute` verification
+deferred to a human with creds; see §9 Outstanding Issues.
 **Doc home:** mirrors `traderton/docs/features/shell-test-cross-stack-plan.md` (the parent plan) and `herobids-config-cleanup-plan.md`.
 
 ---
@@ -257,13 +259,13 @@ verification is deferred to a human with creds.
 ---
 
 ## 8. Definition of done
-- Two validators (+ wrappers) live in traderton, imports repointed, `@traderton/venues`
+- [x] Two validators (+ wrappers) live in traderton, imports repointed, `@traderton/venues`
   builds, dry-runs reach the prereq gate (no import crash).
-- Originals deleted from herobids; no code (apps/packages) references them.
-- `.env.example` twin updated for any new venue-secret vars.
-- `validate-swap-venue.sh` left in place + a backlog entry added for its deferral.
-- Two separate commits (traderton copy-in, herobids delete). Nothing on `main`.
-- Live-venue `--execute` verification explicitly deferred to a human with creds.
+- [x] Originals deleted from herobids; no code (apps/packages) references them.
+- [x] `.env.example` twin updated for any new venue-secret vars.
+- [x] `validate-swap-venue.sh` left in place + a backlog entry added for its deferral (B11).
+- [x] Two separate commits (traderton copy-in, herobids delete). Nothing on `main`.
+- [ ] Live-venue `--execute` verification explicitly deferred to a human with creds.
 
 ---
 
