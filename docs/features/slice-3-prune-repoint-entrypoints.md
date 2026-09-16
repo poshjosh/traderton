@@ -1,6 +1,6 @@
 # Slice 3 — Prune & repoint the herobids test entrypoints for the cross-stack world
 
-**Status:** PLAN — not yet implemented. Hand to an implementing agent.
+**Status:** IMPLEMENTED — 4a/4b/4c/5 DONE (one commit, see §6). Outstanding LOW notes at the bottom.
 **Doc home:** mirrors `traderton/docs/features/shell-test-cross-stack-plan.md` (parent).
 **Depends on:** Slice 1 (cross-stack harness — DONE) and Slice 2 (venue validators
 migrated out of herobids). Do Slice 2 first; this slice assumes the `validate-*`
@@ -44,13 +44,13 @@ the stack). Slice 1 already built the reusable harness this slice wires in.
    `RUN_UNSTABLE_LLM_LATENCY_TESTS` gate + references to bug `2026-09-05/001` that skip
    three flaky LLM-latency tests by default. This is ORTHOGONAL to the migration — do
    NOT change, weaken, or remove it. (VERIFY it still reads as before after your edits.)
-2. **Preserve the existing stack-lifecycle discipline.** Both entrypoints only tear
+3. **Preserve the existing stack-lifecycle discipline.** Both entrypoints only tear
    down services THEY started; pre-existing services are left running. Keep that.
-3. **Commit herobids only, on `consume-traderton`.** Explicit `git add <paths>`.
+4. **Commit herobids only, on `consume-traderton`.** Explicit `git add <paths>`.
    Single-line `-m`, no backticks. Never `--no-verify`. Identity-config warning: ignore.
-4. **Verify with ripgrep (`rg`), never the editor's glob/grep tool** — it false-greens
+5. **Verify with ripgrep (`rg`), never the editor's glob/grep tool** — it false-greens
    in this repo.
-5. **Do not merge to `main`.**
+6. **Do not merge to `main`.**
 
 ### Decisions already settled (do not relitigate)
 - The boundary is brought up **unconditionally** whenever the entrypoints start
@@ -132,7 +132,17 @@ place (BEFORE api/worker start, since api/worker now need the boundary reachable
 
 ## 4. Implementation steps
 
-### 4a. Add unconditional boundary bring-up
+### 4a. Add unconditional boundary bring-up — DONE (factored library shape)
+Implemented via the plan's PREFERRED shape: the bring-up was factored out of
+`with-boundary.sh` into a new sourced library `herobids/scripts/shell/run/boundary.sh`
+(`boundary_compose`, `herobids_compose`, `ensure_boundary_up`, `boundary_wait_ready`,
+`boundary_teardown_if_started`) — one definition of bring-up + `/health/ready` wait +
+created-vs-started teardown. `with-boundary.sh` now sources it; BOTH entrypoints source
+it, call `ensure_boundary_up` before starting api/worker (run-all-tests Steps 5+6;
+run-extra-tests Tiers-3-5 block), pass `docker/xstack.override.yml` on the api/worker
+`up`/`stop`/`rm` compose invocations, and call `boundary_teardown_if_started` from their
+EXIT traps. No `--cross-stack` flag. The boundary is also re-ensured before Step 6/E2E
+(idempotent; self-heals if it died mid-run).
 In BOTH entrypoints, at the point where they are about to start the herobids **api**
 (and worker), FIRST ensure the traderton boundary is up. `with-boundary.sh` (§3a) is
 the canonical bring-up — prefer reusing it over re-deriving the compose invocations.
@@ -161,7 +171,7 @@ Apply to:
 
 Requirement: the boundary bring-up is **unconditional** for those tiers (no flag).
 
-### 4b. Prune migrated-validator references + update tier docs
+### 4b. Prune migrated-validator references + update tier docs — DONE
 - `run-extra-tests.sh` header (~lines 5-6): the venue-validation scripts are no longer
   "3 ... excluded"; `validate-1inch.sh`/`validate-jupiter.sh` were **migrated to
   traderton** (Slice 2). Update the wording to reflect that only `validate-swap-venue.sh`
@@ -172,14 +182,21 @@ Requirement: the boundary bring-up is **unconditional** for those tiers (no flag
 - Update tier-table/header comments that describe the stack to note the traderton
   boundary is brought up alongside api/worker.
 
-### 4c. Preserve the unstable gate
+### 4c. Preserve the unstable gate — DONE (verification-only)
+Gate content byte-identical after edits (line numbers shifted only, from header additions):
+rg diff HEAD↔worktree of the matched lines → GATE_LINES_IDENTICAL.
 Leave the `RUN_UNSTABLE_LLM_LATENCY_TESTS` gate, its Tier-5 skip logic, the dry-run
 plan lines, and the bug-`2026-09-05/001` references EXACTLY as they are. After editing,
 re-run §3d's grep and confirm identical.
 
 ---
 
-## 5. Verification (must pass before commit)
+## 5. Verification (must pass before commit) — DONE
+All static checks green (`bash -n` ×4, §5 greps, `--dry-run` exit 0; gate content
+identical). Live: `bash herobids/scripts/shell/tests/run-extra-tests.sh --tier 1,2,4`
+GREEN without creds — 6/6 scripts PASS (agent-bot-e2e, agent-watch-invariants,
+agent-document-handling, agent-scanner-gated-lifecycle, browser-pool-agent-browser-smoke,
+sandbox-allowlist-smoke); boundary stack was created by the script and torn down on exit.
 
 Static:
 ```
@@ -213,7 +230,10 @@ code defect — report it, don't paper over it.
 
 ---
 
-## 6. Commit (herobids only, `consume-traderton`)
+## 6. Commit (herobids only, `consume-traderton`) — DONE
+`test(consume): entrypoints always bring up the traderton boundary; drop migrated venue validators`
+Files: `scripts/shell/run/boundary.sh` (new), `scripts/shell/run/with-boundary.sh`,
+`scripts/shell/tests/run-all-tests.sh`, `scripts/shell/tests/run-extra-tests.sh`.
 `git add herobids/scripts/shell/tests/run-all-tests.sh herobids/scripts/shell/tests/run-extra-tests.sh` (+ any harness file you refactored). Message e.g.
 `test(consume): entrypoints always bring up the traderton boundary; drop migrated venue validators`.
 
@@ -226,8 +246,14 @@ code defect — report it, don't paper over it.
   it, both 5432 AND 5433 (and 6379/6380) get published and collide with herobids.
   If you touch the overlay, keep `!override`. (Requires Docker Compose ≥ 2.24.)
 - **Separate Docker networks:** from INSIDE the herobids api/worker containers the
-  boundary is NOT at `localhost:8080` — it's `host.docker.internal:8080` (via the
-  `xstack.override.yml` `extra_hosts`). On Linux CI, confirm `host-gateway` resolves.
+  boundary is NOT at `localhost:8080` — it's `host.docker.internal:8080`. On **Docker
+  Desktop (macOS/Windows) this hostname resolves AUTOMATICALLY** — verified this epic
+  that both the boundary and herobids reach the host without any `extra_hosts` (herobids'
+  own compose has none). The `extra_hosts: host.docker.internal:host-gateway` in
+  `xstack.override.yml` is therefore **Linux-CI hardening** (plain Linux Docker does NOT
+  auto-provide the hostname), not a Docker-Desktop requirement — harmless to keep. If a
+  boundary-reachability failure appears on macOS, it is almost certainly NOT the
+  extra_hosts; look at ports/creds first.
 - **HMAC + encryption creds come from `.env`** on both sides (herobids
   `TRADERTON_BOUNDARY_*`, traderton `BOUNDARY_*` + `CREDENTIAL_ENCRYPTION_KEY`), and
   they MUST match. `.env` files are gitignored (not your concern to edit here, but if
@@ -244,13 +270,29 @@ code defect — report it, don't paper over it.
 
 ---
 
-## 8. Definition of done
+## 8. Definition of done — DONE (all bullets met)
 - Both entrypoints bring up the traderton boundary (remapped ports + `/health/ready`
-  gate + herobids overlay) unconditionally for any tier that starts api/worker.
+  gate + herobids overlay) unconditionally for any tier that starts api/worker. ✅
 - No references to the migrated `validate-1inch.sh`/`validate-jupiter.sh` remain;
-  `validate-swap-venue.sh` mention updated to its deferred status.
+  `validate-swap-venue.sh` mention updated to its deferred status. ✅
 - The `RUN_UNSTABLE_LLM_LATENCY_TESTS` gate + bug-`2026-09-05/001` docs are byte-for-byte
-  preserved.
-- `bash -n` clean; `--dry-run` renders; a `--tier 1,2,4` run is green without creds.
-- One herobids commit on `consume-traderton`. Nothing on `main`.
-- Existing stack-lifecycle (start-only-what-was-down, teardown-on-exit) preserved.
+  preserved. ✅
+- `bash -n` clean; `--dry-run` renders; a `--tier 1,2,4` run is green without creds. ✅
+- One herobids commit on `consume-traderton`. Nothing on `main`. ✅
+- Existing stack-lifecycle (start-only-what-was-down, teardown-on-exit) preserved. ✅
+
+---
+
+## Outstanding Issues (from code reviews — LOW only, none blocking)
+
+### [4a] boundary bring-up (implemented via factored library `scripts/shell/run/boundary.sh`)
+- LOW — `scripts/shell/run/boundary.sh:66` runs `set -euo pipefail` at source time; harmless now (all consumers set it first) but a future consumer sourcing it before enabling `set -e` silently inherits it. Drop the `set` line or add a contract comment.
+- LOW (plan-level) — plan §5 static grep should also match `ensure_boundary_up` so the check tracks code, not comments.
+- OBSERVATION (pre-existing, out of scope) — `run-all-tests.sh`: on a Step-5 abort (e.g. `wait_healthy api` fails), the trap's cleanup covers `STACK_STARTED`/`INFRA_STARTED` but not the Step-5 `API_STARTED`/`WORKER_STARTED` flags, so api/worker containers can leak on that path. Identical at HEAD; the boundary does NOT leak in that path.
+- NOTE (inherited semantics) — `ensure_boundary_up`'s "already serving" probe is `curl :8080/health/ready`; a non-boundary listener on 8080 answering 200 would be "reused" and never torn down. Matches Slice-1 semantics; treat a bad :8080 as an environment issue.
+- OUT-OF-SCOPE flag — `.env.ops.dev.example:9` still mentions `(validate-1inch.sh, validate-jupiter.sh)`, which no longer exist in herobids; clean up in a future slice.
+- RESOLVED — `BOUNDARY_URL` dead-override in `with-boundary.sh` (library now defines it; with-boundary kept `:-` for readability, harmless).
+- RESOLVED — `boundary.sh` exec bit set (`chmod +x`).
+- RESOLVED (4b review) — `run-extra-tests.sh` header "operator-only" overclaim on `validate-swap-venue.sh`: reworded to "operator-run, deferred; not part of CI" (only the 1inch variant needs an operator key; Jupiter does not).
+- RESOLVED (4b review) — `run-extra-tests.sh` stack-lifecycle wording "brought up first for tiers 3-5" over-broad: reworded to "brought up first whenever this script starts api/worker (tiers 3-5)".
+- NOTE — live `--tier 1,2,4` verification (plan §5) executed GREEN by the coordinator before commit (6/6 scripts PASS; boundary created+torndown correctly).
