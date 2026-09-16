@@ -28,6 +28,16 @@ const IGNORED_ENV_VARS = new Set<string>([
   'envVar',
   // Only read inside _deferred-authoring (not a live boundary/worker path yet).
   'DATASETS_DIR',
+  // Venue-launch validators (scripts/ts/validate-*-launch.ts): operator-run
+  // scripts outside packages/, documented in .env.example as placeholders but
+  // never read by the live packages.
+  'ONEINCH_PRIVATE_KEY',
+  'SOLANA_WALLET_PRIVATE_KEY',
+  'SOLANA_RPC_URL',
+  'JUPITER_WALLET_ADDRESS',
+  'JUPITER_PRIVATE_KEY',
+  'SWAP_AMOUNT',
+  'SLIPPAGE_BPS',
   // Test-only / dev-only entry points (integration-db, boundary-e2e) are excluded
   // by the ex-tests walk + the dev/ filter below, but list here defensively.
 ]);

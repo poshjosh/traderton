@@ -264,3 +264,31 @@ verification is deferred to a human with creds.
 - `validate-swap-venue.sh` left in place + a backlog entry added for its deferral.
 - Two separate commits (traderton copy-in, herobids delete). Nothing on `main`.
 - Live-venue `--execute` verification explicitly deferred to a human with creds.
+
+---
+
+## 9. Outstanding Issues (from CodeReview — non-blocking)
+
+- **[§4/§6] Commit path list:** §6's `git add` list omitted the load-bearing
+  workspace glue (`scripts/package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`)
+  and `packages/worker/src/env-example-drift.test.ts` (drift allowlist for the
+  7 script-only vars). Without them, fresh clones can't resolve
+  `@traderton/venues` from `scripts/` and the drift test fails. Commits include
+  all 8 changed paths explicitly.
+- **[§4.1, inherited] Latent `--execute` confirmation defect migrated verbatim**
+  (`scripts/ts/validate-{jupiter,1inch}-launch.ts`): the confirmation step reads
+  `result.data.status === 'confirmed'` / `result.data.outputAmount`, but
+  `SwapConfirmationStatus` is `{confirmed, failed?, blockNumber?, timestamp?,
+  actualOutputAmount?}` (`packages/venues/src/swap-confirmation-poller.ts`) —
+  at runtime it always prints "Unexpected status: undefined" and exits 1 even
+  after a successful on-chain confirmation. Verbatim-inherited from herobids
+  (identical defect there); copy-never-author forbids fixing it in this slice.
+  Fix belongs in the herobids source, then re-copy. Only affects the
+  human-gated `--execute` path. → `010-improvement-backlog.md` B12.
+- **[LOW backlog candidates]** No typecheck coverage for `scripts/ts/` (no
+  `scripts/tsconfig.json`; herobids parity — LOW-1); `scripts/package.json`
+  lacks `@types/node` (LOW-2); drift-test comment grouping nit (LOW-3); stale
+  `--all` usage comment in `run-extra-tests.sh` (LOW-4); `BASE_RPC_URL`
+  undocumented in `.env.example` (LOW-5, off-plan var list); `scripts/package.json`
+  single-line JSON (LOW-6); dead `${missing[*]:-${*}}` fallback in
+  `run-extra-tests.sh` (LOW-7).

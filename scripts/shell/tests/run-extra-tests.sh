@@ -13,6 +13,9 @@
 #                            venue credentials, else self-skip.
 #      Env (optional): HYPERLIQUID_TESTNET_API_KEY/SECRET/ACCOUNT_ADDRESS,
 #                      BYBIT_TESTNET_API_KEY/SECRET, ONEINCH_API_KEY/PRIVATE_KEY.
+#   6. Venue-launch validators — operator-run dry-run validation of the Jupiter
+#                            / 1inch adapters (scripts/shell/tests/validate-*.sh);
+#                            skipped without venue keys (never in the default run).
 #
 # Usage:
 #   scripts/shell/tests/run-extra-tests.sh           # runs the venue suites (skip w/o keys)
@@ -69,4 +72,53 @@ if [[ $CODE -eq 0 ]]; then
 else
   err "Venue integration suites failed (exit ${CODE})."
 fi
-exit $CODE
+
+# == Tier 6 / Venue-launch validators (opt-in operator scripts) ==
+# Operator-run dry-run validation of the Jupiter / 1inch venue adapters
+# (scripts/ts/validate-*-launch.ts). They hit LIVE venue endpoints and need
+# venue credentials in .env, so they are NOT part of the default green run.
+# Dry-run only — --execute is left to the operator, by hand.
+
+# Runs the wrapper; skips cleanly (return 0) when required credentials are
+# absent. By default ALL named vars must be set; `--any` runs when at least one
+# is (mirrors the validator's own env-var prerequisites). `|| VALIDATOR_CODE=1`
+# masks failures from `set -e` so both validators always run and failures
+# aggregate into the final exit code.
+venue_validator_dry_run() {
+  local any=0
+  if [[ "${1:-}" == "--any" ]]; then any=1; shift; fi
+  local script="$1"
+  shift
+  local var missing=() present=0
+  for var in "$@"; do
+    if [[ -z "${!var:-}" ]]; then
+      missing+=("${var}")
+    else
+      present=1
+    fi
+  done
+  if (( any == 0 && ${#missing[@]} > 0 )) || (( any == 1 && present == 0 )); then
+    warn "Skipping ${script} — missing required venue credential(s): ${missing[*]:-${*}} (operator-only opt-in; set them in .env to run)."
+    return 0
+  fi
+  log "Running ${script} (dry-run)…"
+  if bash "${ROOT}/scripts/shell/tests/${script}"; then
+    ok "${script} dry-run passed."
+  else
+    err "${script} dry-run failed."
+    return 1
+  fi
+}
+
+header "Tier 6 / Venue-launch validators (opt-in operator scripts)"
+VALIDATOR_CODE=0
+venue_validator_dry_run validate-1inch.sh ONEINCH_API_KEY ONEINCH_PRIVATE_KEY || VALIDATOR_CODE=1
+venue_validator_dry_run --any validate-jupiter.sh SOLANA_WALLET_PRIVATE_KEY JUPITER_WALLET_ADDRESS JUPITER_PRIVATE_KEY || VALIDATOR_CODE=1
+
+echo ""
+if [[ $CODE -ne 0 || $VALIDATOR_CODE -ne 0 ]]; then
+  err "Extra tests failed."
+  exit 1
+fi
+ok "All extra tests passed."
+exit 0

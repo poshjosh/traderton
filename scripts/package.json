@@ -1,0 +1,1 @@
+{"name": "@traderton/scripts", "version": "0.0.1", "private": true, "type": "module", "dependencies": {"@traderton/domain": "workspace:*", "@traderton/venues": "workspace:*"}, "devDependencies": {"tsx": "^4.19.0"}}

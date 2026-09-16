@@ -210,6 +210,19 @@ importers:
         specifier: ^25.9.1
         version: 25.9.5
 
+  scripts:
+    dependencies:
+      '@traderton/domain':
+        specifier: workspace:*
+        version: link:../packages/domain
+      '@traderton/venues':
+        specifier: workspace:*
+        version: link:../packages/venues
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.13
+
 packages:
 
   '@adraffy/ens-normalize@1.11.1':
