@@ -241,6 +241,14 @@ silently replace local imports with `@traderton/*` imports.
 
 ## 3. Plan A - mechanical cleanup available now
 
+**Status:** DONE (implemented 2026-09-17 on herobids `consume-traderton`, commit
+`1f6978d7`). CodeReviewer PASS (no CRITICAL/HIGH/MEDIUM; 4 LOW — see Outstanding
+below). Verification green: both direct worker/api `tsc` clean, `pnpm lint`
+clean, `git diff --check` clean, api setup tests 30/30. One pre-existing,
+unrelated full-suite failure (`tests/staging-config-validation.test.ts >
+staging config has liveRollout disabled`) reproduced identically on clean HEAD
+with the changes stashed — not introduced by this change.
+
 This plan removes dead or stale edges only. It does **not** delete a local
 trading package, alter a boundary payload, or move assessment behavior.
 
@@ -322,6 +330,23 @@ No Traderton code commit is part of Plan A. Never merge either branch.
       branch was changed.
 
 ## 4. Plan B - conditional local trading-package removal
+
+**Status:** DONE (implemented 2026-09-17 on herobids `consume-traderton`,
+commits `55c53756` + `0d161a74`, after the user lifted the hold). The mandatory
+008 decision checkpoint ruled **"settled within the rules"** for amended Option
+A (local consumer-side type seams + verbatim moves, then delete all four
+packages in one slice); the ruling is recorded in `004` ("D1-coda"). CodeReview
+found 1 MEDIUM (`vitest.integration.config.ts` include-fallback regression —
+fixed via explicit `include: []` + `passWithNoTests: true` so `pnpm test:venues`
+is a clean vacuous pass) and 2 LOW citation nits (fixed). Verification at
+commit: api/worker `tsc --noEmit` clean, `pnpm lint` clean, worker 3013/11 skip,
+api 1483/0 (incl. new solana-address tests 5/5), lab 3/3, `pnpm test:venues`
+vacuous pass, `git diff --check` clean, zero remaining alias/path/dynamic
+references. Two in-scope deviations were resolved within the rules and recorded
+in `004` (rate-limit-lab actually imported market-data — verbatim-copied the
+rate limiter into the lab; obsolete `scripts/ts/test-forexfactory-parser.ts`
+deleted — subject moved Traderton-side with B6). The one full-suite failure
+(`staging-config-validation.test.ts`) is pre-existing and unrelated.
 
 Do not start this plan immediately after Plan A. Every package still has a live
 import, package-internal dependency, or both. The c4.9h table ruling resolves
@@ -444,6 +469,16 @@ either branch to `main`.
 
 ## 6. Outstanding issues
 
+- **[Plan A, in-slice]** LOW — the plan's `pnpm test -- <file>` syntax does not
+  filter in this repo (vitest runs the full suite); use `pnpm exec vitest run
+  <file>` for focused runs. Pre-existing, unrelated failure:
+  `tests/staging-config-validation.test.ts > staging config has liveRollout
+  disabled` (reproduced on clean HEAD; not introduced by Plan A).
+- **[Plan A, deferred]** LOW — Dockerfiles still `pnpm --filter`-build
+  engine/venues (`Dockerfile:23`, `apps/api/Dockerfile:15,18`,
+  `apps/worker/Dockerfile:15,18`) and vitest aliases for engine/venues remain
+  (`vitest.config.ts:17`, `vitest.integration.config.ts:20`). Correct while the
+  packages exist; becomes the deletion surface for Plan B.
 - The label "market data / market assessment" hides two different ownership
   boundaries. Do not use temporary assessment retention to justify moving
   market-data provider logic back into Herobids.

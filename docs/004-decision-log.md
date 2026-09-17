@@ -148,6 +148,92 @@ legal-isolation sign-off / final cutover approval, or an earlier dedicated
 assessment-ownership slice. Record the ruling in this log and its status in 001
 and 011.
 
+## D1-coda: local trading-package removal and where consumer type contracts now live
+
+**Decision date:** 2026-09-17. **Gate result:** settled within the rules
+(008 §9.1 — parity does not discriminate the placement since types erase at
+compile; no rule is violated, no recorded decision contradicted, no objective
+undermined; the change is branch-reversible). No human ratification required.
+
+After Slice 4 Plan A removed the stale manifest edges, the remaining static
+type contracts that kept the local trading packages compiling were decided by
+the decision agent (Slice 4 Plan B checkpoint) and implemented in herobids
+`55c53756` + `0d161a74` on `consume-traderton`:
+
+1. **Re-pointed to `@herobids/domain`** (structurally identical, already
+   publicly exported): `RegimeParams`, `RegimeResult`, `PriceCandle`,
+   `ScannerCandleTarget`.
+2. **Copied verbatim into narrow worker/API seams**, each citing its copy
+   source, because the domain package must not carry them:
+   - `apps/worker/src/traderton/price-contracts.ts` (source:
+     `packages/market-data/src/price-service.ts:21-69`) — the price port block
+     (`PriceSource`…`PriceService`). `createBoundaryPriceService` remains a REST
+     adapter over `resolve_price_target`.
+   - `apps/worker/src/market-intelligence/preset-scan-contracts.ts` (source:
+     `packages/strategy/src/scan-engine.ts:38-122`) — `ScoredSignal`,
+     `IndicatorConfig`, `ScanConfig`. **Correction of the brief's premise:** the
+     domain zod-inferred `IndicatorConfig` has required sub-object keys while
+     the strategy-side type is all-optional (`{}` satisfies only the strategy
+     shape — verified by tsc probe). The seam keeps the strategy-side shape;
+     do NOT swap it for the domain type.
+   - `apps/worker/src/agent-risk-limits-contracts.ts` (source:
+     `packages/engine/src/risk-gate.ts:12-34`) — `RiskLimits`.
+   - `apps/api/src/providers/solana-address.ts` (source:
+     `packages/venues/src/solana-signer.ts:238-304`) — `deriveSolanaAddress` +
+     private base58 helpers, moved verbatim. This honours the D1-3b ruling
+     (manual-Jupiter address derivation stays in herobids API). A focused unit
+     test was added (parity-permitted improvement; no test covered it in either
+     repo before).
+3. **Deleted, not copied:** `apps/worker/src/shared/decision-validation.ts`
+   (`LevelValidationError`) — verified orphaned (zero importers incl. dist; the
+   live counterpart is Traderton-side `composition/decision-intake.ts`).
+4. **All four local packages deleted in one slice** (`packages/{venues,engine,
+   strategy,market-data}`), together with their manifest deps, tsconfig
+   references, vitest aliases, Dockerfile `--filter` builds, the lab's
+   market-data dep, and the root tsconfig references. The packages were mutual
+   importers (strategy→market-data, venues→market-data), so no partial
+   deletion was possible.
+5. **Two in-scope deviations found and resolved within the rules** (recorded
+   for the audit trail):
+   - The rate-limit lab DID have real imports of market-data (the ruling's
+     "no source imports" premise was false): `scenario-runner.ts` value-imports
+     `createSharedRateBudgetCoordinator`, plus type imports of market-data
+     types. Resolved by verbatim-copying `rate-limiter.ts` (334 lines, pure
+     rate-limit infrastructure — no market-data fetch logic) and the
+     `PROVIDER_REQUEST_CLASSES`/`RequestGate` type block into the lab;
+     lab tests 3/3 green.
+   - `scripts/ts/test-forexfactory-parser.ts` (surfaced by the mandated script
+     sweep; not on the checklist) value-imported market-data's
+     `ForexFactoryCalendarAdapter`/`createScrapflyFetch`/`HttpError`; its
+     subject (economic-calendar parsing) moved Traderton-side with the B6
+     re-point (Traderton `packages/boundary/src/bin.ts` acquisition loop +
+     `economic-calendar.test.ts`). Deleted with zero remaining references —
+     mirrors the Plan A obsolete-script deletion.
+6. **Test-mock rework:** `preset-scorecard-runner.test.ts` dropped the
+   `vi.mock('@herobids/strategy')` + 5 `expect(scoreCandidate).not.toHaveBeenCalled()`
+   assertions — the in-process scorer no longer exists, so the isolation
+   property is now structural rather than spy-enforced. Payload-shape and
+   scorecard-mapping assertions preserved. Intentional divergence, no parity
+   change.
+
+**Isolation effect:** herobids now structurally cannot import trading
+execution/planning/risk logic — the packages are gone, not merely unimported.
+Behaviour is unchanged (type-only changes + one verbatim function move + one
+orphan deletion + dead-mock rework). Full verification at commit: api/worker
+`tsc --noEmit` clean, `pnpm lint` clean, worker suite 3013/11 skip, api suite
+1483/0 (incl. new solana-address tests 5/5), lab 3/3, `git diff --check` clean,
+zero remaining alias/path/dynamic references. The one full-suite failure
+(`tests/staging-config-validation.test.ts > staging config has liveRollout
+disabled`) is pre-existing and unrelated (reproduced on clean HEAD).
+
+**Non-goals:** this does NOT decide the market-assessment ownership question
+(see "Temporary retention" above) — the assessment tables/orchestration remain
+in herobids pending that separate 008 ruling. `ScoredSignal`/`IndicatorConfig`/
+`ScanConfig`/`RiskLimits` now live in herobids-local seams with declared copy
+sources; if Traderton later publishes a boundary-contract artifact (option B of
+the ruling, routed to 010 as a later-option), these seams become the migration
+surface.
+
 ## Why bots are mechanical (the cyclical tension, resolved)
 
 The old model let bots use LLM intelligence and let agents run the mechanical
