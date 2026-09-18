@@ -36,16 +36,21 @@ export interface AgentRiskSpec {
  * reachable after a successful start). Cached per tuple.
  *
  * Cache policy for consumer-injected risk values:
- *  - `capital`/`riskPosture` CHANGED → stop + deregister the old actor and
- *    RECONSTRUCT fresh: these anchor the `EquityTracker` peak (construct-time
- *    state, agent-trading-actor.ts:2953) — carrying a changed capital into a
- *    live actor would silently skew peak equity/drawdown. The DailyLossTracker
- *    rehydrates from traderton's own fills, so rolling-24h loss history
- *    survives the swap. This matches M1 semantics (a capital change ≈ a new
- *    session constructing a fresh tracker).
- *  - Only `riskOverrides` CHANGED → hot-swap via `updateRiskLimits` (M1
- *    parity: herobids' adjust path hot-swapped limits to preserve per-trade
- *    exit levels / stop-loss timers, agent-trading-actor.ts:1010).
+ *  - ANY of `capital` / `riskPosture` / `riskOverrides` CHANGED → stop +
+ *    deregister the old actor and RECONSTRUCT fresh. Capital/posture anchor the
+ *    `EquityTracker` peak (construct-time state, agent-trading-actor.ts:2953) —
+ *    carrying a changed capital into a live actor would silently skew peak
+ *    equity/drawdown — so a rebuild is required for those regardless. Overrides
+ *    are folded into the SAME rebuild rather than hot-swapped: a single
+ *    reconstruct path keeps the ordering simple and re-applies the full spec.
+ *    The DailyLossTracker rehydrates from traderton's own fills, so rolling-24h
+ *    loss history survives the swap (M1 semantics: a change ≈ a new session
+ *    constructing a fresh tracker).
+ *  - FUTURE OPTIMIZATION (not implemented — Track A is stability-first): an
+ *    overrides-ONLY change could hot-swap via `updateRiskLimits`
+ *    (agent-trading-actor.ts:1010) to preserve per-trade exit levels /
+ *    stop-loss timers instead of rebuilding. Deliberately deferred; today all
+ *    changes reconstruct.
  *  - Never key the cache on the VALUES — one actor per capital edit would fork
  *    actors and never converge.
  *
