@@ -133,6 +133,106 @@ describe('resolveSubjectInjection — needs venue resolution, no bot named (per-
     expect(!res.ok && res.code).toBe('precondition.not_ready');
   });
 
+  // Bug 2026-09-17 #001 regression: a payload-supplied venueAccountId MUST win
+  // deterministically over the per-owner default path — even when the owner has
+  // MULTIPLE accounts and no operator default (which would otherwise refuse
+  // "ambiguous"). This is the L3c contract: herobids resolves the connection→
+  // account mapping and threads the id as a payload arg; the dispatcher's Zod
+  // parse previously stripped it (schema gap), so this path never fired and
+  // every submit_decision fell through to the ambiguous refusal.
+  it('honours a payload-supplied venueAccountId even when the owner has multiple accounts and no default', async () => {
+    const res = await resolveSubjectInjection(
+      SUBJECT,
+      false,
+      { venueAccountId: 'va-1' },
+      ports({
+        listVenueAccountsByOwner: async () => [
+          { id: 'va-1', venue: 'hyperliquid' },
+          { id: 'va-2', venue: '1inch' },
+        ],
+        // getDefaultVenueAccountId deliberately NOT wired — the supplied hint
+        // must be sufficient on its own.
+      }),
+    );
+    expect(res).toEqual({
+      ok: true,
+      injection: {
+        ownerId: 'owner-1',
+        actorId: 'actor-1',
+        ownerMode: 'paper',
+        venue: 'hyperliquid',
+        venueType: 'orderbook',
+        venueAccountId: 'va-1',
+      },
+    });
+  });
+
+  // Consumer-injected agent risk context (capital/riskPosture/riskOverrides):
+  // carried through onto the injection when present; absent cleanly when not.
+  describe('resolveSubjectInjection — agentRiskSpec extraction', () => {
+    const ACCOUNTS = [
+      { id: 'va-1', venue: 'hyperliquid' },
+      { id: 'va-2', venue: '1inch' },
+    ];
+
+    it('carries capital + riskPosture + riskOverrides onto the injection when present', async () => {
+      const res = await resolveSubjectInjection(
+        SUBJECT,
+        false,
+        {
+          venueAccountId: 'va-1',
+          capital: '1000.00000000',
+          riskPosture: { maxDrawdownPct: 5, dailyMaxLossPct: 3 },
+          riskOverrides: { maxOpenPositions: 4 },
+        },
+        ports({ listVenueAccountsByOwner: async () => ACCOUNTS }),
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.injection.agentRiskSpec).toEqual({
+          capital: '1000.00000000',
+          riskPosture: { maxDrawdownPct: 5, dailyMaxLossPct: 3 },
+          riskOverrides: { maxOpenPositions: 4 },
+        });
+      }
+    });
+
+    it('omits agentRiskSpec entirely when no risk fields are present (back-compat)', async () => {
+      const res = await resolveSubjectInjection(
+        SUBJECT,
+        false,
+        { venueAccountId: 'va-1' },
+        ports({ listVenueAccountsByOwner: async () => ACCOUNTS }),
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.injection.agentRiskSpec).toBeUndefined();
+    });
+
+    it('drops non-numeric override values (defensive — the Zod schema already enforces them)', async () => {
+      const res = await resolveSubjectInjection(
+        SUBJECT,
+        false,
+        { venueAccountId: 'va-1', riskOverrides: { maxOpenPositions: 4, junk: 'x' } },
+        ports({ listVenueAccountsByOwner: async () => ACCOUNTS }),
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.injection.agentRiskSpec?.riskOverrides).toEqual({ maxOpenPositions: 4 });
+      }
+    });
+
+    it('omits agentRiskSpec when only non-numeric overrides are present', async () => {
+      const res = await resolveSubjectInjection(
+        SUBJECT,
+        false,
+        { venueAccountId: 'va-1', riskOverrides: { junk: 'x' } },
+        ports({ listVenueAccountsByOwner: async () => ACCOUNTS }),
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.injection.agentRiskSpec).toBeUndefined();
+    });
+  });
+
   it('uses the operator default when multiple accounts exist and a default is set', async () => {
     const res = await resolveSubjectInjection(
       SUBJECT,

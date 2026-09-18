@@ -45,6 +45,11 @@ export { createScannerCandleFetcher, createScannerCandleFetcherFromConfig, creat
 // L3-P1 provision_venue_account tests. No behaviour authored by the re-export.
 export { encryptCredential, decryptCredential, getEncryptionKey } from './crypto.js';
 
+// Structured logger factory — re-exported so the M2 REST boundary can log
+// internally with the SAME pino factory the worker uses (pretty/JSON by
+// LOG_FORMAT). No behaviour authored by the re-export.
+export { createLogger } from './logger.js';
+
 // Tool surface — the copied trading tools + the ToolRegistry dispatch target.
 // Re-exported so the M2 REST boundary (@traderton/boundary, Phase 9b item F) can
 // assemble a registry and dispatch to the copied tools. No behaviour is authored

@@ -447,6 +447,80 @@ describe('F2b side-effecting dispatch (F1 gate opened)', () => {
     expect(calls.complete).toBe(1);
     await app.close();
   });
+
+  // Bug 2026-09-17 #001 regression: the dispatcher validates the payload
+  // against the tool's Zod schema and forwards the PARSED result — an undeclared
+  // key (e.g. the consumer-resolved `venueAccountId` herobids threads into
+  // submit_decision) is STRIPPED before the context factory/subject resolver
+  // ever sees it. Two proofs:
+  //   a. an undeclared key is dropped (this was the bug: the resolver never saw
+  //      the hint and fell back to per-owner default resolution → ambiguous
+  //      refusal when the owner has >1 account);
+  //   b. a DECLARED key survives into the factory request (what the fixed
+  //      submit_decision schema now guarantees, mirroring create_bot).
+  it('drops UNDECLARED payload keys before the context factory (the 001 bug shape)', async () => {
+    const seen: unknown[] = [];
+    const capturingFactory: TradingToolContextFactory = (request) => {
+      seen.push(request.payload);
+      return {
+        agentId: request.actor.id,
+        sessionId: `s:${request.ownerId}`,
+        executionMode: 'paper',
+        authorizationMode: 'direct',
+        redis: {} as TradingToolContext['redis'],
+        publishToInbound: async () => {},
+      } satisfies TradingToolContext;
+    };
+    const { store } = makeFakeStore({ begin: { kind: 'started', id: 'row-1' } });
+    const app = makeApp({ invocationStore: store, contextFactory: capturingFactory });
+    const res = await invoke(app, validEnvelope({
+      toolName: 'write_thing', // schema: z.object({}) — declares nothing
+      payload: { venueAccountId: 'va-supplied' },
+    }));
+    expect(res.json().outcome.kind).toBe('success');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual({}); // the hint was silently stripped
+    await app.close();
+  });
+
+  it('forwards DECLARED payload keys intact to the context factory (the fixed submit_decision shape)', async () => {
+    const hintTool: AgentTool<TradingToolContext> = {
+      name: 'hint_thing',
+      description: 'side-effecting with a declared venueAccountId hint (test fixture)',
+      parametersSchema: z.object({
+        venueAccountId: z.string().optional().transform((v) => (v === '' ? undefined : v)),
+      }),
+      parameters: {},
+      category: 'execute-trade',
+      async execute(): Promise<ToolResult> {
+        return { success: true, data: { ok: true } };
+      },
+    };
+    const seen: unknown[] = [];
+    const capturingFactory: TradingToolContextFactory = (request) => {
+      seen.push(request.payload);
+      return {
+        agentId: request.actor.id,
+        sessionId: `s:${request.ownerId}`,
+        executionMode: 'paper',
+        authorizationMode: 'direct',
+        redis: {} as TradingToolContext['redis'],
+        publishToInbound: async () => {},
+      } satisfies TradingToolContext;
+    };
+    const registry = buildRegistry();
+    registry.register(hintTool);
+    const { store } = makeFakeStore({ begin: { kind: 'started', id: 'row-1' } });
+    const app = makeApp({ registry, invocationStore: store, contextFactory: capturingFactory });
+    const res = await invoke(app, validEnvelope({
+      toolName: 'hint_thing',
+      payload: { venueAccountId: 'va-supplied' },
+    }));
+    expect(res.json().outcome.kind).toBe('success');
+    expect(seen).toHaveLength(1);
+    expect((seen[0] as Record<string, unknown>).venueAccountId).toBe('va-supplied');
+    await app.close();
+  });
 });
 
 // ── F2b: deadline enforcement (D3 pragmatic — pre-check + one re-check) ──────

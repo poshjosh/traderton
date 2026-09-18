@@ -458,3 +458,104 @@ describe('submit_decision — capability denial rejection', () => {
     expect(result.data.decisionId).toEqual(expect.any(String));
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bug 2026-09-17 #001: the schema MUST carry `venueAccountId`.
+//
+// The boundary dispatcher validates the payload against the tool's Zod schema
+// and forwards the PARSED result to the subject resolver. Zod strips unknown
+// keys, so when `venueAccountId` was absent from this schema the
+// consumer-supplied hint was silently dropped BEFORE resolution — the resolver
+// then fell back to per-owner default resolution and refused
+// `precondition.not_ready` ("no default venue account for owner (ambiguous)")
+// when the owner has more than one venue account. Every `submit_decision` from
+// herobids surfaced as the flattened "trading context unavailable".
+//
+// Regression guards:
+//  1. the schema accepts + preserves a supplied venueAccountId (like
+//     create_bot's, which already carried the identical hint);
+//  2. an empty-string value normalises to undefined (same convention as
+//     create_bot);
+//  3. it stays OPTIONAL — the historical no-hint path (single account /
+//     operator default) must keep working.
+describe('submit_decision — venueAccountId payload hint (L3c)', () => {
+  it('preserves a supplied venueAccountId through the schema (survives boundary parse)', () => {
+    const parsed = submitDecision.parametersSchema.safeParse({
+      ...validParams,
+      venueAccountId: '57908962-89d3-449d-a555-b16bc1dd1c19',
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.venueAccountId).toBe('57908962-89d3-449d-a555-b16bc1dd1c19');
+    }
+  });
+
+  it('normalises an empty-string venueAccountId to undefined', () => {
+    const parsed = submitDecision.parametersSchema.safeParse({
+      ...validParams,
+      venueAccountId: '',
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.venueAccountId).toBeUndefined();
+    }
+  });
+
+  it('remains optional — the no-hint payload still parses', () => {
+    const parsed = submitDecision.parametersSchema.safeParse(validParams);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.venueAccountId).toBeUndefined();
+    }
+  });
+
+  it('rejects a non-string venueAccountId (schema stays strict)', () => {
+    const parsed = submitDecision.parametersSchema.safeParse({
+      ...validParams,
+      venueAccountId: 42,
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  // Consumer-injected platform risk context (capital/riskPosture/riskOverrides):
+  // declared so they SURVIVE the boundary's payloadParse into the actor ensure.
+  it('preserves the consumer-injected capital through the schema', () => {
+    const parsed = submitDecision.parametersSchema.safeParse({
+      ...validParams,
+      capital: '1000.00000000',
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.capital).toBe('1000.00000000');
+  });
+
+  it('normalises an empty-string capital to undefined', () => {
+    const parsed = submitDecision.parametersSchema.safeParse({
+      ...validParams,
+      capital: '',
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.capital).toBeUndefined();
+  });
+
+  it('preserves riskPosture and riskOverrides through the schema', () => {
+    const parsed = submitDecision.parametersSchema.safeParse({
+      ...validParams,
+      riskPosture: { maxDrawdownPct: 5, dailyMaxLossPct: 3 },
+      riskOverrides: { maxOpenPositions: 4 },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.riskPosture).toEqual({ maxDrawdownPct: 5, dailyMaxLossPct: 3 });
+      expect(parsed.data.riskOverrides).toEqual({ maxOpenPositions: 4 });
+    }
+  });
+
+  it('rejects a malformed capital (non-numeric string)', () => {
+    const parsed = submitDecision.parametersSchema.safeParse({
+      ...validParams,
+      capital: 'abc',
+    });
+    expect(parsed.success).toBe(true); // capital is a free string — numeric validation is the platform's concern
+    if (parsed.success) expect(parsed.data.capital).toBe('abc');
+  });
+});

@@ -26,6 +26,21 @@ export interface ResolvedInjection {
   venue: string;
   venueType: 'orderbook' | 'swap';
   venueAccountId: string;
+  /**
+   * Consumer-injected platform risk context (submit_decision payload only;
+   * absent for every other tool). The agent-direct actor ensure consumes these
+   * at construct/start time — capital anchors EquityTracker peak, riskPosture +
+   * riskOverrides feed buildAgentRiskLimits (creator-set values beat operator
+   * defaults). Values ride the HMAC-signed payload (005 M2 adapter: "herobids
+   * injects the platform-owned values it still holds … at the call site")
+   * — the boundary process cannot read the consumer's `agents` table (locked:
+   * no `agents`-table dependency, 017 §4 / 019 §1).
+   */
+  agentRiskSpec?: {
+    capital?: string;
+    riskPosture?: Record<string, unknown>;
+    riskOverrides?: Record<string, number | undefined>;
+  };
 }
 
 /** The bot row the resolver reads (the subset it needs for coordinates + ownership). */
@@ -82,6 +97,37 @@ function venueAccountIdOf(payload: unknown): string | undefined {
     if (typeof value === 'string' && value.trim()) return value;
   }
   return undefined;
+}
+
+/**
+ * Extract the consumer-injected agent risk context from a validated tool
+ * payload (submit_decision only; the schema declares the fields so they survive
+ * the dispatcher's `payloadParse`). Absent/invalid-shaped fields are omitted —
+ * the actor ensure then falls back to operator defaults (graceful, and
+ * backward-compatible with consumers that don't send them).
+ */
+function agentRiskSpecOf(payload: unknown): ResolvedInjection['agentRiskSpec'] | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const p = payload as Record<string, unknown>;
+  const capital = typeof p['capital'] === 'string' && p['capital'].trim() ? p['capital'] : undefined;
+  const riskPosture = (p['riskPosture'] && typeof p['riskPosture'] === 'object' && !Array.isArray(p['riskPosture']))
+    ? (p['riskPosture'] as Record<string, unknown>)
+    : undefined;
+  const rawOverrides = (p['riskOverrides'] && typeof p['riskOverrides'] === 'object' && !Array.isArray(p['riskOverrides']))
+    ? (p['riskOverrides'] as Record<string, unknown>)
+    : undefined;
+  if (capital === undefined && riskPosture === undefined && rawOverrides === undefined) return undefined;
+  const riskOverrides: Record<string, number | undefined> | undefined = rawOverrides
+    ? Object.fromEntries(
+        Object.entries(rawOverrides).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+      )
+    : undefined;
+  if (capital === undefined && riskPosture === undefined && (!riskOverrides || Object.keys(riskOverrides).length === 0)) return undefined;
+  return {
+    ...(capital !== undefined ? { capital } : {}),
+    ...(riskPosture !== undefined ? { riskPosture } : {}),
+    ...(riskOverrides !== undefined && Object.keys(riskOverrides).length > 0 ? { riskOverrides } : {}),
+  };
 }
 
 /** Read the requested execution mode from a create-bot payload (`config.execution.mode`), if valid. */
@@ -261,6 +307,10 @@ export async function resolveSubjectInjection(
   // it deterministically (validating ownership against the owner's accounts —
   // defence in depth). When absent we keep the historical per-owner default
   // resolution (single account, else operator default, else ambiguous).
+  // The consumer-injected agent risk context (capital/riskPosture/riskOverrides)
+  // rides the same validated payload — attached to whichever injection this
+  // path returns so the agent-direct actor ensure can consume it.
+  const agentRiskSpec = agentRiskSpecOf(payload);
   const accounts = await ports.listVenueAccountsByOwner(subject.ownerId);
   const requestedVenueAccountId = venueAccountIdOf(payload);
 
@@ -283,6 +333,7 @@ export async function resolveSubjectInjection(
         venue: requested.venue,
         venueType: venueTypeFor(requested.venue),
         venueAccountId: requested.id,
+        ...(agentRiskSpec ? { agentRiskSpec } : {}),
       },
     };
   }
@@ -316,6 +367,7 @@ export async function resolveSubjectInjection(
       venue: account.venue,
       venueType: venueTypeFor(account.venue),
       venueAccountId: account.id,
+      ...(agentRiskSpec ? { agentRiskSpec } : {}),
     },
   };
 }

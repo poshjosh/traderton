@@ -13,6 +13,10 @@
 import type { ToolRegistry } from '@traderton/worker';
 import type { AgentTool, TradingToolContext, ToolResult } from '@traderton/domain';
 import { getCategoryOperation } from '@traderton/domain';
+import { createLogger } from '@traderton/worker';
+
+const logger = createLogger('dispatcher');
+
 import {
   CONTRACT_VERSION,
   TradertonToolInvocationV1Schema,
@@ -489,9 +493,17 @@ export class ToolInvocationDispatcher {
         toolName: tool.name,
         payload,
       });
-    } catch {
+    } catch (err) {
       // A context that cannot be assembled is a readiness failure, not a caller
-      // error. Do not leak the underlying cause over the boundary.
+      // error. Do not leak the underlying cause over the boundary — but DO log it
+      // internally: without this the exact failure (e.g. subject-resolution
+      // ambiguity, a repo/db failure) is unrecoverable from artifacts and every
+      // such rejection looks identical to the consumer.
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error(
+        { toolName: tool.name, ownerId: invocation.subject.ownerId, actorId: invocation.subject.actor.id, requestId: identity.requestId, correlationId: identity.correlationId, err: message },
+        'context factory failed — returning precondition.not_ready',
+      );
       return failureResult(identity, 'precondition.not_ready', 'trading context unavailable', true);
     }
 

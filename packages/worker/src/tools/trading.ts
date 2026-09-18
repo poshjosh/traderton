@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domain';
-import { AGENT_MESSAGE_TYPES } from '@traderton/domain';
+import { AGENT_MESSAGE_TYPES, RiskPostureSchema } from '@traderton/domain';
 import { convertZodToJsonSchema } from './registry.js';
 
 // --- submit_decision ---
 
-export const SubmitDecisionParamsSchema = z.object({
+const submitDecisionParams = z.object({
   instrumentId: z.string().min(1).describe('Venue-specific instrument identifier. Use base tickers for perpetuals venues (e.g. "BTC", "SOL") and pair symbols for swap venues (e.g. "SOL/USDC").'),
   intent: z.enum(['go_long', 'go_short', 'go_flat', 'increase', 'decrease']).describe('Trading intent: go_long, go_short, go_flat (close), increase, or decrease position'),
   targetSize: z.string().regex(/^\d+(\.\d+)?$/, 'Must be a decimal string').describe('Target position size in BASE units as a decimal string — the amount of the traded asset, not a dollar value. For ETH/USDC this means ETH (e.g. "0.0064"), not USDC.'),
@@ -17,7 +17,39 @@ export const SubmitDecisionParamsSchema = z.object({
   dryRun: z.boolean().optional().describe('If true, validates the decision without submitting it. Returns a preview of what would be sent to the engine.'),
   stopLoss: z.string().regex(/^\d+(\.\d+)?$/).optional().transform(v => v === '' ? undefined : v).describe('In-process stop-loss level monitored while the runtime is alive. Active-session protection only — does not fire during a full worker crash. Set via submit_decision on position-open or increase.'),
   takeProfit: z.string().regex(/^\d+(\.\d+)?$/).optional().transform(v => v === '' ? undefined : v).describe('In-process take-profit level monitored while the runtime is alive. Active-session protection only — does not fire during a full worker crash. Set via submit_decision on position-open or increase.'),
+  // The consumer-resolved venue account (L3c: herobids resolves the connection→
+  // account mapping and threads the id here as a per-operation payload arg, not
+  // in the subject — D2). MUST be declared or the boundary's Zod payload
+  // validation strips it BEFORE the subject resolver runs, so the resolver never
+  // sees the hint and falls back to per-owner default resolution — which fails
+  // `precondition.not_ready` (ambiguous) when the owner has >1 venue account and
+  // no operator default. Same shape as create_bot's `venueAccountId` (bots.ts),
+  // which already carries the identical consumer-supplied hint.
+  venueAccountId: z.string().optional().transform(v => v === '' ? undefined : v).describe('Explicit venue account ID to trade on. Omit to use your default venue account (used only when you have exactly one, or an operator default is set).'),
+  // ── Consumer-injected platform risk context (NOT LLM inputs) ──────────────
+  // 005's M2 adapter contract: "herobids injects the platform-owned values it
+  // still holds … at the call site." The agent's capital + creator risk posture
+  // + runtime overrides live in the consumer's `agents` row — the boundary
+  // process cannot read them (locked: no `agents`-table dependency, 017 §4 /
+  // 019 §1) — so the consumer threads them here POST-LLM (herobids'
+  // buildSubmitDecisionPayload), HMAC-signed like every other payload field.
+  // The agent-direct actor ensure (boundary bin.ts) consumes them at
+  // construct/start time: capital anchors EquityTracker peak; riskPosture/
+  // riskOverrides feed buildAgentRiskLimits (creator-set values take priority
+  // over operator defaults). MUST be declared or Zod strips them (the bug-001
+  // lesson).
+  capital: z.string().optional().transform(v => v === '' ? undefined : v).describe('Consumer-injected platform value — the agent\'s deployable capital. Set by the consuming platform, never an LLM input.'),
+  riskPosture: RiskPostureSchema.optional().describe('Consumer-injected creator risk posture (platform-owned). Not an LLM input.'),
+  riskOverrides: z.object({
+    maxOpenPositions: z.number().int().positive().optional(),
+    maxPositionSizePct: z.number().min(0).max(100).optional(),
+    stopLossPct: z.number().min(0).max(100).optional(),
+    stopLossCooldownMs: z.number().int().min(0).optional(),
+    maxDrawdownPct: z.number().min(0).max(100).optional(),
+  }).optional().describe('Consumer-injected runtime risk overrides (platform-owned). Not an LLM input.'),
 });
+
+export const SubmitDecisionParamsSchema = submitDecisionParams;
 
 const submitDecisionTool: AgentTool<TradingToolContext> = {
   name: 'submit_decision',
