@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: poshjosh/herobids
-          ref: 01bbb35046f6a391e7c59143ab42f9a0df450242
+          ref: 250dd60b37603105b2028b93972ec54fa5c06d33
           path: herobids
       - uses: actions/checkout@v4
         with:
