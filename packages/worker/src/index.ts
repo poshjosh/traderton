@@ -45,10 +45,22 @@ export { createScannerCandleFetcher, createScannerCandleFetcherFromConfig, creat
 // L3-P1 provision_venue_account tests. No behaviour authored by the re-export.
 export { encryptCredential, decryptCredential, getEncryptionKey } from './crypto.js';
 
-// Structured logger factory — re-exported so the M2 REST boundary can log
+// Structured logger factory — re-exported so the M2 REST boundary
+// (@traderton/boundary) can log
 // internally with the SAME pino factory the worker uses (pretty/JSON by
 // LOG_FORMAT). No behaviour authored by the re-export.
 export { createLogger } from './logger.js';
+
+// A3 RiskSource seam — the boundary composition root builds `riskContractOps`
+// behind this interface (payload-spec source under A3; profile store under B1).
+// No behaviour authored by the re-export; it only widens the package's public
+// surface for the boundary composition root.
+export {
+  buildRiskContractOpsFromRiskSource,
+  riskSourceIsEmpty,
+  validateRiskOverride,
+  type RiskSource,
+} from './agent-risk-context.js';
 
 // Tool surface — the copied trading tools + the ToolRegistry dispatch target.
 // Re-exported so the M2 REST boundary (@traderton/boundary, Phase 9b item F) can

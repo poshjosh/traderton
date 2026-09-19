@@ -182,7 +182,15 @@ function mapToolResult(
   if (result.errorCode === 'rate_limit') {
     return failureResult(identity, 'rate_limit.exceeded', message, true, details);
   }
-
+  // A3: a tool-signaled typed precondition (e.g. adjust_risk_limits' fail-closed
+  // "no durable store until B1") passes through as the closed-union
+  // `precondition.not_ready` — a content-level "not yet" outcome, not an
+  // infrastructure fault. Without this branch the generic mapping below would
+  // flatten it to `validation.invalid_payload`, losing the semantic the consumer
+  // keys its non-circuit-breaking handling on.
+  if (result.errorCode === 'precondition.not_ready') {
+    return failureResult(identity, 'precondition.not_ready', message, result.retryable === true, details);
+  }
   // A transient/retryable fault → upstream.transient (infrastructure/dependency).
   if (result.retryable === true) {
     return failureResult(identity, 'upstream.transient', message, true, details);

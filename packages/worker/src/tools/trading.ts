@@ -40,6 +40,7 @@ const submitDecisionParams = z.object({
   // lesson).
   capital: z.string().optional().transform(v => v === '' ? undefined : v).describe('Consumer-injected platform value — the agent\'s deployable capital. Set by the consuming platform, never an LLM input.'),
   riskPosture: RiskPostureSchema.optional().describe('Consumer-injected creator risk posture (platform-owned). Not an LLM input.'),
+  executionMode: z.enum(['paper', 'shadow', 'live']).optional().describe('Consumer-injected agent execution mode (platform-owned; the consuming platform\'s agents.execution_defaults.mode). Never an LLM input.'),
   riskOverrides: z.object({
     maxOpenPositions: z.number().int().positive().optional(),
     maxPositionSizePct: z.number().min(0).max(100).optional(),
@@ -51,11 +52,23 @@ const submitDecisionParams = z.object({
 
 export const SubmitDecisionParamsSchema = submitDecisionParams;
 
+// LLM-visible subset of the submit_decision payload: the full Zod schema keeps
+// validating the platform-injected spec fields, but they must never appear in
+// the LLM's tool spec.
+const submitDecisionLlmParamsSchema = submitDecisionParams.omit({
+  capital: true,
+  riskPosture: true,
+  executionMode: true,
+  riskOverrides: true,
+});
+
 const submitDecisionTool: AgentTool<TradingToolContext> = {
   name: 'submit_decision',
   description: 'Submit a trade decision for a specific instrument. In direct authorization mode, accepted decisions proceed to execution immediately. In approval_required mode, the decision is recorded and sent to the user for approval — no trade executes until the user responds with /yes <code> or /no <code>. Check your runtime context for the active authorization mode.',
   parametersSchema: SubmitDecisionParamsSchema,
-  parameters: convertZodToJsonSchema(SubmitDecisionParamsSchema),
+  // capital/riskPosture/riskOverrides are platform-injected post-LLM — the
+  // LLM-facing JSON schema is the LLM-visible subset only (see risk-limits.ts).
+  parameters: convertZodToJsonSchema(submitDecisionLlmParamsSchema),
   category: 'execute-trade',
   promptGuidance: 'Use dryRun=true first to preview the decision before submitting. Call find_instrument to get the correct instrumentId, and get_account_summary to see available capital and open positions. targetSize is denominated in the base asset (e.g. ETH in ETH/USDC), so a $50 position at $2500/ETH is "0.02". Use get_schema("venue-defaults") for recommended slippage values. In approval_required mode, your decision will be recorded and sent to the user — ask them to approve with /yes <code> or reject with /no <code>. No trade executes without user approval.',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {

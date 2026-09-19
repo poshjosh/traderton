@@ -103,6 +103,13 @@ execution:
   maxRetries: 3
   shadowPollIntervalMs: 2000   # swap-venue price polling interval when no live stream
   shadowQuoteSlippageBps: 50   # slippage assumed for shadow swap price estimation
+  # A4: default owner execution mode for agent-subject no-bot invocations
+  # (submit_decision / create_bot). Consumed ONLY as the agent mode-escalation
+  # ceiling — real execution keys off each bot's persisted config.execution.mode,
+  # and live stays gated by the liveRollout policy below. Traderton has no
+  # agents table, so this is a static operator default, not a per-agent mode
+  # (B1's trading profile owns per-agent mode later; this becomes the fallback).
+  defaultOwnerMode: paper      # paper | shadow | live
 
 simulation:
   takerFeePct: 0.001           # 10bps taker fee for paper/shadow fills

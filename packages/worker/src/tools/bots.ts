@@ -54,6 +54,10 @@ const BotConfigInputSchema = z.object({
 
 const CreateBotParamsSchema = z.object({
   venueAccountId: z.string().optional().transform(v => v === '' ? undefined : v).describe('Explicit venue account ID to trade on. Omit to use your default venue account (used only when you have exactly one, or an operator default is set).'),
+  // Consumer-injected agent execution mode (platform-owned, Option A). Never an
+  // LLM input — declared here so the dispatcher's Zod parse keeps it and the
+  // subject resolver can use it as the per-agent escalation ceiling.
+  executionMode: z.enum(['paper', 'shadow', 'live']).optional().describe('Consumer-injected agent execution mode (platform-owned). Never an LLM input.'),
   config: BotConfigInputSchema.optional().describe('Bot configuration (strategy, symbol, risk params). venue is resolved from your venue account automatically.'),
   rationale: z.string().max(500).optional().describe('Brief rationale for creating this bot. Used for audit.'),
   // autostart: whether to start the bot immediately after creating it.
@@ -73,7 +77,9 @@ const createBotTool: AgentTool<TradingToolContext> = {
   name: 'create_bot',
   description: 'Create and start a new trading bot. The bot will run independently with its own strategy and risk parameters. Use when you want to delegate a trading opportunity to an automated bot. By default the bot is created AND started (autostart=true); pass autostart=false to create it stopped and start it later.',
   parametersSchema: CreateBotParamsSchema,
-  parameters: convertZodToJsonSchema(CreateBotParamsSchema),
+  // executionMode is platform-injected (Option A) and must never appear in the
+  // LLM's tool spec, though the full schema still validates it on the wire.
+  parameters: convertZodToJsonSchema(CreateBotParamsSchema.omit({ executionMode: true })),
   category: 'execute-trade',
   promptGuidance: 'dryRun=true previews the bot config without creating it. Use find_instrument to look up the correct config.symbol (use the symbol field from the result). get_schema("create_bot.config.strategy") and get_schema("create_bot.config.execution") show available strategy and execution options.',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
@@ -832,6 +838,9 @@ const StrategyPartialInputSchema = z.object({
 
 const AdjustBotConfigParamsSchema = z.object({
   botId: z.string().min(1).describe('ID of the bot to reconfigure'),
+  // Consumer-injected agent execution mode (platform-owned, Option A) — the
+  // per-agent escalation ceiling for the mode-rank guard below.
+  executionMode: z.enum(['paper', 'shadow', 'live']).optional().describe('Consumer-injected agent execution mode (platform-owned). Never an LLM input.'),
   config: z.object({
     strategy: StrategyPartialInputSchema.optional().describe('Updated strategy fields (partial merge)'),
     execution: z.object({
@@ -860,7 +869,9 @@ const adjustBotConfigTool: AgentTool<TradingToolContext> = {
   name: 'adjust_bot_config',
   description: 'Update configuration for a specific bot. Changes are merged with existing config and take effect on the next bot tick. Only works for bots owned by this agent.',
   parametersSchema: AdjustBotConfigParamsSchema,
-  parameters: convertZodToJsonSchema(AdjustBotConfigParamsSchema),
+  // executionMode is platform-injected (Option A) and must never appear in the
+  // LLM's tool spec, though the full schema still validates it on the wire.
+  parameters: convertZodToJsonSchema(AdjustBotConfigParamsSchema.omit({ executionMode: true })),
   category: 'write-database',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
     const { botId, config } = params as z.infer<typeof AdjustBotConfigParamsSchema>;

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ToolContext, ResolvedAgentRiskContract } from '@traderton/domain';
 import { riskLimitsTools } from './risk-limits.js';
+import { accountTools } from './account.js';
+import { tradingTools } from './trading.js';
 
 const getRiskLimitsTool = riskLimitsTools.find((t) => t.name === 'get_risk_limits')!;
 const adjustRiskLimitsTool = riskLimitsTools.find((t) => t.name === 'adjust_risk_limits')!;
@@ -252,76 +254,78 @@ describe('get_risk_limits tool', () => {
   });
 });
 
-describe('adjust_risk_limits tool', () => {
-  it('successfully adjusts mutable fields', async () => {
-    const updatedContract = makeContract({
-      maxOpenPositions: { effectiveValue: 7, source: 'agent_override', mutable: true, operatorCeiling: 10, overrideValue: 7 },
+const SPEC_FIELDS = ['capital', 'riskPosture', 'riskOverrides'];
+
+describe('risk spec leak into LLM-facing parameters schema (A3 review fix)', () => {
+  const getRiskLimits = riskLimitsTools.find((t) => t.name === 'get_risk_limits')!;
+  const getAccountSummary = accountTools.find((t) => t.name === 'get_account_summary')!;
+
+  function propertiesOf(tool: { parameters: Record<string, unknown> }): Record<string, unknown> {
+    return (tool.parameters['properties'] ?? {}) as Record<string, unknown>;
+  }
+
+  it('get_risk_limits.parameters omits the spec fields', () => {
+    const props = propertiesOf(getRiskLimits);
+    for (const field of SPEC_FIELDS) expect(props).not.toHaveProperty(field);
+  });
+
+  it('get_account_summary.parameters omits the spec fields', () => {
+    const props = propertiesOf(getAccountSummary);
+    for (const field of SPEC_FIELDS) expect(props).not.toHaveProperty(field);
+  });
+
+  it('submit_decision.parameters omits the spec fields', () => {
+    const submitDecision = tradingTools.find((t) => t.name === 'submit_decision')!;
+    const props = propertiesOf(submitDecision);
+    for (const field of SPEC_FIELDS) expect(props).not.toHaveProperty(field);
+  });
+
+  it('parametersSchema (Zod) still validates the full spec payload', () => {
+    const parsed = getRiskLimits.parametersSchema.safeParse({
+      capital: '1000',
+      riskPosture: { maxPositionSizePct: 5 },
+      riskOverrides: { maxOpenPositions: 3 },
     });
-    const adjustOverrides = vi.fn().mockResolvedValue({ ok: true, contract: updatedContract });
+    expect(parsed.success).toBe(true);
+  });
+});
+
+describe('adjust_risk_limits tool', () => {  // A3 FAIL-CLOSED: the write has no durable traderton-owned home until the
+  // profile store (B1) exists. Every adjust attempt returns the typed
+  // precondition regardless of context — never a write, never a silent pass.
+  it('returns the typed precondition.not_ready fail-closed regardless of riskContractOps', async () => {
+    const adjustOverrides = vi.fn();
     const ctx = makeCtx({
       riskContractOps: {
-        getContract: vi.fn().mockResolvedValue(makeContract()),
+        getContract: vi.fn(),
         adjustOverrides,
       },
     });
 
     const result = await adjustRiskLimitsTool.execute({ maxOpenPositions: 7 }, ctx);
 
-    expect(result.success).toBe(true);
-    expect(adjustOverrides).toHaveBeenCalledWith({ maxOpenPositions: 7 });
-    const data = result.data as Record<string, unknown>;
-    expect(data.ok).toBe(true);
-    expect(data.note).toContain('next decision cycle');
-  });
-
-  it('passes null to reset a field to default', async () => {
-    const adjustOverrides = vi.fn().mockResolvedValue({ ok: true, contract: makeContract() });
-    const ctx = makeCtx({
-      riskContractOps: {
-        getContract: vi.fn().mockResolvedValue(makeContract()),
-        adjustOverrides,
-      },
-    });
-
-    const result = await adjustRiskLimitsTool.execute({ stopLossCooldownMs: null }, ctx);
-
-    expect(result.success).toBe(true);
-    expect(adjustOverrides).toHaveBeenCalledWith({ stopLossCooldownMs: null });
-  });
-
-  it('returns error when adjustment is rejected', async () => {
-    const adjustOverrides = vi.fn().mockResolvedValue({ ok: false, error: "Field 'maxOpenPositions' is creator-configured" });
-    const ctx = makeCtx({
-      riskContractOps: {
-        getContract: vi.fn().mockResolvedValue(makeContract()),
-        adjustOverrides,
-      },
-    });
-
-    const result = await adjustRiskLimitsTool.execute({ maxOpenPositions: 3 }, ctx);
-
     expect(result.success).toBe(false);
-    expect(result.error).toContain('creator-configured');
+    expect(result.errorCode).toBe('precondition.not_ready');
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('B1');
+    // The in-process ops are NEVER touched (fail-closed).
+    expect(adjustOverrides).not.toHaveBeenCalled();
   });
 
-  it('returns error when no fields are provided', async () => {
-    const ctx = makeCtx({
-      riskContractOps: {
-        getContract: vi.fn(),
-        adjustOverrides: vi.fn(),
-      },
-    });
-
-    const result = await adjustRiskLimitsTool.execute({}, ctx);
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('No fields provided');
-  });
-
-  it('returns error when riskContractOps is not available', async () => {
+  it('returns the typed precondition even with no riskContractOps at all', async () => {
     const ctx = makeCtx();
     const result = await adjustRiskLimitsTool.execute({ maxOpenPositions: 5 }, ctx);
     expect(result.success).toBe(false);
-    expect(result.error).toContain('not available');
+    expect(result.errorCode).toBe('precondition.not_ready');
+    expect(result.fault).toBe(false);
+  });
+
+  it('returns the typed precondition even for an empty payload', async () => {
+    const ctx = makeCtx({
+      riskContractOps: { getContract: vi.fn(), adjustOverrides: vi.fn() },
+    });
+    const result = await adjustRiskLimitsTool.execute({}, ctx);
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('precondition.not_ready');
   });
 });

@@ -949,6 +949,15 @@ export const AppConfigSchema = z.object({
     maxRetries: z.number().min(0).default(3),
     shadowPollIntervalMs: z.number().int().min(100).default(2_000),
     shadowQuoteSlippageBps: z.number().min(0).default(50),
+    // A4: the operator-configured default owner execution mode for the no-bot
+    // path (submit_decision / create_bot by an agent subject). This is the
+    // mode-escalation CEILING for agent-direct actors only — it does not drive
+    // real execution (per-bot persisted config.execution.mode remains
+    // authoritative) and `live` stays gated downstream by the liveRollout
+    // policy. Traderton has no agents table (locked), so per-agent mode cannot
+    // ride here — B1's trading profile becomes the per-agent source later, at
+    // which point this static default degrades to the fallback.
+    defaultOwnerMode: z.enum(['paper', 'shadow', 'live']).default('paper'),
   }),
   simulation: z.object({
     takerFeePct: z.number().min(0).default(0.001),

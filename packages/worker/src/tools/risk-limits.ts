@@ -1,16 +1,54 @@
 import { z } from 'zod';
 import type { AgentTool, ToolResult, TradingToolContext, ResolvedAgentRiskContract, ResolvedAgentRiskProfile, AgentRiskProfileField } from '@traderton/domain';
+import { RiskPostureSchema } from '@traderton/domain';
 import { convertZodToJsonSchema } from './registry.js';
+
+// ── Consumer-injected platform risk spec (A3) ──────────────────────────────
+// get_risk_limits / get_account_summary take "empty" payloads from the LLM, but
+// the PLATFORM (herobids, post-LLM, from the `agents` row) attaches the risk
+// spec — the same capital/riskPosture/riskOverrides fields submit_decision
+// already carries. MUST be declared in the schema or the dispatcher's Zod
+// validation strips them before the resolver/factory reads them (bug-001
+// lesson). The tool's execute never reads these fields directly — the boundary
+// context factory binds them via the single RiskSource seam.
+export const AgentRiskSpecFieldsSchema = {
+  capital: z.string().optional().transform(v => v === '' ? undefined : v).describe('Consumer-injected platform value — the agent\'s deployable capital. Set by the consuming platform, never an LLM input.'),
+  riskPosture: RiskPostureSchema.optional().describe('Consumer-injected creator risk posture (platform-owned). Not an LLM input.'),
+  executionMode: z.enum(['paper', 'shadow', 'live']).optional().describe('Consumer-injected agent execution mode (platform-owned; the consuming platform\'s agents.execution_defaults.mode). Never an LLM input.'),
+  riskOverrides: z.object({
+    maxOpenPositions: z.number().int().positive().optional(),
+    maxPositionSizePct: z.number().min(0).max(100).optional(),
+    stopLossPct: z.number().min(0).max(100).optional(),
+    stopLossCooldownMs: z.number().int().min(0).optional(),
+    maxDrawdownPct: z.number().min(0).max(100).optional(),
+  }).optional().describe('Consumer-injected runtime risk overrides (platform-owned). Not an LLM input.'),
+} as const;
+
+/**
+ * The LLM-facing `parameters` JSON schema for spec-attaching tools.
+ *
+ * The Zod `parametersSchema` MUST declare the spec fields (or the dispatcher's
+ * Zod validation strips them — bug-001 lesson), but `convertZodToJsonSchema` on
+ * that schema would leak capital/riskPosture/riskOverrides into the LLM's tool
+ * spec. The plan's invariant is "the LLM never sees or supplies these values",
+ * so the LLM-facing schema is built from an empty object while the Zod schema
+ * keeps validating the full platform payload.
+ */
+const LLM_EMPTY_PARAMS_SCHEMA = z.object({});
+
+export { LLM_EMPTY_PARAMS_SCHEMA as llmEmptyParamsSchema };
 
 // --- get_risk_limits ---
 
-const GetRiskLimitsParamsSchema = z.object({});
+const GetRiskLimitsParamsSchema = z.object({
+  ...AgentRiskSpecFieldsSchema,
+});
 
 const getRiskLimitsTool: AgentTool<TradingToolContext> = {
   name: 'get_risk_limits',
   description: 'Get the effective risk limits for this agent, including which limits are mutable (adjustable) and which are locked by the creator. Also shows current runtime state against those limits (open position count, daily P&L vs loss limit, drawdown). Shows effective values, sources, operator ceilings, and mutability for each risk field.',
   parametersSchema: GetRiskLimitsParamsSchema,
-  parameters: convertZodToJsonSchema(GetRiskLimitsParamsSchema),
+  parameters: convertZodToJsonSchema(LLM_EMPTY_PARAMS_SCHEMA),
   category: 'read-database',
   async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
     if (!ctx.riskContractOps) {
@@ -79,46 +117,71 @@ const adjustRiskLimitsTool: AgentTool<TradingToolContext> = {
   parameters: convertZodToJsonSchema(AdjustRiskLimitsParamsSchema),
   category: 'write-database',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
-    if (!ctx.riskContractOps) {
-      return { success: false, error: 'risk contract not available in this context' };
-    }
-
-    const p = params as z.infer<typeof AdjustRiskLimitsParamsSchema>;
-
-    // Collect only fields that were explicitly provided
-    const overrides: Record<string, number | null> = {};
-    if (p.maxOpenPositions !== undefined) overrides.maxOpenPositions = p.maxOpenPositions ?? null;
-    if (p.maxPositionSizePct !== undefined) overrides.maxPositionSizePct = p.maxPositionSizePct ?? null;
-    if (p.stopLossPct !== undefined) overrides.stopLossPct = p.stopLossPct ?? null;
-    if (p.stopLossCooldownMs !== undefined) overrides.stopLossCooldownMs = p.stopLossCooldownMs ?? null;
-    if (p.maxDrawdownPct !== undefined) overrides.maxDrawdownPct = p.maxDrawdownPct ?? null;
-
-    if (Object.keys(overrides).length === 0) {
-      return { success: false, error: 'No fields provided to adjust', fault: false };
-    }
-
-    const result = await ctx.riskContractOps.adjustOverrides(overrides);
-
-    if (!result.ok) {
-      return { success: false, error: result.error, fault: false };
-    }
-
+    // A3 FAIL-CLOSED: the write has no durable traderton-owned home until the
+    // profile store (B1) exists — the risk context under the boundary is a
+    // per-call spec, so persisting overrides anywhere pre-B1 either violates
+    // "traderton owns what traderton enforces" or smuggles B1 into Track A.
+    // Typed precondition (not a bare error) so the consumer maps it without it
+    // counting against its circuit breaker. B1/Track C activates this write.
+    void ctx;
+    void params;
     return {
-      success: true,
-      data: {
-        ok: true,
-        note: 'Risk limits updated. Changes take effect on next decision cycle.',
-        limits: result.contract ? {
-          maxOpenPositions: formatField(result.contract.maxOpenPositions),
-          maxPositionSizePct: formatField(result.contract.maxPositionSizePct),
-          stopLossPct: formatField(result.contract.stopLossPct),
-          stopLossCooldownMs: formatField(result.contract.stopLossCooldownMs),
-          maxDrawdownPct: formatField(result.contract.maxDrawdownPct),
-        } : undefined,
-      },
+      success: false,
+      error: 'adjust_risk_limits is not yet available over the boundary: risk overrides have no durable store until the trading profile lands (B1). Read your effective limits with get_risk_limits.',
+      errorCode: 'precondition.not_ready',
+      fault: false,
     };
   },
 };
+
+// The schema stays declared so the tool's wire contract (and the LLM's tool
+// description) are unchanged; the handler above ignores the payload entirely.
+
+/** Unreachable under A3 — kept as the B1/Track C reactivation point (verbatim
+ *  copy of the in-process write body so the swap is a pure diff). */
+export async function adjustOverridesViaRiskContractOps(
+  params: unknown,
+  ctx: TradingToolContext,
+): Promise<ToolResult> {
+  if (!ctx.riskContractOps) {
+    return { success: false, error: 'risk contract not available in this context' };
+  }
+
+  const p = params as z.infer<typeof AdjustRiskLimitsParamsSchema>;
+
+  // Collect only fields that were explicitly provided
+  const overrides: Record<string, number | null> = {};
+  if (p.maxOpenPositions !== undefined) overrides.maxOpenPositions = p.maxOpenPositions ?? null;
+  if (p.maxPositionSizePct !== undefined) overrides.maxPositionSizePct = p.maxPositionSizePct ?? null;
+  if (p.stopLossPct !== undefined) overrides.stopLossPct = p.stopLossPct ?? null;
+  if (p.stopLossCooldownMs !== undefined) overrides.stopLossCooldownMs = p.stopLossCooldownMs ?? null;
+  if (p.maxDrawdownPct !== undefined) overrides.maxDrawdownPct = p.maxDrawdownPct ?? null;
+
+  if (Object.keys(overrides).length === 0) {
+    return { success: false, error: 'No fields provided to adjust', fault: false };
+  }
+
+  const result = await ctx.riskContractOps.adjustOverrides(overrides);
+
+  if (!result.ok) {
+    return { success: false, error: result.error, fault: false };
+  }
+
+  return {
+    success: true,
+    data: {
+      ok: true,
+      note: 'Risk limits updated. Changes take effect on next decision cycle.',
+      limits: result.contract ? {
+        maxOpenPositions: formatField(result.contract.maxOpenPositions),
+        maxPositionSizePct: formatField(result.contract.maxPositionSizePct),
+        stopLossPct: formatField(result.contract.stopLossPct),
+        stopLossCooldownMs: formatField(result.contract.stopLossCooldownMs),
+        maxDrawdownPct: formatField(result.contract.maxDrawdownPct),
+      } : undefined,
+    },
+  };
+}
 
 /**
  * Build the runtime risk snapshot for an agent.

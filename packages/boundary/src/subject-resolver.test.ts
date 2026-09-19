@@ -11,6 +11,7 @@
 //   skipVenueResolution = true   → short-circuit (read-only OR owner-scoped write)
 
 import { describe, it, expect } from 'vitest';
+import { buildResolverPorts, type ResolverPortsDeps } from './resolver-ports.js';
 import {
   resolveSubjectInjection,
   type SubjectResolverPorts,
@@ -240,7 +241,7 @@ describe('resolveSubjectInjection — needs venue resolution, no bot named (per-
       {},
       ports({
         listVenueAccountsByOwner: async () => [ACCOUNT, { id: 'va-2', venue: 'hyperliquid' }],
-        getDefaultVenueAccountId: () => 'va-2',
+        getDefaultVenueAccountId: async () => 'va-2',
         getDefaultOwnerMode: () => 'shadow',
       }),
     );
@@ -258,10 +259,180 @@ describe('resolveSubjectInjection — needs venue resolution, no bot named (per-
   });
 });
 
+// ── A4: the wired default ports ─────────────────────────────────────────────
+// The boundary composition root (resolver-ports.ts) implements
+// getDefaultOwnerMode as the static operator knob `execution.defaultOwnerMode`
+// and getDefaultVenueAccountId as the owner's OLDEST account by created_at
+// (no is_default column in the verified schema — deterministic pick, id
+// tiebreak). These tests pin the RESOLVER's consumption of those ports and the
+// ports' own policy (buildResolverPorts, with a fake db).
+
+describe('resolveSubjectInjection — wired getDefaultOwnerMode (A4 semantics)', () => {
+  function makePorts(mode: 'paper' | 'shadow' | 'live'): SubjectResolverPorts {
+    return ports({
+      listVenueAccountsByOwner: async () => [{ id: 'va-1', venue: 'hyperliquid' }],
+      getDefaultOwnerMode: () => mode,
+    });
+  }
+
+  it('agent subject: ownerMode = the port value, NOT the safe fallback paper', async () => {
+    const res = await resolveSubjectInjection(
+      SUBJECT,
+      false,
+      {}, // no bot, no payload venueAccountId → no-bot path
+      makePorts('shadow'),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.injection.ownerMode).toBe('shadow');
+  });
+
+  it('agent subject: mode applies even when the payload requests a lower mode (ceiling semantics)', async () => {
+    const res = await resolveSubjectInjection(
+      SUBJECT,
+      false,
+      { config: { execution: { mode: 'paper' } } },
+      makePorts('live'),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.injection.ownerMode).toBe('live');
+  });
+
+  it('agent subject: injected executionMode is authoritative over the port (Option A)', async () => {
+    // The consumer stamps the agent's REAL mode post-LLM; it must win over the
+    // static operator default so a shadow agent on a paper-default operator can
+    // still author shadow bots (swap-venue fix).
+    const res = await resolveSubjectInjection(
+      SUBJECT,
+      false,
+      { config: { execution: { mode: 'shadow' } }, executionMode: 'shadow' },
+      makePorts('paper'),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.injection.ownerMode).toBe('shadow');
+  });
+
+  it('agent subject: invalid injected executionMode is ignored (falls back to port)', async () => {
+    const res = await resolveSubjectInjection(
+      SUBJECT,
+      false,
+      { executionMode: 'garbage' } as unknown as Record<string, unknown>,
+      makePorts('paper'),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.injection.ownerMode).toBe('paper');
+  });
+
+  it('agent subject: absent injected mode falls back to the port (back-compat)', async () => {
+    const res = await resolveSubjectInjection(
+      SUBJECT,
+      false,
+      { config: { execution: { mode: 'paper' } } },
+      makePorts('shadow'),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.injection.ownerMode).toBe('shadow');
+  });
+
+  it('agent subject: absent port still falls back to safe paper', async () => {
+    const res = await resolveSubjectInjection(SUBJECT, false, {}, ports({
+      listVenueAccountsByOwner: async () => [{ id: 'va-1', venue: 'hyperliquid' }],
+    }));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.injection.ownerMode).toBe('paper');
+  });
+
+  it('user subject: unaffected by the port — requested payload mode is authoritative', async () => {
+    const res = await resolveSubjectInjection(
+      { ownerId: 'owner-1', actor: { type: 'user', id: 'user-1' } },
+      false,
+      { config: { execution: { mode: 'shadow' } } },
+      makePorts('paper'),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.injection.ownerMode).toBe('shadow');
+  });
+});
+
+describe('buildResolverPorts — default venue account policy (oldest by created_at)', () => {
+  /** Minimal fake over the drizzle select/from/where/orderBy/limit chain the port uses.
+   *  `result` is what limit() resolves to (the fake db is not a real query engine —
+   *  the chain shape is what matters; real SQL correctness is exercised by the
+   *  integration suite). */
+  function fakeDbResolving(result: Array<{ id: string }>): ResolverPortsDeps['db'] {
+    return {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: () => Promise.resolve(result),
+            }),
+          }),
+        }),
+      }),
+    } as unknown as ResolverPortsDeps['db'];
+  }
+
+  function wiredWith(db: ResolverPortsDeps['db'], mode: 'paper' | 'shadow' | 'live' = 'shadow') {
+    return buildResolverPorts({
+      db,
+      appConfig: { execution: { defaultOwnerMode: mode } } as ResolverPortsDeps['appConfig'],
+      getBotById: async () => null,
+    });
+  }
+
+  it('returns the id the (oldest-first) db query yields', async () => {
+    // The production port orders by created_at ASC, id ASC and takes limit 1;
+    // the fake stands in for the engine and returns the "oldest" row.
+    const portsWired = wiredWith(fakeDbResolving([{ id: 'va-old' }]));
+    await expect(portsWired.getDefaultVenueAccountId!('owner-1')).resolves.toBe('va-old');
+  });
+
+  it('getDefaultOwnerMode returns the operator knob value', () => {
+    const portsWired = wiredWith(fakeDbResolving([]), 'live');
+    expect(portsWired.getDefaultOwnerMode!('owner-1')).toBe('live');
+  });
+
+  it('getDefaultVenueAccountId resolves undefined when the owner has no accounts', async () => {
+    const portsWired = wiredWith(fakeDbResolving([]));
+    await expect(portsWired.getDefaultVenueAccountId!('owner-1')).resolves.toBeUndefined();
+  });
+});
+
 describe('resolveSubjectInjection — skipVenueResolution short-circuit', () => {
   it('short-circuits to a minimal injection (ownerId + actorId; empty venue coords)', async () => {
     const res = await resolveSubjectInjection(SUBJECT, true, { symbol: 'BTC' }, ports());
     expect(res).toEqual({ ok: true, injection: MINIMAL_INJECTION });
+  });
+
+  // A3: the risk spec rides the read calls too (get_risk_limits /
+  // get_account_summary are read-only → the skip path) — the resolver must
+  // extract it onto the injection so the context factory binds the ops via the
+  // single RiskSource seam.
+  it('attaches the agentRiskSpec on the skip path when the payload carries the spec', async () => {
+    const res = await resolveSubjectInjection(
+      SUBJECT,
+      true,
+      {
+        capital: '1000',
+        riskPosture: { maxOpenPositions: 3 },
+        riskOverrides: { maxDrawdownPct: 5 },
+      },
+      ports(),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.injection.agentRiskSpec).toEqual({
+        capital: '1000',
+        riskPosture: { maxOpenPositions: 3 },
+        riskOverrides: { maxDrawdownPct: 5 },
+      });
+    }
+  });
+
+  it('omits agentRiskSpec on the skip path when the payload carries none', async () => {
+    const res = await resolveSubjectInjection(SUBJECT, true, {}, ports());
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.injection.agentRiskSpec).toBeUndefined();
   });
 
   it('short-circuits even when the owner has NO venue account (would fail if resolution ran)', async () => {

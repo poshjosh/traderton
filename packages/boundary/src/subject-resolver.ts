@@ -10,7 +10,8 @@
 // injects VALUES ONLY (reads db rows and derives coordinates); it authors NO
 // trading behaviour. The copied drive target ALSO re-checks bot ownership — the
 // ownership check here is defence in depth, not a replacement.
-
+import { RiskPostureSchema } from '@traderton/domain';
+import type { RiskPosture } from '@traderton/domain';
 
 
 /** A resolution outcome — either the injection VALUES or a typed boundary failure. */
@@ -27,18 +28,19 @@ export interface ResolvedInjection {
   venueType: 'orderbook' | 'swap';
   venueAccountId: string;
   /**
-   * Consumer-injected platform risk context (submit_decision payload only;
-   * absent for every other tool). The agent-direct actor ensure consumes these
-   * at construct/start time — capital anchors EquityTracker peak, riskPosture +
-   * riskOverrides feed buildAgentRiskLimits (creator-set values beat operator
-   * defaults). Values ride the HMAC-signed payload (005 M2 adapter: "herobids
-   * injects the platform-owned values it still holds … at the call site")
-   * — the boundary process cannot read the consumer's `agents` table (locked:
-   * no `agents`-table dependency, 017 §4 / 019 §1).
+   * Consumer-injected platform risk context. Attached by the consumer to every
+   * tool payload that needs it (submit_decision, get_risk_limits,
+   * get_account_summary); absent for the rest. The agent-direct actor ensure
+   * consumes these at construct/start time — capital anchors EquityTracker
+   * peak, riskPosture + riskOverrides feed buildAgentRiskLimits (creator-set
+   * values beat operator defaults). Values ride the HMAC-signed payload (005
+   * M2 adapter: "herobids injects the platform-owned values it still holds …
+   * at the call site") — the boundary process cannot read the consumer's
+   * `agents` table (locked: no `agents`-table dependency, 017 §4 / 019 §1).
    */
   agentRiskSpec?: {
     capital?: string;
-    riskPosture?: Record<string, unknown>;
+    riskPosture?: RiskPosture;
     riskOverrides?: Record<string, number | undefined>;
   };
 }
@@ -66,11 +68,18 @@ export interface SubjectResolverPorts {
    * Optional operator-configured default venue-account id for an owner. When more
    * than one account exists and no operator default is set, resolution fails
    * `precondition.not_ready` (ambiguous — refuse rather than guess).
+   *
+   * A4: async — the boundary composition root implements the policy as a db
+   * read (the owner's oldest account), so the port must await.
    */
-  getDefaultVenueAccountId?(ownerId: string): string | undefined;
+  getDefaultVenueAccountId?(ownerId: string): Promise<string | undefined>;
   /**
    * Optional operator-configured default owner execution mode for the no-bot
    * path. Defaults to the safe `paper` when absent (005 conservative default).
+   *
+   * A4: wired by the boundary composition root from the operator knob
+   * `execution.defaultOwnerMode` (static — no per-agent source exists; B1's
+   * trading profile becomes the per-agent mode later, with this as fallback).
    */
   getDefaultOwnerMode?(ownerId: string): 'paper' | 'shadow' | 'live' | undefined;
 }
@@ -101,33 +110,51 @@ function venueAccountIdOf(payload: unknown): string | undefined {
 
 /**
  * Extract the consumer-injected agent risk context from a validated tool
- * payload (submit_decision only; the schema declares the fields so they survive
- * the dispatcher's `payloadParse`). Absent/invalid-shaped fields are omitted —
- * the actor ensure then falls back to operator defaults (graceful, and
- * backward-compatible with consumers that don't send them).
+ * payload (any tool that declares the spec fields — submit_decision,
+ * get_risk_limits, get_account_summary; the schemas declare the fields so
+ * they survive the dispatcher's `payloadParse`). Absent/invalid-shaped fields
+ * are omitted — the actor ensure then falls back to operator defaults
+ * (graceful, and backward-compatible with consumers that don't send them).
+ * `riskPosture` is validated against the canonical `RiskPostureSchema` — a
+ * payload that fails validation degrades to no posture (operator defaults)
+ * rather than smuggling unvalidated values into the risk contract.
  */
 function agentRiskSpecOf(payload: unknown): ResolvedInjection['agentRiskSpec'] | undefined {
   if (!payload || typeof payload !== 'object') return undefined;
   const p = payload as Record<string, unknown>;
   const capital = typeof p['capital'] === 'string' && p['capital'].trim() ? p['capital'] : undefined;
-  const riskPosture = (p['riskPosture'] && typeof p['riskPosture'] === 'object' && !Array.isArray(p['riskPosture']))
-    ? (p['riskPosture'] as Record<string, unknown>)
-    : undefined;
+  const riskPosture = RiskPostureSchema.nullable().safeParse(p['riskPosture']);
+  const validatedPosture = riskPosture.success && riskPosture.data ? riskPosture.data : undefined;
   const rawOverrides = (p['riskOverrides'] && typeof p['riskOverrides'] === 'object' && !Array.isArray(p['riskOverrides']))
     ? (p['riskOverrides'] as Record<string, unknown>)
     : undefined;
-  if (capital === undefined && riskPosture === undefined && rawOverrides === undefined) return undefined;
+  if (capital === undefined && validatedPosture === undefined && rawOverrides === undefined) return undefined;
   const riskOverrides: Record<string, number | undefined> | undefined = rawOverrides
     ? Object.fromEntries(
         Object.entries(rawOverrides).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
       )
     : undefined;
-  if (capital === undefined && riskPosture === undefined && (!riskOverrides || Object.keys(riskOverrides).length === 0)) return undefined;
+  if (capital === undefined && validatedPosture === undefined && (!riskOverrides || Object.keys(riskOverrides).length === 0)) return undefined;
   return {
     ...(capital !== undefined ? { capital } : {}),
-    ...(riskPosture !== undefined ? { riskPosture } : {}),
+    ...(validatedPosture !== undefined ? { riskPosture: validatedPosture } : {}),
     ...(riskOverrides !== undefined && Object.keys(riskOverrides).length > 0 ? { riskOverrides } : {}),
   };
+}
+
+/**
+ * Read the consumer-injected platform `executionMode` from a validated tool
+ * payload, if valid. This is the Option-A per-agent mode the consumer stamps
+ * POST-LLM from its own `agents.execution_defaults.mode` (the signed, LLM-never-
+ * sees-it value) — the boundary process cannot read the consumer's `agents` table
+ * (locked). Absent/invalid → undefined (fall back to the operator default).
+ */
+function injectedModeOf(payload: unknown): 'paper' | 'shadow' | 'live' | undefined {
+  if (payload && typeof payload === 'object') {
+    const mode = (payload as Record<string, unknown>)['executionMode'];
+    if (mode === 'paper' || mode === 'shadow' || mode === 'live') return mode;
+  }
+  return undefined;
 }
 
 /** Read the requested execution mode from a create-bot payload (`config.execution.mode`), if valid. */
@@ -183,7 +210,13 @@ function resolveNoBotOwnerMode(
   ports: SubjectResolverPorts,
 ): 'paper' | 'shadow' | 'live' {
   if (subject.actor.type === 'agent') {
-    return ports.getDefaultOwnerMode?.(subject.ownerId) ?? 'paper';
+    // Option A (signed injected per-agent mode): the consumer's platform mode is
+    // authoritative when present — an agent carries its REAL configured mode, not
+    // a static guess. Fall back to the operator default (getDefaultOwnerMode →
+    // `execution.defaultOwnerMode` → 'paper') when the consumer did not inject
+    // one (backward-compatible). This resolves the swap-venue gap: a shadow agent
+    // can now author a shadow bot, and the escalation ceiling is per-agent.
+    return injectedModeOf(payload) ?? ports.getDefaultOwnerMode?.(subject.ownerId) ?? 'paper';
   }
   return requestedModeOf(payload) ?? 'paper';
 }
@@ -255,6 +288,11 @@ export async function resolveSubjectInjection(
   // which creates the owner's FIRST account). Short-circuit to a minimal
   // injection — venue fields empty, never consumed. Authors no trading behaviour.
   if (skipVenueResolution) {
+    // A3: the risk spec rides the read calls too (get_risk_limits /
+    // get_account_summary are read-only → this skip path). Extract it BEFORE
+    // the short-circuit so the context factory can bind the ops via the single
+    // RiskSource seam — the venue fields stay empty/never consumed.
+    const skipPathRiskSpec = agentRiskSpecOf(payload);
     return {
       ok: true,
       injection: {
@@ -264,6 +302,7 @@ export async function resolveSubjectInjection(
         venue: '',
         venueType: 'orderbook',
         venueAccountId: '',
+        ...(skipPathRiskSpec ? { agentRiskSpec: skipPathRiskSpec } : {}),
       },
     };
   }
@@ -346,7 +385,7 @@ export async function resolveSubjectInjection(
   if (accounts.length === 1) {
     account = accounts[0];
   } else {
-    const defaultId = ports.getDefaultVenueAccountId?.(subject.ownerId);
+    const defaultId = await ports.getDefaultVenueAccountId?.(subject.ownerId);
     account = defaultId ? accounts.find((a) => a.id === defaultId) : undefined;
   }
   if (!account) {

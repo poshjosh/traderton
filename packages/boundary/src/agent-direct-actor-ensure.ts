@@ -80,6 +80,7 @@ export function buildAgentDirectActorEnsure(
     capital: string | undefined;
     riskPostureKey: string;
     riskOverridesKey: string;
+    ownerMode: 'paper' | 'shadow' | 'live';
   }
 
   // Keyed by ownerId+actorId+venueAccountId: a re-point of the SAME agent to a
@@ -104,12 +105,16 @@ export function buildAgentDirectActorEnsure(
       const capitalChanged = (risk.capital ?? undefined) !== existing.capital;
       const postureChanged = postureKey(risk.riskPosture) !== existing.riskPostureKey;
       const overridesChanged = overridesKey(risk.riskOverrides) !== existing.riskOverridesKey;
+      // Option A: executionMode is construct-time actor state (selects the
+      // Paper/Shadow/Live executor). A mode change must reconstruct the actor —
+      // the fast path would otherwise reuse a stale-mode actor (the A1/A2 class).
+      const modeChanged = injection.ownerMode !== existing.ownerMode;
       const alive = runtime.actorRegistry.get(injection.actorId)?.isRunning === true;
-      if (!capitalChanged && !postureChanged && !overridesChanged && alive) {
+      if (!capitalChanged && !postureChanged && !overridesChanged && !modeChanged && alive) {
         return; // fast path — same spec, actor alive
       }
       logger.warn(
-        { ownerId: injection.ownerId, agentId: injection.actorId, capitalChanged, postureChanged, overridesChanged, alive },
+        { ownerId: injection.ownerId, agentId: injection.actorId, capitalChanged, postureChanged, overridesChanged, modeChanged, alive },
         'agent-direct actor ensure needs reconstruction — rebuilding',
       );
       // A2 re-read: concurrent callers awaiting the same stale entry resumed
@@ -178,6 +183,7 @@ export function buildAgentDirectActorEnsure(
       capital: risk.capital ?? undefined,
       riskPostureKey: postureKey(risk.riskPosture),
       riskOverridesKey: overridesKey(risk.riskOverrides),
+      ownerMode: injection.ownerMode,
     });
 
     try {

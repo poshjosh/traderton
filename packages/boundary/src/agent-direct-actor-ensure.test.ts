@@ -173,6 +173,30 @@ describe('buildAgentDirectActorEnsure', () => {
     expect(construct).toHaveBeenCalledTimes(2); // cached — no extra construct
   });
 
+  it('6. ownerMode change → reconstructs (Option A: mode is construct-time actor state)', async () => {
+    const { runtime, construct } = makeRuntime();
+    const ensure = buildAgentDirectActorEnsure(runtime);
+
+    await ensure({ ...injectionWith({ capital: '1000' }), ownerMode: 'paper' });
+    expect(construct).toHaveBeenCalledTimes(1);
+
+    // Same capital but a live-mode flip: the actor must be torn down and rebuilt
+    // because ownerMode selects the Paper/Shadow/Live executor at construct time.
+    await ensure({ ...injectionWith({ capital: '1000' }), ownerMode: 'live' });
+    expect(construct).toHaveBeenCalledTimes(2);
+  });
+
+  it('7. same ownerMode (no other change) → fast path preserved', async () => {
+    const { runtime, construct } = makeRuntime();
+    const ensure = buildAgentDirectActorEnsure(runtime);
+
+    await ensure({ ...injectionWith({ capital: '1000' }), ownerMode: 'shadow' });
+    expect(construct).toHaveBeenCalledTimes(1);
+
+    await ensure({ ...injectionWith({ capital: '1000' }), ownerMode: 'shadow' });
+    expect(construct).toHaveBeenCalledTimes(1); // no change → fast path
+  });
+
   it('regression: reconstruction logs "agent-direct actor constructed + started" exactly once per rebuild', async () => {
     const { runtime, construct } = makeRuntime();
     const ensure = buildAgentDirectActorEnsure(runtime);

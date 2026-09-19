@@ -4,19 +4,27 @@ import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domai
 import type { Database } from '@traderton/db';
 import { venueAccounts } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
+import { AgentRiskSpecFieldsSchema, llmEmptyParamsSchema } from './risk-limits.js';
 import { createLogger } from '../logger.js';
 
 const logger = createLogger('tools:account');
 
 // --- get_account_summary ---
 
-const GetAccountSummaryParamsSchema = z.object({});
+// A3: the PLATFORM attaches the risk spec to this read call (same fields as
+// get_risk_limits) — declared here so Zod keeps them; the context factory binds
+// them via the RiskSource seam (capital feeds the summary + riskContractOps).
+const GetAccountSummaryParamsSchema = z.object({
+  ...AgentRiskSpecFieldsSchema,
+});
 
 const getAccountSummaryTool: AgentTool<TradingToolContext> = {
   name: 'get_account_summary',
   description: 'Get a summary of the agent\'s trading account including usable capital, equity, open positions, P&L, and risk limits. Use this to compute appropriate position sizes (targetSize) before calling submit_decision, or to determine sizing for position sizing configuration.',
   parametersSchema: GetAccountSummaryParamsSchema,
-  parameters: convertZodToJsonSchema(GetAccountSummaryParamsSchema),
+  // Spec fields are platform-injected post-LLM — the LLM-facing JSON schema is
+  // the empty contract (see risk-limits.ts).
+  parameters: convertZodToJsonSchema(llmEmptyParamsSchema),
   category: 'read-database',
   promptGuidance: 'Call get_account_summary before submit_decision to see available capital and open positions. targetSize is in base units — the amount of the asset being bought or sold. If capital is unavailable, omit targetSize to let the engine use a safe default.',
   async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {

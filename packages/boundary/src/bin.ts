@@ -10,7 +10,6 @@
 // boundary package (the 000 invariant); the dispatcher stays wiring-free.
 
 import { Redis } from 'ioredis';
-import { and, eq } from 'drizzle-orm';
 import type { TradingToolContext, ToolCategory } from '@traderton/domain';
 import { isReadOnlyCategory } from '@traderton/domain';
 import {
@@ -19,13 +18,15 @@ import {
   InstrumentRepository,
   BoundaryInvocationRepository,
   computeRequestFingerprint,
-  venueAccounts,
 } from '@traderton/db';
 import {
   createTradingRuntime,
   loadConfig,
   createScannerCandleFetcherFromConfig,
   createScannerPoolResolverFromConfig,
+  buildRiskContractOpsFromRiskSource,
+  riskSourceIsEmpty,
+  type RiskSource,
 } from '@traderton/worker';
 import {
   createProviderRegistry,
@@ -49,10 +50,8 @@ import type {
 import { buildToolRegistry } from './registry.js';
 import {
   resolveSubjectInjection,
-  type SubjectResolverPorts,
-  type ResolverBotRecord,
-  type ResolverVenueAccountRecord,
 } from './subject-resolver.js';
+import { buildResolverPorts } from './resolver-ports.js';
 import { buildAgentDirectActorEnsure } from './agent-direct-actor-ensure.js';
 
 function loadBoundaryConfig(): BoundaryConfig {
@@ -237,20 +236,11 @@ async function main(): Promise<void> {
   const retentionMs = boundaryConfig.idempotencyRetentionHours * 60 * 60 * 1000;
 
   // ── The D2 subject→injection resolver ports (db-row VALUE lookups) ──
-  const resolverPorts: SubjectResolverPorts = {
-    getBotById: async (botId): Promise<ResolverBotRecord | null> => {
-      const bot = await botRepo.getBotById(botId);
-      if (!bot) return null;
-      return { ownerId: bot.ownerId, venueAccountId: bot.venueAccountId, config: bot.config };
-    },
-    listVenueAccountsByOwner: async (ownerId): Promise<ResolverVenueAccountRecord[]> => {
-      const rows = await db
-        .select({ id: venueAccounts.id, venue: venueAccounts.venue })
-        .from(venueAccounts)
-        .where(and(eq(venueAccounts.ownerId, ownerId)));
-      return rows.map((r) => ({ id: r.id, venue: r.venue }));
-    },
-  };
+  // A4: the default ports (getDefaultOwnerMode / getDefaultVenueAccountId) are
+  // wired too — see buildResolverPorts (extracted + unit-tested in
+  // ./resolver-ports.ts). Owner mode = the operator knob
+  // `execution.defaultOwnerMode`; venue default = the owner's oldest account.
+  const resolverPorts = buildResolverPorts({ db, appConfig, getBotById: (id) => botRepo.getBotById(id) });
 
   // ── The real TradingToolContext factory (composition root, NOT the dispatcher) ──
   const contextFactory: TradingToolContextFactory = async (
@@ -278,6 +268,33 @@ async function main(): Promise<void> {
     }
 
     const injection = resolution.injection;
+
+    // ── A3: the RiskSource seam ─────────────────────────────────────────────
+    // The consumer attaches its risk spec (capital/riskPosture/riskOverrides —
+    // the same fields submit_decision already carries) to the read calls
+    // (get_risk_limits / get_account_summary). The subject resolver extracted
+    // it onto injection.agentRiskSpec; the ops read it through ONE narrow
+    // interface (RiskSource) — never ad-hoc payload fields — so B1's
+    // profile-store swap is a one-adapter change. Absent spec → the ops are
+    // not constructed and the tools degrade (get_risk_limits via the factory
+    // throw → precondition.not_ready; get_account_summary via its graceful
+    // warnings shape).
+    const riskSpec = injection.agentRiskSpec;
+    const riskSource: RiskSource | undefined = riskSpec
+      ? {
+          capital: riskSpec.capital ?? null,
+          // riskPosture is already RiskPostureSchema-validated by the subject resolver.
+          riskPosture: riskSpec.riskPosture ?? null,
+          riskOverrides: (riskSpec.riskOverrides ?? {}) as RiskSource['riskOverrides'],
+        }
+      : undefined;
+    const riskContractOps = riskSource && !riskSourceIsEmpty(riskSource)
+      ? buildRiskContractOpsFromRiskSource({
+          agentRiskDefaults: appConfig.agentRiskDefaults,
+          source: riskSource,
+        })
+      : undefined;
+
     // Lazy agent-direct actor ensure (M2 GAP FIX): for a venue-resolving
     // invocation whose actor is not yet running in THIS process, construct +
     // register + start the AgentTradingActor BEFORE handing the drive target to
@@ -287,14 +304,24 @@ async function main(): Promise<void> {
     // venue resolution was NOT skipped. Failures throw → the dispatcher logs
     // internally and returns `precondition.not_ready` (retryable).
     //
-    // NOTE (parity caveat, L3-Rx): `injection.ownerMode` for agent subjects
-    // currently falls back to 'paper' (no getDefaultOwnerMode port wired), so
-    // agent-direct actors start in paper mode today. See
-    // docs/features/L3-Rx-subject-resolver-venue-signal-plan.md.
+    // A4: `injection.ownerMode` for agent subjects now comes from the wired
+    // operator default (`execution.defaultOwnerMode`, static — no per-agent
+    // source exists). B1's trading profile becomes the per-agent source later,
+    // with this static default as the fallback.
     if (!skipVenueResolution && request.actor.type === 'agent') {
       await ensureAgentDirectActor(injection);
     }
     const publishToInbound = runtime.createDriveTarget(injection);
+
+    // A3: get_risk_limits over the boundary REQUIRES a risk spec — the whole
+    // tool is the contract read; serving it without one would fabricate
+    // operator-default limits the platform did not assert. A missing spec is a
+    // readiness failure (the consumer must attach it) → throw so the dispatcher
+    // returns `precondition.not_ready` (retryable). get_account_summary is NOT
+    // gated here — it keeps its graceful `*_unavailable` warnings degrade.
+    if (request.toolName === 'get_risk_limits' && !riskContractOps) {
+      throw new Error('risk context unavailable: the consumer did not attach a risk spec to this invocation');
+    }
 
     return {
       agentId: request.actor.id,
@@ -334,6 +361,28 @@ async function main(): Promise<void> {
       economicCalendarProvider: economicCalendarProvider as unknown as TradingToolContext['economicCalendarProvider'],
       // Raw Drizzle handle for tools that write tables directly (provisioning).
       db,
+      // ── A3: risk/account context over the RiskSource seam ─────────────────
+      // riskContractOps: the copied source-agnostic ops bound to the per-call
+      // payload spec (undefined when absent — tools degrade). agentRepo: a thin
+      // adapter over the SAME seam so get_risk_limits' buildRuntime daily-loss
+      // math and get_account_summary's capital come from the single source (no
+      // ad-hoc payload reads). executionConfig: the agent's execution mode rides
+      // the injection (ownerMode ceiling); sizing fields have no platform source
+      // over the boundary — null, as the tool's degrade expects.
+      riskContractOps,
+      agentRepo: riskSource ? {
+        getAgent: async (_agentId: string) => ({
+          capital: riskSource.capital,
+          risk: riskSource.riskPosture,
+        }),
+      } satisfies Pick<NonNullable<TradingToolContext['agentRepo']>, 'getAgent'> : undefined,
+      executionConfig: {
+        getExecutionConfig: async () => ({
+          mode: injection.ownerMode,
+          positionSizeMode: null,
+          fixedPositionSize: null,
+        }),
+      },
     };
   };
 
