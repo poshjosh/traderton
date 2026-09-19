@@ -51,6 +51,7 @@ export interface BuildRiskContractOpsOptions {
   agentRiskDefaults: AgentRiskDefaultsConfig;
   /** The invocation's risk context, read through the single seam. */
   source: RiskSource;
+  setRiskOverrides?: (overrides: AgentRiskOverrides) => Promise<void>;
 }
 
 /**
@@ -67,7 +68,7 @@ export function buildRiskContractOpsFromRiskSource(
 ): NonNullable<import('@traderton/domain').TradingToolContext['riskContractOps']> {
   const { agentRiskDefaults, source } = options;
   const ceilings = extractCeilings(agentRiskDefaults);
-  const overrides = source.riskOverrides ?? {};
+  let overrides = source.riskOverrides ?? {};
 
   return {
     async getContract(): Promise<ResolvedAgentRiskContract> {
@@ -82,15 +83,19 @@ export function buildRiskContractOpsFromRiskSource(
       });
     },
 
-    async adjustOverrides(
-      _proposedChanges: Record<string, number | null>,
-    ): Promise<{ ok: boolean; error?: string; contract?: ResolvedAgentRiskContract }> {
-      // No durable write home until B1's profile store exists — the source is a
-      // per-call spec; persisting overrides anywhere else would violate
-      // "traderton owns what traderton enforces" or smuggle B1 into Track A.
-      // The adjust_risk_limits tool fails closed BEFORE reaching this; this is
-      // the defence-in-depth backstop so no future caller writes-through.
-      return { ok: false, error: 'risk override writes are not supported until the profile store exists (B1)' };
+    async adjustOverrides(proposedChanges: Record<string, number | null>): Promise<{ ok: boolean; error?: string; contract?: ResolvedAgentRiskContract }> {
+      if (!options.setRiskOverrides) return { ok: false, error: 'risk override store unavailable' };
+      const contract = await this.getContract();
+      const next = { ...overrides };
+      for (const [field, value] of Object.entries(proposedChanges)) {
+        const error = validateRiskOverride(field as keyof ResolvedAgentRiskContract, contract, value);
+        if (error) return { ok: false, error };
+        if (value == null) delete next[field as keyof AgentRiskOverrides];
+        else next[field as keyof AgentRiskOverrides] = value;
+      }
+      await options.setRiskOverrides(next);
+      overrides = next;
+      return { ok: true, contract: await this.getContract() };
     },
 
     async getProfile(): Promise<ResolvedAgentRiskProfile> {

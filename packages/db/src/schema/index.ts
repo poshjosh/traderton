@@ -1,5 +1,11 @@
 export { instruments } from './instruments.js';
 export { venueAccounts } from './venue-accounts.js';
+export {
+	agentTradingProfiles,
+	agentTradingProfileChanges,
+	type AgentTradingProfileForwardAction,
+	type AgentTradingProfilePreimage,
+} from './agent-trading-profiles.js';
 export { userCredentials } from './user-credentials.js';
 export { bots } from './bots.js';
 export { decisions } from './decisions.js';

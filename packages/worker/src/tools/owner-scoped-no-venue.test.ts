@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import type { AgentTool, TradingToolContext } from '@traderton/domain';
 import { provisioningTools } from './provisioning.js';
 import { riskLimitsTools } from './risk-limits.js';
+import { tradingProfileTools } from './trading-profiles.js';
 import { watchTools } from './watch.js';
 import { botManagementTools } from './bots.js';
 import { tradingTools } from './trading.js';
@@ -25,6 +26,12 @@ describe('ownerScopedNoVenue flag', () => {
   const flagged: Array<[AgentTool<TradingToolContext>[], string]> = [
     [provisioningTools, 'provision_venue_account'],
     [provisioningTools, 'deprovision_venue_account'],
+    [tradingProfileTools, 'set_agent_trading_profile'],
+    [tradingProfileTools, 'clear_agent_trading_profile'],
+    [tradingProfileTools, 'get_agent_trading_profile'],
+    [tradingProfileTools, 'finalize_agent_trading_profile_change'],
+    [tradingProfileTools, 'rollback_agent_trading_profile_change'],
+    [tradingProfileTools, 'resume_agent_trading_profile_change'],
     [riskLimitsTools, 'adjust_risk_limits'],
     [watchTools, 'watch_token'],
     [watchTools, 'remove_watch'],

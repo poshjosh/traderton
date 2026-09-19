@@ -20,7 +20,7 @@ vi.mock('@traderton/worker', async (importOriginal) => {
     createLogger: () => ({ info: infoSpy, warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   };
 });
-import { buildAgentDirectActorEnsure, type AgentRiskSpec } from './agent-direct-actor-ensure.js';
+import { buildAgentDirectActorEnsure, type StoredTradingProfile } from './agent-direct-actor-ensure.js';
 
 interface FakeActor {
   isRunning: boolean;
@@ -64,18 +64,35 @@ const baseInjection = {
   venueAccountId: 'va-1',
 };
 
-function injectionWith(spec?: AgentRiskSpec) {
-  return { ...baseInjection, agentRiskSpec: spec };
+let profile: StoredTradingProfile;
+
+function injectionWith() {
+  return baseInjection;
+}
+
+function profileReader(): (ownerId: string, actorId: string, venueAccountId: string) => Promise<StoredTradingProfile | null> {
+  return async () => profile;
+}
+
+function buildEnsure(runtime: TradingRuntime) {
+  return buildAgentDirectActorEnsure(runtime, profileReader());
 }
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  profile = {
+    capital: '1000',
+    riskPosture: null,
+    riskOverrides: {},
+    executionDefaults: { mode: 'paper' },
+    revision: 1n,
+  };
 });
 
 describe('buildAgentDirectActorEnsure', () => {
   it('1. cache hit + actor running → no reconstruct (fast path intact)', async () => {
     const { runtime, construct } = makeRuntime();
-    const ensure = buildAgentDirectActorEnsure(runtime);
+    const ensure = buildEnsure(runtime);
 
     await ensure(injectionWith({ capital: '1000' }));
     expect(construct).toHaveBeenCalledTimes(1);
@@ -86,7 +103,7 @@ describe('buildAgentDirectActorEnsure', () => {
 
   it('2. cache hit + actor deregistered (simulated onCrashed) → reconstructs, subsequent ensure succeeds', async () => {
     const { runtime, construct } = makeRuntime();
-    const ensure = buildAgentDirectActorEnsure(runtime);
+    const ensure = buildEnsure(runtime);
 
     await ensure(injectionWith({ capital: '1000' }));
     expect(construct).toHaveBeenCalledTimes(1);
@@ -105,7 +122,7 @@ describe('buildAgentDirectActorEnsure', () => {
 
   it('3. cache hit + actor stopped-not-crashed (registered, isRunning=false) → reconstructs', async () => {
     const { runtime, construct } = makeRuntime();
-    const ensure = buildAgentDirectActorEnsure(runtime);
+    const ensure = buildEnsure(runtime);
 
     await ensure(injectionWith({ capital: '1000' }));
     expect(construct).toHaveBeenCalledTimes(1);
@@ -120,17 +137,18 @@ describe('buildAgentDirectActorEnsure', () => {
 
   it('4. concurrent invocation during reconstruction → exactly ONE construct+start sequence', async () => {
     const { runtime, construct, stopAndDeregister } = makeRuntime();
-    const ensure = buildAgentDirectActorEnsure(runtime);
+    const ensure = buildEnsure(runtime);
 
     await ensure(injectionWith({ capital: '1000' }));
     expect(construct).toHaveBeenCalledTimes(1);
 
-    // Change the spec so the next call reconstructs; fire three concurrent
-    // invocations (mirrors the live LLM submitting 2–3 decisions per tick).
+    // Change the selected profile revision so the next call reconstructs; fire
+    // three concurrent invocations (mirrors multiple decisions in one tick).
+    profile = { ...profile, capital: '2000', revision: 2n };
     const calls = [
-      ensure(injectionWith({ capital: '2000' })),
-      ensure(injectionWith({ capital: '2000' })),
-      ensure(injectionWith({ capital: '2000' })),
+      ensure(injectionWith()),
+      ensure(injectionWith()),
+      ensure(injectionWith()),
     ];
     await Promise.all(calls);
 
@@ -159,7 +177,7 @@ describe('buildAgentDirectActorEnsure', () => {
       runtime.actorRegistry.set(actor.agentId, actor as never);
       return actor;
     });
-    const ensure = buildAgentDirectActorEnsure(runtime);
+    const ensure = buildEnsure(runtime);
 
     await expect(ensure(injectionWith({ capital: '1000' }))).rejects.toThrow('start failed');
     expect(construct).toHaveBeenCalledTimes(1);
@@ -173,22 +191,55 @@ describe('buildAgentDirectActorEnsure', () => {
     expect(construct).toHaveBeenCalledTimes(2); // cached — no extra construct
   });
 
-  it('6. ownerMode change → reconstructs (Option A: mode is construct-time actor state)', async () => {
+  it('retry recovery is scoped to the failed actor identity', async () => {
     const { runtime, construct } = makeRuntime();
-    const ensure = buildAgentDirectActorEnsure(runtime);
+    let failAgentOne = true;
+    construct.mockImplementation((spec: AgentActorSpec): FakeActor => {
+      const actor: FakeActor = {
+        agentId: spec.agentId,
+        isRunning: false,
+        start: vi.fn(async () => {
+          if (spec.agentId === 'agent-1' && failAgentOne) throw new Error('agent-1 binding unavailable');
+          actor.isRunning = true;
+          runtime.actorRegistry.set(actor.agentId, actor as never);
+        }),
+      };
+      runtime.actorRegistry.set(actor.agentId, actor as never);
+      return actor;
+    });
+    const profiles = new Map<string, StoredTradingProfile>([
+      ['agent-1', profile],
+      ['agent-2', profile],
+    ]);
+    const ensure = buildAgentDirectActorEnsure(runtime, async (_ownerId, actorId) => profiles.get(actorId) ?? null);
 
-    await ensure({ ...injectionWith({ capital: '1000' }), ownerMode: 'paper' });
+    await expect(ensure(baseInjection)).rejects.toThrow('agent-1 binding unavailable');
+    await ensure({ ...baseInjection, actorId: 'agent-2' });
+    failAgentOne = false;
+    await ensure(baseInjection);
+
+    expect(runtime.actorRegistry.get('agent-1')?.isRunning).toBe(true);
+    expect(runtime.actorRegistry.get('agent-2')?.isRunning).toBe(true);
+    expect(construct).toHaveBeenCalledTimes(3);
+  });
+
+  it('6. selected profile mode change → reconstructs', async () => {
+    const { runtime, construct } = makeRuntime();
+    const ensure = buildEnsure(runtime);
+
+    await ensure(injectionWith());
     expect(construct).toHaveBeenCalledTimes(1);
 
-    // Same capital but a live-mode flip: the actor must be torn down and rebuilt
-    // because ownerMode selects the Paper/Shadow/Live executor at construct time.
-    await ensure({ ...injectionWith({ capital: '1000' }), ownerMode: 'live' });
+    // The selected profile is the sole mode authority and a revision change must
+    // rebuild the actor because execution mode is construct-time state.
+    profile = { ...profile, executionDefaults: { mode: 'live' }, revision: 2n };
+    await ensure(injectionWith());
     expect(construct).toHaveBeenCalledTimes(2);
   });
 
   it('7. same ownerMode (no other change) → fast path preserved', async () => {
     const { runtime, construct } = makeRuntime();
-    const ensure = buildAgentDirectActorEnsure(runtime);
+    const ensure = buildEnsure(runtime);
 
     await ensure({ ...injectionWith({ capital: '1000' }), ownerMode: 'shadow' });
     expect(construct).toHaveBeenCalledTimes(1);
@@ -197,14 +248,63 @@ describe('buildAgentDirectActorEnsure', () => {
     expect(construct).toHaveBeenCalledTimes(1); // no change → fast path
   });
 
+  it('keeps two agent actors on the same venue account isolated by actor identity', async () => {
+    const { runtime, construct } = makeRuntime();
+    const profiles = new Map<string, StoredTradingProfile>([
+      ['agent-1', profile],
+      ['agent-2', { ...profile, revision: 2n }],
+    ]);
+    const ensure = buildAgentDirectActorEnsure(runtime, async (_ownerId, actorId) => profiles.get(actorId) ?? null);
+
+    await ensure(baseInjection);
+    await ensure({ ...baseInjection, actorId: 'agent-2' });
+    await ensure(baseInjection);
+
+    expect(construct).toHaveBeenCalledTimes(2);
+    expect(runtime.actorRegistry.get('agent-1')?.isRunning).toBe(true);
+    expect(runtime.actorRegistry.get('agent-2')?.isRunning).toBe(true);
+  });
+
+  it('stops the previous actor before starting when the selected venue binding changes', async () => {
+    const events: string[] = [];
+    const { runtime, construct, stopAndDeregister } = makeRuntime();
+    stopAndDeregister.mockImplementation(async (actor: FakeActor) => {
+      events.push(`stop:${actor.agentId}`);
+      actor.isRunning = false;
+      runtime.actorRegistry.delete(actor.agentId);
+    });
+    construct.mockImplementation((spec: AgentActorSpec): FakeActor => {
+      const actor: FakeActor = {
+        agentId: spec.agentId,
+        isRunning: false,
+        start: vi.fn(async () => {
+          events.push(`start:${spec.venueAccountId}`);
+          actor.isRunning = true;
+          runtime.actorRegistry.set(actor.agentId, actor as never);
+        }),
+      };
+      runtime.actorRegistry.set(actor.agentId, actor as never);
+      return actor;
+    });
+    const ensure = buildEnsure(runtime);
+
+    await ensure(baseInjection);
+    profile = { ...profile, revision: 2n };
+    await ensure({ ...baseInjection, venueAccountId: 'va-2' });
+
+    expect(events).toEqual(['start:va-1', 'stop:agent-1', 'start:va-2']);
+    expect(construct).toHaveBeenCalledTimes(2);
+  });
+
   it('regression: reconstruction logs "agent-direct actor constructed + started" exactly once per rebuild', async () => {
     const { runtime, construct } = makeRuntime();
-    const ensure = buildAgentDirectActorEnsure(runtime);
+    const ensure = buildEnsure(runtime);
     infoSpy.mockClear();
 
-    await ensure(injectionWith({ capital: '1000' }));
-    await ensure(injectionWith({ capital: '1000' })); // fast path — no extra log
-    await ensure(injectionWith({ capital: '2000' })); // spec change → rebuild
+    await ensure(injectionWith());
+    await ensure(injectionWith()); // fast path — no extra log
+    profile = { ...profile, capital: '2000', revision: 2n };
+    await ensure(injectionWith()); // profile change → rebuild
 
     expect(construct).toHaveBeenCalledTimes(2);
     const messages = infoSpy.mock.calls.map((c) => String(c[c.length - 1]));

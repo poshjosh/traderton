@@ -15,6 +15,7 @@ import { isReadOnlyCategory } from '@traderton/domain';
 import {
   createDatabase,
   BotRepository,
+  AgentTradingProfileRepository,
   InstrumentRepository,
   BoundaryInvocationRepository,
   computeRequestFingerprint,
@@ -25,7 +26,6 @@ import {
   createScannerCandleFetcherFromConfig,
   createScannerPoolResolverFromConfig,
   buildRiskContractOpsFromRiskSource,
-  riskSourceIsEmpty,
   type RiskSource,
 } from '@traderton/worker';
 import {
@@ -82,6 +82,7 @@ async function main(): Promise<void> {
   });
   const db = createDatabase(appConfig.database.url);
   const botRepo = new BotRepository(db);
+  const profileRepo = new AgentTradingProfileRepository(db);
   const instrumentRepo = new InstrumentRepository(db);
   const runtime = createTradingRuntime({
     config: appConfig,
@@ -98,7 +99,10 @@ async function main(): Promise<void> {
   // hosts the implementation + its A1/A2 stability fixes): constructed once
   // per process, closed over the runtime, and invoked per venue-resolving
   // agent invocation in the context factory below.
-  const ensureAgentDirectActor = buildAgentDirectActorEnsure(runtime);
+  const ensureAgentDirectActor = buildAgentDirectActorEnsure(
+    runtime,
+    (ownerId, actorId, venueAccountId) => profileRepo.getByOwnerActorVenueAccount(ownerId, actorId, venueAccountId),
+  );
 
   // ── Venue-aware candle fetcher for read-only scoring tools (score_candidate).
   //    Candles are fetched BEHIND the boundary (legal-isolation: the consumer
@@ -269,29 +273,31 @@ async function main(): Promise<void> {
 
     const injection = resolution.injection;
 
-    // ── A3: the RiskSource seam ─────────────────────────────────────────────
-    // The consumer attaches its risk spec (capital/riskPosture/riskOverrides —
-    // the same fields submit_decision already carries) to the read calls
-    // (get_risk_limits / get_account_summary). The subject resolver extracted
-    // it onto injection.agentRiskSpec; the ops read it through ONE narrow
-    // interface (RiskSource) — never ad-hoc payload fields — so B1's
-    // profile-store swap is a one-adapter change. Absent spec → the ops are
-    // not constructed and the tools degrade (get_risk_limits via the factory
-    // throw → precondition.not_ready; get_account_summary via its graceful
-    // warnings shape).
-    const riskSpec = injection.agentRiskSpec;
-    const riskSource: RiskSource | undefined = riskSpec
+    // C1: the profile is Traderton-owned enforcement state. The verified owner,
+    // signed actor, and verified venue-account coordinate form its exact key.
+    const profile = request.actor.type === 'agent' && injection.venueAccountId
+      ? await profileRepo.getByOwnerActorVenueAccount(request.ownerId, request.actor.id, injection.venueAccountId)
+      : null;
+    const riskSource: RiskSource | undefined = profile
       ? {
-          capital: riskSpec.capital ?? null,
-          // riskPosture is already RiskPostureSchema-validated by the subject resolver.
-          riskPosture: riskSpec.riskPosture ?? null,
-          riskOverrides: (riskSpec.riskOverrides ?? {}) as RiskSource['riskOverrides'],
+          capital: profile.capital,
+          riskPosture: profile.riskPosture,
+          riskOverrides: profile.riskOverrides,
         }
       : undefined;
-    const riskContractOps = riskSource && !riskSourceIsEmpty(riskSource)
+    const riskContractOps = riskSource
       ? buildRiskContractOpsFromRiskSource({
           agentRiskDefaults: appConfig.agentRiskDefaults,
           source: riskSource,
+          setRiskOverrides: async (riskOverrides) => {
+            const updated = await profileRepo.replaceRiskOverrides({
+              ownerId: request.ownerId,
+              actorId: request.actor.id,
+              venueAccountId: injection.venueAccountId,
+              riskOverrides,
+            });
+            if (!updated) throw new Error('trading profile disappeared while updating risk overrides');
+          },
         })
       : undefined;
 
@@ -308,19 +314,18 @@ async function main(): Promise<void> {
     // operator default (`execution.defaultOwnerMode`, static — no per-agent
     // source exists). B1's trading profile becomes the per-agent source later,
     // with this static default as the fallback.
+    const profileInjection = profile?.executionDefaults?.mode
+      ? { ...injection, ownerMode: profile.executionDefaults.mode }
+      : injection;
     if (!skipVenueResolution && request.actor.type === 'agent') {
-      await ensureAgentDirectActor(injection);
+      await ensureAgentDirectActor(profileInjection);
     }
-    const publishToInbound = runtime.createDriveTarget(injection);
+    const publishToInbound = runtime.createDriveTarget(profileInjection);
 
-    // A3: get_risk_limits over the boundary REQUIRES a risk spec — the whole
-    // tool is the contract read; serving it without one would fabricate
-    // operator-default limits the platform did not assert. A missing spec is a
-    // readiness failure (the consumer must attach it) → throw so the dispatcher
-    // returns `precondition.not_ready` (retryable). get_account_summary is NOT
-    // gated here — it keeps its graceful `*_unavailable` warnings degrade.
+    // Risk reads are profile-only. A missing profile is a readiness failure;
+    // operator defaults must never become a payload-free fallback authority.
     if (request.toolName === 'get_risk_limits' && !riskContractOps) {
-      throw new Error('risk context unavailable: the consumer did not attach a risk spec to this invocation');
+      throw new Error('risk context unavailable: the selected trading profile is missing');
     }
 
     return {
@@ -329,7 +334,7 @@ async function main(): Promise<void> {
       // The signed owner id — owner-scoped write tools (provision_venue_account)
       // write it to the soft `ownerId` columns (L3-P1).
       ownerId: request.ownerId,
-      executionMode: injection.ownerMode,
+      executionMode: profile?.executionDefaults?.mode ?? injection.ownerMode,
       // The boundary executes what it is given — human approvals are the
       // consumer's PRE-boundary job (CANONICAL-STATE D3/§3.2 P2): Traderton owns
       // no approval machinery, so `authorizationMode` is 'direct'. A consumer
@@ -361,14 +366,8 @@ async function main(): Promise<void> {
       economicCalendarProvider: economicCalendarProvider as unknown as TradingToolContext['economicCalendarProvider'],
       // Raw Drizzle handle for tools that write tables directly (provisioning).
       db,
-      // ── A3: risk/account context over the RiskSource seam ─────────────────
-      // riskContractOps: the copied source-agnostic ops bound to the per-call
-      // payload spec (undefined when absent — tools degrade). agentRepo: a thin
-      // adapter over the SAME seam so get_risk_limits' buildRuntime daily-loss
-      // math and get_account_summary's capital come from the single source (no
-      // ad-hoc payload reads). executionConfig: the agent's execution mode rides
-      // the injection (ownerMode ceiling); sizing fields have no platform source
-      // over the boundary — null, as the tool's degrade expects.
+      // Profile-backed risk and account context. No decision payload field is an
+      // enforcement input after C1.
       riskContractOps,
       agentRepo: riskSource ? {
         getAgent: async (_agentId: string) => ({
@@ -378,7 +377,7 @@ async function main(): Promise<void> {
       } satisfies Pick<NonNullable<TradingToolContext['agentRepo']>, 'getAgent'> : undefined,
       executionConfig: {
         getExecutionConfig: async () => ({
-          mode: injection.ownerMode,
+          mode: profile?.executionDefaults?.mode ?? null,
           positionSizeMode: null,
           fixedPositionSize: null,
         }),

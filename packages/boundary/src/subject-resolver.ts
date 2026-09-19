@@ -10,8 +10,6 @@
 // injects VALUES ONLY (reads db rows and derives coordinates); it authors NO
 // trading behaviour. The copied drive target ALSO re-checks bot ownership — the
 // ownership check here is defence in depth, not a replacement.
-import { RiskPostureSchema } from '@traderton/domain';
-import type { RiskPosture } from '@traderton/domain';
 
 
 /** A resolution outcome — either the injection VALUES or a typed boundary failure. */
@@ -27,22 +25,6 @@ export interface ResolvedInjection {
   venue: string;
   venueType: 'orderbook' | 'swap';
   venueAccountId: string;
-  /**
-   * Consumer-injected platform risk context. Attached by the consumer to every
-   * tool payload that needs it (submit_decision, get_risk_limits,
-   * get_account_summary); absent for the rest. The agent-direct actor ensure
-   * consumes these at construct/start time — capital anchors EquityTracker
-   * peak, riskPosture + riskOverrides feed buildAgentRiskLimits (creator-set
-   * values beat operator defaults). Values ride the HMAC-signed payload (005
-   * M2 adapter: "herobids injects the platform-owned values it still holds …
-   * at the call site") — the boundary process cannot read the consumer's
-   * `agents` table (locked: no `agents`-table dependency, 017 §4 / 019 §1).
-   */
-  agentRiskSpec?: {
-    capital?: string;
-    riskPosture?: RiskPosture;
-    riskOverrides?: Record<string, number | undefined>;
-  };
 }
 
 /** The bot row the resolver reads (the subset it needs for coordinates + ownership). */
@@ -108,55 +90,6 @@ function venueAccountIdOf(payload: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Extract the consumer-injected agent risk context from a validated tool
- * payload (any tool that declares the spec fields — submit_decision,
- * get_risk_limits, get_account_summary; the schemas declare the fields so
- * they survive the dispatcher's `payloadParse`). Absent/invalid-shaped fields
- * are omitted — the actor ensure then falls back to operator defaults
- * (graceful, and backward-compatible with consumers that don't send them).
- * `riskPosture` is validated against the canonical `RiskPostureSchema` — a
- * payload that fails validation degrades to no posture (operator defaults)
- * rather than smuggling unvalidated values into the risk contract.
- */
-function agentRiskSpecOf(payload: unknown): ResolvedInjection['agentRiskSpec'] | undefined {
-  if (!payload || typeof payload !== 'object') return undefined;
-  const p = payload as Record<string, unknown>;
-  const capital = typeof p['capital'] === 'string' && p['capital'].trim() ? p['capital'] : undefined;
-  const riskPosture = RiskPostureSchema.nullable().safeParse(p['riskPosture']);
-  const validatedPosture = riskPosture.success && riskPosture.data ? riskPosture.data : undefined;
-  const rawOverrides = (p['riskOverrides'] && typeof p['riskOverrides'] === 'object' && !Array.isArray(p['riskOverrides']))
-    ? (p['riskOverrides'] as Record<string, unknown>)
-    : undefined;
-  if (capital === undefined && validatedPosture === undefined && rawOverrides === undefined) return undefined;
-  const riskOverrides: Record<string, number | undefined> | undefined = rawOverrides
-    ? Object.fromEntries(
-        Object.entries(rawOverrides).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
-      )
-    : undefined;
-  if (capital === undefined && validatedPosture === undefined && (!riskOverrides || Object.keys(riskOverrides).length === 0)) return undefined;
-  return {
-    ...(capital !== undefined ? { capital } : {}),
-    ...(validatedPosture !== undefined ? { riskPosture: validatedPosture } : {}),
-    ...(riskOverrides !== undefined && Object.keys(riskOverrides).length > 0 ? { riskOverrides } : {}),
-  };
-}
-
-/**
- * Read the consumer-injected platform `executionMode` from a validated tool
- * payload, if valid. This is the Option-A per-agent mode the consumer stamps
- * POST-LLM from its own `agents.execution_defaults.mode` (the signed, LLM-never-
- * sees-it value) — the boundary process cannot read the consumer's `agents` table
- * (locked). Absent/invalid → undefined (fall back to the operator default).
- */
-function injectedModeOf(payload: unknown): 'paper' | 'shadow' | 'live' | undefined {
-  if (payload && typeof payload === 'object') {
-    const mode = (payload as Record<string, unknown>)['executionMode'];
-    if (mode === 'paper' || mode === 'shadow' || mode === 'live') return mode;
-  }
-  return undefined;
-}
-
 /** Read the requested execution mode from a create-bot payload (`config.execution.mode`), if valid. */
 function requestedModeOf(payload: unknown): 'paper' | 'shadow' | 'live' | undefined {
   if (payload && typeof payload === 'object') {
@@ -210,13 +143,7 @@ function resolveNoBotOwnerMode(
   ports: SubjectResolverPorts,
 ): 'paper' | 'shadow' | 'live' {
   if (subject.actor.type === 'agent') {
-    // Option A (signed injected per-agent mode): the consumer's platform mode is
-    // authoritative when present — an agent carries its REAL configured mode, not
-    // a static guess. Fall back to the operator default (getDefaultOwnerMode →
-    // `execution.defaultOwnerMode` → 'paper') when the consumer did not inject
-    // one (backward-compatible). This resolves the swap-venue gap: a shadow agent
-    // can now author a shadow bot, and the escalation ceiling is per-agent.
-    return injectedModeOf(payload) ?? ports.getDefaultOwnerMode?.(subject.ownerId) ?? 'paper';
+    return ports.getDefaultOwnerMode?.(subject.ownerId) ?? 'paper';
   }
   return requestedModeOf(payload) ?? 'paper';
 }
@@ -288,21 +215,22 @@ export async function resolveSubjectInjection(
   // which creates the owner's FIRST account). Short-circuit to a minimal
   // injection — venue fields empty, never consumed. Authors no trading behaviour.
   if (skipVenueResolution) {
-    // A3: the risk spec rides the read calls too (get_risk_limits /
-    // get_account_summary are read-only → this skip path). Extract it BEFORE
-    // the short-circuit so the context factory can bind the ops via the single
-    // RiskSource seam — the venue fields stay empty/never consumed.
-    const skipPathRiskSpec = agentRiskSpecOf(payload);
+    const requestedVenueAccountId = venueAccountIdOf(payload);
+    const account = requestedVenueAccountId
+      ? (await ports.listVenueAccountsByOwner(subject.ownerId)).find((candidate) => candidate.id === requestedVenueAccountId)
+      : undefined;
+    if (requestedVenueAccountId && !account) {
+      return { ok: false, code: 'authorization.denied', message: 'venue account not owned by subject' };
+    }
     return {
       ok: true,
       injection: {
         ownerId: subject.ownerId,
         actorId: subject.actor.id,
         ownerMode: 'paper',
-        venue: '',
+        venue: account?.venue ?? '',
         venueType: 'orderbook',
-        venueAccountId: '',
-        ...(skipPathRiskSpec ? { agentRiskSpec: skipPathRiskSpec } : {}),
+        venueAccountId: account?.id ?? '',
       },
     };
   }
@@ -349,7 +277,6 @@ export async function resolveSubjectInjection(
   // The consumer-injected agent risk context (capital/riskPosture/riskOverrides)
   // rides the same validated payload — attached to whichever injection this
   // path returns so the agent-direct actor ensure can consume it.
-  const agentRiskSpec = agentRiskSpecOf(payload);
   const accounts = await ports.listVenueAccountsByOwner(subject.ownerId);
   const requestedVenueAccountId = venueAccountIdOf(payload);
 
@@ -372,7 +299,6 @@ export async function resolveSubjectInjection(
         venue: requested.venue,
         venueType: venueTypeFor(requested.venue),
         venueAccountId: requested.id,
-        ...(agentRiskSpec ? { agentRiskSpec } : {}),
       },
     };
   }
@@ -406,7 +332,6 @@ export async function resolveSubjectInjection(
       venue: account.venue,
       venueType: venueTypeFor(account.venue),
       venueAccountId: account.id,
-      ...(agentRiskSpec ? { agentRiskSpec } : {}),
     },
   };
 }

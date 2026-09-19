@@ -254,9 +254,7 @@ describe('get_risk_limits tool', () => {
   });
 });
 
-const SPEC_FIELDS = ['capital', 'riskPosture', 'riskOverrides'];
-
-describe('risk spec leak into LLM-facing parameters schema (A3 review fix)', () => {
+describe('profile-backed selected venue inputs', () => {
   const getRiskLimits = riskLimitsTools.find((t) => t.name === 'get_risk_limits')!;
   const getAccountSummary = accountTools.find((t) => t.name === 'get_account_summary')!;
 
@@ -264,37 +262,28 @@ describe('risk spec leak into LLM-facing parameters schema (A3 review fix)', () 
     return (tool.parameters['properties'] ?? {}) as Record<string, unknown>;
   }
 
-  it('get_risk_limits.parameters omits the spec fields', () => {
+  it('keeps the selected venue account out of the LLM-facing get_risk_limits schema', () => {
     const props = propertiesOf(getRiskLimits);
-    for (const field of SPEC_FIELDS) expect(props).not.toHaveProperty(field);
+    expect(props).not.toHaveProperty('venueAccountId');
   });
 
-  it('get_account_summary.parameters omits the spec fields', () => {
+  it('keeps the selected venue account out of the LLM-facing account schema', () => {
     const props = propertiesOf(getAccountSummary);
-    for (const field of SPEC_FIELDS) expect(props).not.toHaveProperty(field);
+    expect(props).not.toHaveProperty('venueAccountId');
   });
 
-  it('submit_decision.parameters omits the spec fields', () => {
+  it('declares the selected venue account in the boundary input schemas', () => {
     const submitDecision = tradingTools.find((t) => t.name === 'submit_decision')!;
-    const props = propertiesOf(submitDecision);
-    for (const field of SPEC_FIELDS) expect(props).not.toHaveProperty(field);
-  });
-
-  it('parametersSchema (Zod) still validates the full spec payload', () => {
-    const parsed = getRiskLimits.parametersSchema.safeParse({
-      capital: '1000',
-      riskPosture: { maxPositionSizePct: 5 },
-      riskOverrides: { maxOpenPositions: 3 },
-    });
-    expect(parsed.success).toBe(true);
+    expect(getRiskLimits.parametersSchema.safeParse({ venueAccountId: 'venue-1' }).success).toBe(true);
+    expect(getAccountSummary.parametersSchema.safeParse({ venueAccountId: 'venue-1' }).success).toBe(true);
+    expect(submitDecision.parametersSchema.safeParse({ venueAccountId: 'venue-1' }).success).toBe(false);
   });
 });
 
-describe('adjust_risk_limits tool', () => {  // A3 FAIL-CLOSED: the write has no durable traderton-owned home until the
-  // profile store (B1) exists. Every adjust attempt returns the typed
-  // precondition regardless of context — never a write, never a silent pass.
-  it('returns the typed precondition.not_ready fail-closed regardless of riskContractOps', async () => {
-    const adjustOverrides = vi.fn();
+describe('adjust_risk_limits tool', () => {
+  it('persists mutable overrides through the profile-backed contract and returns updated limits', async () => {
+    const updatedContract = makeContract({ maxOpenPositions: { effectiveValue: 7, source: 'agent_override', mutable: true, operatorCeiling: 10, overrideValue: 7 } });
+    const adjustOverrides = vi.fn().mockResolvedValue({ ok: true, contract: updatedContract });
     const ctx = makeCtx({
       riskContractOps: {
         getContract: vi.fn(),
@@ -302,30 +291,25 @@ describe('adjust_risk_limits tool', () => {  // A3 FAIL-CLOSED: the write has no
       },
     });
 
-    const result = await adjustRiskLimitsTool.execute({ maxOpenPositions: 7 }, ctx);
+    const result = await adjustRiskLimitsTool.execute({ venueAccountId: 'venue-1', maxOpenPositions: 7 }, ctx);
 
-    expect(result.success).toBe(false);
-    expect(result.errorCode).toBe('precondition.not_ready');
-    expect(result.fault).toBe(false);
-    expect(result.error).toContain('B1');
-    // The in-process ops are NEVER touched (fail-closed).
-    expect(adjustOverrides).not.toHaveBeenCalled();
+    expect(adjustOverrides).toHaveBeenCalledWith({ maxOpenPositions: 7 });
+    expect(result).toMatchObject({ success: true, data: { ok: true, limits: { maxOpenPositions: { value: 7, source: 'agent_override' } } } });
   });
 
-  it('returns the typed precondition even with no riskContractOps at all', async () => {
+  it('returns a non-fault contract error when the profile-backed risk operations are unavailable', async () => {
     const ctx = makeCtx();
-    const result = await adjustRiskLimitsTool.execute({ maxOpenPositions: 5 }, ctx);
+    const result = await adjustRiskLimitsTool.execute({ venueAccountId: 'venue-1', maxOpenPositions: 5 }, ctx);
     expect(result.success).toBe(false);
-    expect(result.errorCode).toBe('precondition.not_ready');
-    expect(result.fault).toBe(false);
+    expect(result.error).toContain('not available');
   });
 
-  it('returns the typed precondition even for an empty payload', async () => {
+  it('rejects an adjustment with no mutable limits', async () => {
     const ctx = makeCtx({
       riskContractOps: { getContract: vi.fn(), adjustOverrides: vi.fn() },
     });
-    const result = await adjustRiskLimitsTool.execute({}, ctx);
+    const result = await adjustRiskLimitsTool.execute({ venueAccountId: 'venue-1' }, ctx);
     expect(result.success).toBe(false);
-    expect(result.errorCode).toBe('precondition.not_ready');
+    expect(result.error).toContain('No fields');
   });
 });

@@ -1,46 +1,10 @@
-// A3 tests — end-to-end read parity + typed fail-closed write, over the
-// boundary app (`app.inject`, no network). Real copied tools are registered;
-// the context factory binds `riskContractOps` behind the RiskSource seam the
-// same way bin.ts does (payload spec → RiskSource → buildRiskContractOps
-// FromRiskSource). Proves:
-//   1. `get_risk_limits` with an attached spec returns REAL contract fields
-//      (capital-derived provenance) — the same composite shape the in-process
-//      tool builds.
-//   2. `get_risk_limits` WITHOUT a spec → `precondition.not_ready` (the
-//      context factory throws; the dispatcher maps it).
-//   3. `adjust_risk_limits` fails CLOSED with a typed `precondition.not_ready`
-//      (A8's split assertion: reads work AND the write fails typed).
-//   4. get_account_summary keeps its graceful degrade shape when the spec is
-//      absent, and populates riskLimits/capital-derived warnings with one.
+import { beforeEach, describe, expect, it } from 'vitest';
+import type { AgentRiskDefaultsConfig, AgentRiskOverrides, TradingToolContext } from '@traderton/domain';
+import { accountTools, buildRiskContractOpsFromRiskSource, riskLimitsTools } from '@traderton/worker';
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { createHash, createHmac } from 'node:crypto';
-import type { TradingToolContext } from '@traderton/domain';
-import type { AgentRiskDefaultsConfig } from '@traderton/domain';
-import {
-  ToolRegistry,
-  accountTools,
-  riskLimitsTools,
-  buildRiskContractOpsFromRiskSource,
-  riskSourceIsEmpty,
-  type RiskSource,
-} from '@traderton/worker';
-import { createBoundaryApp } from './app.js';
-import type { BoundaryConfig } from './config.js';
-import type { TradingToolContextFactory, BoundaryInvocationStore, ContextFactoryRequest } from './dispatcher.js';
-
-const CONSUMER_ID = 'consumerA';
-const KEY_ID = 'current';
-const SECRET = 'test-signing-secret';
-const NOW = Date.parse('2026-01-01T00:00:00.000Z');
-const INVOKE_PATH = '/internal/v1/tools:invoke';
-
-const CONFIG: BoundaryConfig = {
-  clockSkewMs: 30_000,
-  allowedConsumers: { [CONSUMER_ID]: { keyId: KEY_ID, secret: SECRET } },
-};
-
-const AGENT_RISK_DEFAULTS = {
+const AGENT_ID = 'agent-1';
+const VENUE_ACCOUNT_ID = 'venue-1';
+const AGENT_RISK_DEFAULTS: AgentRiskDefaultsConfig = {
   maxOpenPositions: 10,
   maxPositionSizePct: 100,
   stopLossPct: 10,
@@ -48,202 +12,137 @@ const AGENT_RISK_DEFAULTS = {
   maxDrawdownPct: 20,
   dailyMaxLossPct: 20,
   maxOrderNotionalMultiplier: 1,
-} as AgentRiskDefaultsConfig;
-
-const SPEC = {
-  capital: '1000',
-  riskPosture: { maxOpenPositions: 3, stopLossPct: 5, dailyMaxLossPct: 20 },
-  riskOverrides: { maxDrawdownPct: 5 },
 };
 
-/** Build the ops from the payload spec exactly as bin.ts does (the seam). */
-function riskSourceFromPayload(payload: unknown): RiskSource | undefined {
-  if (!payload || typeof payload !== 'object') return undefined;
-  const p = payload as Record<string, unknown>;
-  const capital = typeof p['capital'] === 'string' ? p['capital'] : undefined;
-  const riskPosture = (p['riskPosture'] && typeof p['riskPosture'] === 'object') ? p['riskPosture'] as RiskSource['riskPosture'] : undefined;
-  const riskOverrides = (p['riskOverrides'] && typeof p['riskOverrides'] === 'object') ? p['riskOverrides'] as RiskSource['riskOverrides'] : undefined;
-  const source: RiskSource = {
-    capital: capital ?? null,
-    riskPosture: riskPosture ?? null,
-    riskOverrides: riskOverrides ?? {},
-  };
-  return riskSourceIsEmpty(source) ? undefined : source;
+interface StoredProfile {
+  capital: string | null;
+  riskPosture: Record<string, unknown> | null;
+  riskOverrides: AgentRiskOverrides;
+  executionDefaults: { mode: 'paper' | 'shadow' | 'live' } | null;
 }
 
-function makeContextFactory(opts: { withSpec: boolean }): TradingToolContextFactory {
-  return async (request: ContextFactoryRequest): Promise<TradingToolContext> => {
-    const source = opts.withSpec ? riskSourceFromPayload(request.payload) : undefined;
-    const riskContractOps = source
-      ? buildRiskContractOpsFromRiskSource({ agentRiskDefaults: AGENT_RISK_DEFAULTS, source })
-      : undefined;
-    if (request.toolName === 'get_risk_limits' && !riskContractOps) {
-      throw new Error('risk context unavailable: the consumer did not attach a risk spec to this invocation');
-    }
-    return {
-      agentId: request.actor.id,
-      sessionId: `boundary:${request.ownerId}`,
-      ownerId: request.ownerId,
-      executionMode: 'paper',
-      authorizationMode: 'direct',
-      redis: {
-        hset: async () => 1, hget: async () => null, hgetall: async () => ({}),
-        hdel: async () => 1, publish: async () => 1, blpop: async () => null,
-        smembers: async () => [], sadd: async () => 1, srem: async () => 1, expire: async () => 1,
-      } as unknown as TradingToolContext['redis'],
-      publishToInbound: async () => {},
-      riskContractOps,
-      // get_account_summary hard-requires botRepo (its positions read) — bin.ts
-      // supplies the real repo in production; here a stub with empty positions.
-      botRepo: {
-        getOpenPositionsByCreator: async () => [],
-        getAnalyticsByCreator: async () => ({
-          realizedPnlUsd: '0', botCount: 0, openPositions: 0, closedPositions: 0,
-          winningPositions: 0, totalFeesUsd: '0', recentFills: 0, avgHoldTimeHours: null, byBot: [],
-        }),
-      } as unknown as TradingToolContext['botRepo'],
-      agentRepo: source ? {
-        getAgent: async () => ({ capital: source.capital, risk: (source.riskPosture ?? null) as Record<string, unknown> | null }),
-      } as unknown as TradingToolContext['agentRepo'] : undefined,
-      executionConfig: {
-        getExecutionConfig: async () => ({ mode: 'paper', positionSizeMode: null, fixedPositionSize: null }),
-      },
-    };
-  };
-}
+const getRiskLimits = riskLimitsTools.find((tool) => tool.name === 'get_risk_limits')!;
+const adjustRiskLimits = riskLimitsTools.find((tool) => tool.name === 'adjust_risk_limits')!;
+const getAccountSummary = accountTools.find((tool) => tool.name === 'get_account_summary')!;
 
-const FAKE_STORE: BoundaryInvocationStore = {
-  beginOrResolve: async () => ({ state: 'started' }) as Awaited<ReturnType<BoundaryInvocationStore['beginOrResolve']>>,
-  complete: async () => {},
-  findByRequestId: async () => null,
-} as unknown as BoundaryInvocationStore;
+let profiles: Map<string, StoredProfile>;
 
-function buildApp(opts: { withSpec: boolean }) {
-  const registry = new ToolRegistry();
-  for (const tool of [...riskLimitsTools, ...accountTools]) registry.register(tool);
-  return createBoundaryApp({
-    config: CONFIG,
-    registry,
-    contextFactory: makeContextFactory(opts),
-    invocationStore: FAKE_STORE,
-    computeRequestFingerprint: (r) =>
-      createHash('sha256').update(JSON.stringify([r.consumerId, r.toolName, r.ownerId, r.payload])).digest('hex'),
-    retentionMs: 3_600_000,
-    now: () => NOW,
-  });
-}
+function selectedContext(venueAccountId: string): TradingToolContext {
+  const profile = profiles.get(venueAccountId);
+  if (!profile) throw new Error('selected trading profile is missing');
 
-let seq = 0;
-async function invoke(toolName: string, payload: unknown): Promise<{ status: number; outcome: Record<string, unknown> }> {
-  const app = appRef!;
-  const envelope = {
-    contractVersion: '1.0',
-    requestId: `req-${++seq}`,
-    idempotencyKey: `idem-${seq}`,
-    correlationId: `corr-${seq}`,
-    issuedAt: new Date(NOW).toISOString(),
-    deadlineAt: new Date(NOW + 30_000).toISOString(),
-    caller: { consumerId: CONSUMER_ID, keyId: KEY_ID },
-    subject: { ownerId: 'owner-1', actor: { type: 'agent', id: 'agent-1' } },
-    toolName,
-    payload: payload ?? {},
-  };
-  const rawBody = JSON.stringify(envelope);
-  const timestamp = new Date(NOW).toISOString();
-  const bodyHash = createHash('sha256').update(Buffer.from(rawBody, 'utf8')).digest('hex');
-  const canonical = `POST\n${INVOKE_PATH}\n${timestamp}\n${bodyHash}`;
-  const sig = 'sha256=' + createHmac('sha256', SECRET).update(canonical).digest('hex');
-  const res = await app.inject({
-    method: 'POST',
-    url: INVOKE_PATH,
-    headers: {
-      'content-type': 'application/json',
-      'x-traderton-consumer-id': CONSUMER_ID,
-      'x-traderton-key-id': KEY_ID,
-      'x-traderton-timestamp': timestamp,
-      'x-traderton-signature': sig,
-      'x-request-deadline-at': new Date(NOW + 30_000).toISOString(),
+  const riskContractOps = buildRiskContractOpsFromRiskSource({
+    agentRiskDefaults: AGENT_RISK_DEFAULTS,
+    source: {
+      capital: profile.capital,
+      riskPosture: profile.riskPosture,
+      riskOverrides: profile.riskOverrides,
     },
-    payload: rawBody,
+    setRiskOverrides: async (riskOverrides) => {
+      const current = profiles.get(venueAccountId);
+      if (!current) throw new Error('selected trading profile disappeared while updating risk overrides');
+      profiles.set(venueAccountId, { ...current, riskOverrides });
+    },
   });
-  return { status: res.statusCode, outcome: (res.json() as Record<string, unknown>)['outcome'] as Record<string, unknown> };
+
+  return {
+    agentId: AGENT_ID,
+    sessionId: 'session-1',
+    ownerId: 'owner-1',
+    executionMode: profile.executionDefaults?.mode ?? 'paper',
+    authorizationMode: 'direct',
+    redis: {
+      hset: async () => 1, hget: async () => null, hgetall: async () => ({}),
+      hdel: async () => 1, publish: async () => 1, blpop: async () => null,
+      smembers: async () => [], sadd: async () => 1, srem: async () => 1, expire: async () => 1,
+    } as TradingToolContext['redis'],
+    publishToInbound: async () => {},
+    riskContractOps,
+    botRepo: {
+      getOpenPositionsByCreator: async () => [],
+      getAnalyticsByCreator: async () => ({
+        realizedPnlUsd: '0', botCount: 0, openPositions: 0, closedPositions: 0,
+        winningPositions: 0, totalFeesUsd: '0', recentFills: 0, avgHoldTimeHours: null, byBot: [],
+      }),
+    } as TradingToolContext['botRepo'],
+    agentRepo: {
+      getAgent: async () => ({ capital: profile.capital, risk: profile.riskPosture }),
+    },
+    executionConfig: {
+      getExecutionConfig: async () => ({
+        mode: profile.executionDefaults?.mode ?? null,
+        positionSizeMode: null,
+        fixedPositionSize: null,
+      }),
+    },
+  };
 }
 
-let appRef: ReturnType<typeof buildApp> | null = null;
+function replaceProfileConfiguration(venueAccountId: string, configuration: Omit<StoredProfile, 'riskOverrides'>): void {
+  const existing = profiles.get(venueAccountId);
+  if (!existing) throw new Error('selected trading profile is missing');
+  profiles.set(venueAccountId, { ...configuration, riskOverrides: existing.riskOverrides });
+}
 
-describe('A3 — boundary risk/account reads over the RiskSource seam', () => {
+describe('C1 selected trading-profile risk seam', () => {
   beforeEach(() => {
-    appRef = null;
+    profiles = new Map([[VENUE_ACCOUNT_ID, {
+      capital: '1000',
+      riskPosture: { maxOpenPositions: 3, dailyMaxLossPct: 20 },
+      riskOverrides: {},
+      executionDefaults: { mode: 'paper' },
+    }]]);
   });
 
-  it('get_risk_limits with an attached spec returns real contract fields (read parity)', async () => {
-    const app = buildApp({ withSpec: true });
-    appRef = app;
-    const { status, outcome } = await invoke('get_risk_limits', SPEC);
-    expect(status).toBe(200);
-    expect(outcome['kind']).toBe('success');
-    const data = outcome['payload'] as Record<string, unknown>;
-    // Creator-posture values win with provenance — real contract math, not stubs.
-    expect(data['limits']['maxOpenPositions']).toMatchObject({ value: 3, source: 'user', mutable: false, ceiling: 10 });
-    expect(data['limits']['stopLossPct']).toMatchObject({ value: 5, source: 'user', mutable: false, ceiling: 10 });
-    // The override caps under the ceiling with agent_override provenance.
-    expect(data['limits']['maxDrawdownPct']).toMatchObject({ value: 5, source: 'agent_override', mutable: true, ceiling: 20 });
-    // Runtime snapshot is composed (no botRepo over the boundary → daily loss '0').
-    const runtime = data['runtime'] as Record<string, unknown>;
-    const dailyLoss = runtime['dailyLoss'] as Record<string, unknown>;
-    expect(dailyLoss['current']).toBe('0');
-    // Daily-loss limit derived from the spec's capital × agentRepo-declared posture.
-    expect(dailyLoss['limit']).toBe('200'); // 1000 × 20%
+  it('reads risk and account state from the selected profile, not request payload authority', async () => {
+    const ctx = selectedContext(VENUE_ACCOUNT_ID);
+    const suppliedPayload = {
+      venueAccountId: VENUE_ACCOUNT_ID,
+      capital: '999999',
+      riskPosture: { maxOpenPositions: 9, dailyMaxLossPct: 1 },
+      executionDefaults: { mode: 'live' },
+    };
+
+    const risk = await getRiskLimits.execute(suppliedPayload, ctx);
+    const account = await getAccountSummary.execute(suppliedPayload, ctx);
+
+    expect(risk).toMatchObject({ success: true });
+    expect((risk.data as { limits: { maxOpenPositions: { value: number } } }).limits.maxOpenPositions.value).toBe(3);
+    expect(account).toMatchObject({ success: true, data: { capital: '1000' } });
+    await expect(ctx.executionConfig?.getExecutionConfig()).resolves.toMatchObject({ mode: 'paper' });
   });
 
-  it('get_risk_limits WITHOUT a spec → precondition.not_ready (typed, not silent)', async () => {
-    const app = buildApp({ withSpec: true });
-    appRef = app;
-    const { status, outcome } = await invoke('get_risk_limits', {});
-    expect(status).toBe(200);
-    expect(outcome['kind']).toBe('failure');
-    expect(outcome['code']).toBe('precondition.not_ready');
+  it('rejects selected profile reads when no persisted profile exists', () => {
+    expect(() => selectedContext('missing-venue')).toThrow('selected trading profile is missing');
   });
 
-  it('get_risk_limits when the factory never sees a spec (withSpec=false) → precondition.not_ready', async () => {
-    const app = buildApp({ withSpec: false });
-    appRef = app;
-    const { outcome } = await invoke('get_risk_limits', {});
-    expect(outcome['kind']).toBe('failure');
-    expect(outcome['code']).toBe('precondition.not_ready');
+  it('round-trips adjust_risk_limits overrides through the selected stored profile', async () => {
+    const adjustment = await adjustRiskLimits.execute({ venueAccountId: VENUE_ACCOUNT_ID, maxDrawdownPct: 5 }, selectedContext(VENUE_ACCOUNT_ID));
+
+    expect(adjustment).toMatchObject({ success: true });
+    expect(profiles.get(VENUE_ACCOUNT_ID)?.riskOverrides).toEqual({ maxDrawdownPct: 5 });
+    const read = await getRiskLimits.execute({ venueAccountId: VENUE_ACCOUNT_ID }, selectedContext(VENUE_ACCOUNT_ID));
+    expect((read.data as { limits: { maxDrawdownPct: { value: number; source: string } } }).limits.maxDrawdownPct)
+      .toEqual(expect.objectContaining({ value: 5, source: 'agent_override' }));
   });
 
-  it('adjust_risk_limits fails CLOSED with a typed precondition — no write, no silent pass (A8 split)', async () => {
-    const app = buildApp({ withSpec: true });
-    appRef = app;
-    const { outcome } = await invoke('adjust_risk_limits', { maxOpenPositions: 4, ...SPEC });
-    expect(outcome['kind']).toBe('failure');
-    expect(outcome['code']).toBe('precondition.not_ready');
-    expect(String(outcome['message'])).toContain('B1');
-  });
+  it('preserves persisted overrides when configuration writes replace profile fields', () => {
+    profiles.set(VENUE_ACCOUNT_ID, {
+      ...profiles.get(VENUE_ACCOUNT_ID)!,
+      riskOverrides: { maxOpenPositions: 4 },
+    });
 
-  it('get_account_summary with a spec populates riskLimits + capital from the same seam', async () => {
-    const app = buildApp({ withSpec: true });
-    appRef = app;
-    const { outcome } = await invoke('get_account_summary', SPEC);
-    expect(outcome['kind']).toBe('success');
-    const data = outcome['payload'] as Record<string, unknown>;
-    expect(data['capital']).toBe('1000');
-    expect(data['capitalAvailable']).toBe(true);
-    const riskLimits = data['riskLimits'] as Record<string, unknown>;
-    expect(riskLimits['maxOpenPositions']).toBe(3);
-    expect(riskLimits['maxOpenPositionsSource']).toBe('user');
-  });
+    replaceProfileConfiguration(VENUE_ACCOUNT_ID, {
+      capital: '2500',
+      riskPosture: { maxOpenPositions: 2 },
+      executionDefaults: { mode: 'shadow' },
+    });
 
-  it('get_account_summary WITHOUT a spec keeps the graceful warnings degrade', async () => {
-    const app = buildApp({ withSpec: false });
-    appRef = app;
-    const { outcome } = await invoke('get_account_summary', {});
-    expect(outcome['kind']).toBe('success');
-    const data = outcome['payload'] as Record<string, unknown>;
-    expect(data['capital']).toBeNull();
-    expect(data['riskLimits']).toBe('unavailable');
-    const warnings = data['warnings'] as string[];
-    expect(warnings).toContain('risk_contract_unavailable');
+    expect(profiles.get(VENUE_ACCOUNT_ID)).toEqual(expect.objectContaining({
+      capital: '2500',
+      riskPosture: { maxOpenPositions: 2 },
+      riskOverrides: { maxOpenPositions: 4 },
+      executionDefaults: { mode: 'shadow' },
+    }));
   });
 });

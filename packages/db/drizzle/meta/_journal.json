@@ -15,6 +15,20 @@
       "when": 1789033786621,
       "tag": "0001_yellow_killmonger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789830055554,
+      "tag": "0002_agent_trading_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789832543335,
+      "tag": "0003_dusty_banshee",
+      "breakpoints": true
     }
   ]
 }

@@ -7,6 +7,7 @@ import {
   type TradingRuntime,
   type AgentActorSpec,
 } from '@traderton/worker';
+import type { AgentRiskOverrides, ExecutionDefaults, RiskPosture } from '@traderton/domain';
 
 const logger = createLogger('boundary-agent-direct-ensure');
 
@@ -15,10 +16,12 @@ const logger = createLogger('boundary-agent-direct-ensure');
  * fields are declared in the tool's Zod schema so they survive the dispatcher's
  * `payloadParse` (bug-001 lesson) and are extracted by the subject resolver.
  */
-export interface AgentRiskSpec {
-  capital?: string;
-  riskPosture?: Record<string, unknown>;
-  riskOverrides?: Record<string, number | undefined>;
+export interface StoredTradingProfile {
+  capital: string | null;
+  riskPosture: RiskPosture | null;
+  riskOverrides: AgentRiskOverrides;
+  executionDefaults: ExecutionDefaults | null;
+  revision: bigint;
 }
 
 /**
@@ -66,6 +69,7 @@ export interface AgentRiskSpec {
  */
 export function buildAgentDirectActorEnsure(
   runtime: TradingRuntime,
+  getProfile: (ownerId: string, actorId: string, venueAccountId: string) => Promise<StoredTradingProfile | null>,
 ): (injection: {
   ownerId: string;
   actorId: string;
@@ -73,48 +77,43 @@ export function buildAgentDirectActorEnsure(
   venue: string;
   venueType: 'orderbook' | 'swap';
   venueAccountId: string;
-  agentRiskSpec?: AgentRiskSpec;
 }) => Promise<void> {
   interface CacheEntry {
     ensure: Promise<void>;
-    capital: string | undefined;
-    riskPostureKey: string;
-    riskOverridesKey: string;
-    ownerMode: 'paper' | 'shadow' | 'live';
+    revision: bigint;
+    venueAccountId: string;
   }
 
-  // Keyed by ownerId+actorId+venueAccountId: a re-point of the SAME agent to a
-  // DIFFERENT venue account must construct a fresh actor (the venueAccountId is
-  // injected into the actor's adapter, not looked up at call time).
+  // The actor registry itself is keyed by agent id. Cache at the same identity
+  // boundary so a selected-binding switch cannot fast-path a stale cache entry.
   const ensureCache = new Map<string, CacheEntry>();
 
-  const postureKey = (posture: Record<string, unknown> | undefined): string =>
-    JSON.stringify(posture ?? null);
-  const overridesKey = (overrides: Record<string, number | undefined> | undefined): string =>
-    JSON.stringify(overrides ?? null);
-
   return async (injection) => {
-    const key = `${injection.ownerId}::${injection.actorId}::${injection.venueAccountId}`;
-    const risk = injection.agentRiskSpec ?? {};
+    const key = `${injection.ownerId}::${injection.actorId}`;
+    const profile = await getProfile(injection.ownerId, injection.actorId, injection.venueAccountId);
+    if (!profile) {
+      throw new Error('selected agent trading profile is missing');
+    }
+    const mode = profile.executionDefaults?.mode;
+    if (!mode) {
+      throw new Error('selected agent trading profile has no execution mode');
+    }
     const existing = ensureCache.get(key);
 
     if (existing) {
       // Serialize behind the in-flight construction (if any) before deciding:
       // liveness is only meaningful once the construction has settled.
       await existing.ensure.catch(() => { /* failed prior construction → reconstruct below */ });
-      const capitalChanged = (risk.capital ?? undefined) !== existing.capital;
-      const postureChanged = postureKey(risk.riskPosture) !== existing.riskPostureKey;
-      const overridesChanged = overridesKey(risk.riskOverrides) !== existing.riskOverridesKey;
-      // Option A: executionMode is construct-time actor state (selects the
-      // Paper/Shadow/Live executor). A mode change must reconstruct the actor —
-      // the fast path would otherwise reuse a stale-mode actor (the A1/A2 class).
-      const modeChanged = injection.ownerMode !== existing.ownerMode;
       const alive = runtime.actorRegistry.get(injection.actorId)?.isRunning === true;
-      if (!capitalChanged && !postureChanged && !overridesChanged && !modeChanged && alive) {
-        return; // fast path — same spec, actor alive
+      if (
+        existing.revision === profile.revision
+        && existing.venueAccountId === injection.venueAccountId
+        && alive
+      ) {
+        return;
       }
       logger.warn(
-        { ownerId: injection.ownerId, agentId: injection.actorId, capitalChanged, postureChanged, overridesChanged, modeChanged, alive },
+        { ownerId: injection.ownerId, agentId: injection.actorId, revision: profile.revision.toString(), alive },
         'agent-direct actor ensure needs reconstruction — rebuilding',
       );
       // A2 re-read: concurrent callers awaiting the same stale entry resumed
@@ -144,28 +143,28 @@ export function buildAgentDirectActorEnsure(
       // itself returns from constructAndRegisterAgentActor; only agent actors
       // are ever keyed by an agent-subject actorId, so the cast is sound.
       const previous = runtime.actorRegistry.get(injection.actorId);
-      if (previous && previous.isRunning) {
+      if (previous) {
         const agentActor = previous as unknown as Parameters<
           typeof runtime.stopAndDeregisterAgentActor
         >[0];
-        await runtime.stopAndDeregisterAgentActor(agentActor).catch(() => { /* best-effort teardown */ });
+        await runtime.stopAndDeregisterAgentActor(agentActor);
       }
 
       const spec: AgentActorSpec = {
         agentId: injection.actorId,
-        executionMode: injection.ownerMode,
+        executionMode: mode,
         venueAccountId: injection.venueAccountId,
         venue: injection.venue,
         venueType: injection.venueType,
-        capital: risk.capital ?? null,
-        riskPosture: (risk.riskPosture ?? null) as AgentActorSpec['riskPosture'],
-        riskOverrides: (risk.riskOverrides ?? {}) as AgentActorSpec['riskOverrides'],
+        capital: profile.capital,
+        riskPosture: profile.riskPosture,
+        riskOverrides: profile.riskOverrides,
       };
       const actor = runtime.constructAndRegisterAgentActor(spec);
       try {
         await actor.start();
         logger.info(
-          { ownerId: injection.ownerId, agentId: injection.actorId, venueAccountId: injection.venueAccountId, mode: injection.ownerMode, capital: risk.capital ?? null },
+          { ownerId: injection.ownerId, agentId: injection.actorId, venueAccountId: injection.venueAccountId, mode, capital: profile.capital },
           'agent-direct actor constructed + started',
         );
       } catch (err) {
@@ -180,10 +179,8 @@ export function buildAgentDirectActorEnsure(
     // concurrent invocations await the same construction.
     ensureCache.set(key, {
       ensure,
-      capital: risk.capital ?? undefined,
-      riskPostureKey: postureKey(risk.riskPosture),
-      riskOverridesKey: overridesKey(risk.riskOverrides),
-      ownerMode: injection.ownerMode,
+      revision: profile.revision,
+      venueAccountId: injection.venueAccountId,
     });
 
     try {

@@ -20,6 +20,7 @@ import {
   schemaTools,
   strategyTools,
   tradingTools,
+  tradingProfileTools,
   watchTools,
 } from '@traderton/worker';
 
@@ -44,6 +45,7 @@ export function buildToolRegistry(): ToolRegistry {
     ...schemaTools,
     ...strategyTools,
     ...tradingTools,
+    ...tradingProfileTools,
     ...watchTools,
   ];
   for (const tool of allTools) {

@@ -79,6 +79,7 @@ export {
   schemaTools,
   strategyTools,
   tradingTools,
+  tradingProfileTools,
   watchTools,
   ToolRegistry,
   convertZodToJsonSchema,

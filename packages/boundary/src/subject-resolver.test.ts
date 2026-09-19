@@ -168,72 +168,6 @@ describe('resolveSubjectInjection — needs venue resolution, no bot named (per-
     });
   });
 
-  // Consumer-injected agent risk context (capital/riskPosture/riskOverrides):
-  // carried through onto the injection when present; absent cleanly when not.
-  describe('resolveSubjectInjection — agentRiskSpec extraction', () => {
-    const ACCOUNTS = [
-      { id: 'va-1', venue: 'hyperliquid' },
-      { id: 'va-2', venue: '1inch' },
-    ];
-
-    it('carries capital + riskPosture + riskOverrides onto the injection when present', async () => {
-      const res = await resolveSubjectInjection(
-        SUBJECT,
-        false,
-        {
-          venueAccountId: 'va-1',
-          capital: '1000.00000000',
-          riskPosture: { maxDrawdownPct: 5, dailyMaxLossPct: 3 },
-          riskOverrides: { maxOpenPositions: 4 },
-        },
-        ports({ listVenueAccountsByOwner: async () => ACCOUNTS }),
-      );
-      expect(res.ok).toBe(true);
-      if (res.ok) {
-        expect(res.injection.agentRiskSpec).toEqual({
-          capital: '1000.00000000',
-          riskPosture: { maxDrawdownPct: 5, dailyMaxLossPct: 3 },
-          riskOverrides: { maxOpenPositions: 4 },
-        });
-      }
-    });
-
-    it('omits agentRiskSpec entirely when no risk fields are present (back-compat)', async () => {
-      const res = await resolveSubjectInjection(
-        SUBJECT,
-        false,
-        { venueAccountId: 'va-1' },
-        ports({ listVenueAccountsByOwner: async () => ACCOUNTS }),
-      );
-      expect(res.ok).toBe(true);
-      if (res.ok) expect(res.injection.agentRiskSpec).toBeUndefined();
-    });
-
-    it('drops non-numeric override values (defensive — the Zod schema already enforces them)', async () => {
-      const res = await resolveSubjectInjection(
-        SUBJECT,
-        false,
-        { venueAccountId: 'va-1', riskOverrides: { maxOpenPositions: 4, junk: 'x' } },
-        ports({ listVenueAccountsByOwner: async () => ACCOUNTS }),
-      );
-      expect(res.ok).toBe(true);
-      if (res.ok) {
-        expect(res.injection.agentRiskSpec?.riskOverrides).toEqual({ maxOpenPositions: 4 });
-      }
-    });
-
-    it('omits agentRiskSpec when only non-numeric overrides are present', async () => {
-      const res = await resolveSubjectInjection(
-        SUBJECT,
-        false,
-        { venueAccountId: 'va-1', riskOverrides: { junk: 'x' } },
-        ports({ listVenueAccountsByOwner: async () => ACCOUNTS }),
-      );
-      expect(res.ok).toBe(true);
-      if (res.ok) expect(res.injection.agentRiskSpec).toBeUndefined();
-    });
-  });
-
   it('uses the operator default when multiple accounts exist and a default is set', async () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
@@ -297,25 +231,11 @@ describe('resolveSubjectInjection — wired getDefaultOwnerMode (A4 semantics)',
     if (res.ok) expect(res.injection.ownerMode).toBe('live');
   });
 
-  it('agent subject: injected executionMode is authoritative over the port (Option A)', async () => {
-    // The consumer stamps the agent's REAL mode post-LLM; it must win over the
-    // static operator default so a shadow agent on a paper-default operator can
-    // still author shadow bots (swap-venue fix).
+  it('agent subject: ignores payload executionMode and uses the resolver default', async () => {
     const res = await resolveSubjectInjection(
       SUBJECT,
       false,
       { config: { execution: { mode: 'shadow' } }, executionMode: 'shadow' },
-      makePorts('paper'),
-    );
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(res.injection.ownerMode).toBe('shadow');
-  });
-
-  it('agent subject: invalid injected executionMode is ignored (falls back to port)', async () => {
-    const res = await resolveSubjectInjection(
-      SUBJECT,
-      false,
-      { executionMode: 'garbage' } as unknown as Record<string, unknown>,
       makePorts('paper'),
     );
     expect(res.ok).toBe(true);
@@ -404,32 +324,7 @@ describe('resolveSubjectInjection — skipVenueResolution short-circuit', () => 
     expect(res).toEqual({ ok: true, injection: MINIMAL_INJECTION });
   });
 
-  // A3: the risk spec rides the read calls too (get_risk_limits /
-  // get_account_summary are read-only → the skip path) — the resolver must
-  // extract it onto the injection so the context factory binds the ops via the
-  // single RiskSource seam.
-  it('attaches the agentRiskSpec on the skip path when the payload carries the spec', async () => {
-    const res = await resolveSubjectInjection(
-      SUBJECT,
-      true,
-      {
-        capital: '1000',
-        riskPosture: { maxOpenPositions: 3 },
-        riskOverrides: { maxDrawdownPct: 5 },
-      },
-      ports(),
-    );
-    expect(res.ok).toBe(true);
-    if (res.ok) {
-      expect(res.injection.agentRiskSpec).toEqual({
-        capital: '1000',
-        riskPosture: { maxOpenPositions: 3 },
-        riskOverrides: { maxDrawdownPct: 5 },
-      });
-    }
-  });
-
-  it('omits agentRiskSpec on the skip path when the payload carries none', async () => {
+  it('does not derive enforcement state from payload fields on the skip path', async () => {
     const res = await resolveSubjectInjection(SUBJECT, true, {}, ports());
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.injection.agentRiskSpec).toBeUndefined();

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domain';
-import { AGENT_MESSAGE_TYPES, RiskPostureSchema } from '@traderton/domain';
+import { AGENT_MESSAGE_TYPES } from '@traderton/domain';
 import { convertZodToJsonSchema } from './registry.js';
 
 // --- submit_decision ---
@@ -26,28 +26,6 @@ const submitDecisionParams = z.object({
   // no operator default. Same shape as create_bot's `venueAccountId` (bots.ts),
   // which already carries the identical consumer-supplied hint.
   venueAccountId: z.string().optional().transform(v => v === '' ? undefined : v).describe('Explicit venue account ID to trade on. Omit to use your default venue account (used only when you have exactly one, or an operator default is set).'),
-  // ── Consumer-injected platform risk context (NOT LLM inputs) ──────────────
-  // 005's M2 adapter contract: "herobids injects the platform-owned values it
-  // still holds … at the call site." The agent's capital + creator risk posture
-  // + runtime overrides live in the consumer's `agents` row — the boundary
-  // process cannot read them (locked: no `agents`-table dependency, 017 §4 /
-  // 019 §1) — so the consumer threads them here POST-LLM (herobids'
-  // buildSubmitDecisionPayload), HMAC-signed like every other payload field.
-  // The agent-direct actor ensure (boundary bin.ts) consumes them at
-  // construct/start time: capital anchors EquityTracker peak; riskPosture/
-  // riskOverrides feed buildAgentRiskLimits (creator-set values take priority
-  // over operator defaults). MUST be declared or Zod strips them (the bug-001
-  // lesson).
-  capital: z.string().optional().transform(v => v === '' ? undefined : v).describe('Consumer-injected platform value — the agent\'s deployable capital. Set by the consuming platform, never an LLM input.'),
-  riskPosture: RiskPostureSchema.optional().describe('Consumer-injected creator risk posture (platform-owned). Not an LLM input.'),
-  executionMode: z.enum(['paper', 'shadow', 'live']).optional().describe('Consumer-injected agent execution mode (platform-owned; the consuming platform\'s agents.execution_defaults.mode). Never an LLM input.'),
-  riskOverrides: z.object({
-    maxOpenPositions: z.number().int().positive().optional(),
-    maxPositionSizePct: z.number().min(0).max(100).optional(),
-    stopLossPct: z.number().min(0).max(100).optional(),
-    stopLossCooldownMs: z.number().int().min(0).optional(),
-    maxDrawdownPct: z.number().min(0).max(100).optional(),
-  }).optional().describe('Consumer-injected runtime risk overrides (platform-owned). Not an LLM input.'),
 });
 
 export const SubmitDecisionParamsSchema = submitDecisionParams;
@@ -55,12 +33,7 @@ export const SubmitDecisionParamsSchema = submitDecisionParams;
 // LLM-visible subset of the submit_decision payload: the full Zod schema keeps
 // validating the platform-injected spec fields, but they must never appear in
 // the LLM's tool spec.
-const submitDecisionLlmParamsSchema = submitDecisionParams.omit({
-  capital: true,
-  riskPosture: true,
-  executionMode: true,
-  riskOverrides: true,
-});
+const submitDecisionLlmParamsSchema = submitDecisionParams;
 
 const submitDecisionTool: AgentTool<TradingToolContext> = {
   name: 'submit_decision',

@@ -23,6 +23,7 @@ export { riskLimitsTools } from './risk-limits.js';
 export { schemaTools } from './schema.js';
 export { strategyTools } from './strategy.js';
 export { tradingTools } from './trading.js';
+export { tradingProfileTools } from './trading-profiles.js';
 export { watchTools } from './watch.js';
 
 export { ToolRegistry, convertZodToJsonSchema } from './registry.js';

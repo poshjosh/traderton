@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import type { AgentTool, ToolResult, TradingToolContext, ResolvedAgentRiskContract, ResolvedAgentRiskProfile, AgentRiskProfileField } from '@traderton/domain';
-import { RiskPostureSchema } from '@traderton/domain';
 import { convertZodToJsonSchema } from './registry.js';
 
 // ── Consumer-injected platform risk spec (A3) ──────────────────────────────
@@ -12,16 +11,7 @@ import { convertZodToJsonSchema } from './registry.js';
 // lesson). The tool's execute never reads these fields directly — the boundary
 // context factory binds them via the single RiskSource seam.
 export const AgentRiskSpecFieldsSchema = {
-  capital: z.string().optional().transform(v => v === '' ? undefined : v).describe('Consumer-injected platform value — the agent\'s deployable capital. Set by the consuming platform, never an LLM input.'),
-  riskPosture: RiskPostureSchema.optional().describe('Consumer-injected creator risk posture (platform-owned). Not an LLM input.'),
-  executionMode: z.enum(['paper', 'shadow', 'live']).optional().describe('Consumer-injected agent execution mode (platform-owned; the consuming platform\'s agents.execution_defaults.mode). Never an LLM input.'),
-  riskOverrides: z.object({
-    maxOpenPositions: z.number().int().positive().optional(),
-    maxPositionSizePct: z.number().min(0).max(100).optional(),
-    stopLossPct: z.number().min(0).max(100).optional(),
-    stopLossCooldownMs: z.number().int().min(0).optional(),
-    maxDrawdownPct: z.number().min(0).max(100).optional(),
-  }).optional().describe('Consumer-injected runtime risk overrides (platform-owned). Not an LLM input.'),
+  venueAccountId: z.string().min(1).describe('Consumer-injected selected venue binding. Never an LLM input.'),
 } as const;
 
 /**
@@ -100,12 +90,15 @@ const getRiskLimitsTool: AgentTool<TradingToolContext> = {
 // --- adjust_risk_limits ---
 
 const AdjustRiskLimitsParamsSchema = z.object({
+  ...AgentRiskSpecFieldsSchema,
   maxOpenPositions: z.number().int().positive().optional().nullable().describe('Max concurrent open positions. Set null to reset to operator default.'),
   maxPositionSizePct: z.number().min(0).max(100).optional().nullable().describe('Max position size as % of equity (0-100). Set null to reset to operator default.'),
   stopLossPct: z.number().min(0).max(100).optional().nullable().describe('Max unrealized loss per position as % of equity before forced exit (0-100). Set null to reset to operator default.'),
   stopLossCooldownMs: z.number().int().min(0).optional().nullable().describe('Cooldown in ms after stop-loss exit before re-entry. Set null to reset to operator default.'),
   maxDrawdownPct: z.number().min(0).max(100).optional().nullable().describe('Max peak-to-current equity drawdown % (0-100). Set null to reset to operator default.'),
 });
+
+const AdjustRiskLimitsLlmParamsSchema = AdjustRiskLimitsParamsSchema.omit({ venueAccountId: true });
 
 const adjustRiskLimitsTool: AgentTool<TradingToolContext> = {
   name: 'adjust_risk_limits',
@@ -114,23 +107,10 @@ const adjustRiskLimitsTool: AgentTool<TradingToolContext> = {
   ownerScopedNoVenue: true,
   description: 'Adjust mutable risk limits for this agent. Only limits derived from operator defaults (not creator-configured) can be changed. Values cannot exceed operator ceilings. Set a field to null to reset it to the operator default. maxDrawdownPct controls peak-to-current equity drawdown (separate from dailyLossLimit which controls rolling 24h realized loss).',
   parametersSchema: AdjustRiskLimitsParamsSchema,
-  parameters: convertZodToJsonSchema(AdjustRiskLimitsParamsSchema),
+  parameters: convertZodToJsonSchema(AdjustRiskLimitsLlmParamsSchema),
   category: 'write-database',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
-    // A3 FAIL-CLOSED: the write has no durable traderton-owned home until the
-    // profile store (B1) exists — the risk context under the boundary is a
-    // per-call spec, so persisting overrides anywhere pre-B1 either violates
-    // "traderton owns what traderton enforces" or smuggles B1 into Track A.
-    // Typed precondition (not a bare error) so the consumer maps it without it
-    // counting against its circuit breaker. B1/Track C activates this write.
-    void ctx;
-    void params;
-    return {
-      success: false,
-      error: 'adjust_risk_limits is not yet available over the boundary: risk overrides have no durable store until the trading profile lands (B1). Read your effective limits with get_risk_limits.',
-      errorCode: 'precondition.not_ready',
-      fault: false,
-    };
+    return adjustOverridesViaRiskContractOps(params, ctx);
   },
 };
 
