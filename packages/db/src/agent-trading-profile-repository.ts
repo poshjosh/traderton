@@ -273,7 +273,25 @@ function sameManifest(
 ): boolean {
   if (existing.length !== requested.length) return false;
   const byActionId = new Map(existing.map((action) => [action.actionId, action]));
-  return requested.every((action) => JSON.stringify(byActionId.get(action.actionId)) === JSON.stringify(action));
+  return requested.every((action) => canonicalJson(byActionId.get(action.actionId)) === canonicalJson(action));
+}
+
+/**
+ * Order-insensitive JSON serialization for manifest comparison. Postgres jsonb
+ * canonicalizes object key order on write, so a raw JSON.stringify round-trip
+ * would never match the requested action. Sort keys recursively so replayed
+ * manifests compare equal regardless of storage key order.
+ */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(',')}]`;
+  }
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, val]) => `${JSON.stringify(key)}:${canonicalJson(val)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function serializePreimage(profile: AgentTradingProfile): AgentTradingProfilePreimage {
