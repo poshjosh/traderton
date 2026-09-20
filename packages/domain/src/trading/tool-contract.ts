@@ -285,10 +285,8 @@ export interface TradingToolContext {
       fixedPositionSize: string | null;
     } | null>;
   };
-  /** Operator-configured risk defaults for the running agent (from agentRiskDefaults config). */
-  operatorDefaults?: {
-    maxDrawdownPct: number;
-  };
+  /** Operator-configured risk defaults (17-field `agentRiskDefaults` block). Traderton is the sole authority; a read tool exposes it and profile writes enforce its ceilings. */
+  operatorRiskDefaults?: import('../config/schema.js').AgentRiskDefaultsConfig;
   /**
    * Venue-aware candle fetcher for read-only market/strategy tools (e.g.
    * score_candidate). Fetches candles BEHIND the boundary — orderbook targets

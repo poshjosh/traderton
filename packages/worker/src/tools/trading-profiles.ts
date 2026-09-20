@@ -9,6 +9,7 @@ import {
 import {
   ExecutionDefaultsSchema,
   RiskPostureSchema,
+  type AgentRiskDefaultsConfig,
   type AgentTool,
   type ToolResult,
   type TradingToolContext,
@@ -55,6 +56,41 @@ const ExactProfileOperationSchema = ProfileIdentitySchema.merge(OperationSchema)
 
 function unavailable(message: string, code: string): ToolResult {
   return { success: false, fault: true, error: message, errorCode: code };
+}
+
+/**
+ * Ceiling fields enforced against operator risk defaults. `riskPosture` numeric
+ * ranges are already constrained by `RiskPostureSchema` (0-100 etc.); these
+ * ceilings are the ADDITIONAL operator authority layer — a creator may not push
+ * a posture field above the operator's ceiling. Traderton is the sole authority
+ * (herobids drops its local `validateAgentRiskBounds` pre-check).
+ */
+const RISK_CEILING_FIELDS = [
+  'maxOpenPositions',
+  'maxPositionSizePct',
+  'stopLossPct',
+  'stopLossCooldownMs',
+  'maxDrawdownPct',
+] as const;
+
+type RiskCeilingField = (typeof RISK_CEILING_FIELDS)[number];
+
+/**
+ * Validate a creator `riskPosture` against operator ceilings. Mirrors herobids
+ * `validateAgentRiskBounds` semantics: each non-null posture field that exceeds
+ * the corresponding operator ceiling is a violation. Returns the first
+ * violation; caller turns it into a typed `ToolResult`.
+ */
+function ceilingViolation(
+  riskPosture: NonNullable<z.infer<typeof ProfileConfigurationSchema>['riskPosture']>,
+  defaults: AgentRiskDefaultsConfig,
+): { field: RiskCeilingField; ceiling: number } | undefined {
+  for (const field of RISK_CEILING_FIELDS) {
+    const value = riskPosture[field];
+    if (value == null) continue;
+    if (value > defaults[field]) return { field, ceiling: defaults[field] };
+  }
+  return undefined;
 }
 
 async function repositoryFor(ctx: TradingToolContext): Promise<AgentTradingProfileRepository | ToolResult> {
@@ -137,6 +173,23 @@ const setAgentTradingProfileTool: AgentTool<TradingToolContext> = {
   parameters: convertZodToJsonSchema(SetProfileSchema),
   async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
     const params = SetProfileSchema.parse(rawParams);
+    // Enforce operator ceilings on creator riskPosture BEFORE any DB write.
+    // Fail closed: missing operator defaults = platform config gap (fault).
+    const defaults = ctx.operatorRiskDefaults;
+    if (!defaults) {
+      return unavailable('Operator risk defaults not configured in this context', 'risk_defaults.unavailable');
+    }
+    if (params.riskPosture != null) {
+      const violation = ceilingViolation(params.riskPosture, defaults);
+      if (violation) {
+        return {
+          success: false,
+          fault: false,
+          error: `${violation.field} cannot exceed the operator ceiling of ${violation.ceiling}`,
+          errorCode: 'validation.risk_ceiling',
+        };
+      }
+    }
     const repo = await repositoryFor(ctx);
     if ('success' in repo) return repo;
     const actions = setActions(params);
@@ -218,7 +271,23 @@ function changeTool(name: 'finalize_agent_trading_profile_change' | 'rollback_ag
   };
 }
 
+const getOperatorDefaultsTool: AgentTool<TradingToolContext> = {
+  name: 'get_operator_defaults',
+  ownerScopedNoVenue: true,
+  category: 'read-config',
+  description: 'Read the operator-configured risk defaults (17-field agentRiskDefaults block). Traderton is the sole authority for these defaults; creator risk posture writes are ceiling-enforced against them.',
+  parametersSchema: z.object({}),
+  parameters: convertZodToJsonSchema(z.object({})),
+  async execute(_rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    if (!ctx.operatorRiskDefaults) {
+      return unavailable('Operator risk defaults not configured in this context', 'risk_defaults.unavailable');
+    }
+    return { success: true, data: ctx.operatorRiskDefaults };
+  },
+};
+
 export const tradingProfileTools: AgentTool<TradingToolContext>[] = [
+  getOperatorDefaultsTool,
   setAgentTradingProfileTool,
   clearAgentTradingProfileTool,
   getAgentTradingProfileTool,

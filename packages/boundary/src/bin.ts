@@ -382,6 +382,10 @@ async function main(): Promise<void> {
           fixedPositionSize: null,
         }),
       },
+      // Operator risk defaults (17-field agentRiskDefaults block) — exposed to
+      // the get_operator_defaults read tool and enforced as ceilings by
+      // set_agent_trading_profile. Traderton is the sole authority.
+      operatorRiskDefaults: appConfig.agentRiskDefaults,
     };
   };
 
