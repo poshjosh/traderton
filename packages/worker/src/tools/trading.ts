@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domain';
-import { AGENT_MESSAGE_TYPES } from '@traderton/domain';
+import {
+  AGENT_MESSAGE_TYPES,
+  AgentRiskOverridesSchema,
+  RiskPostureSchema,
+} from '@traderton/domain';
 import { convertZodToJsonSchema } from './registry.js';
 
 // --- submit_decision ---
@@ -26,6 +30,11 @@ const submitDecisionParams = z.object({
   // no operator default. Same shape as create_bot's `venueAccountId` (bots.ts),
   // which already carries the identical consumer-supplied hint.
   venueAccountId: z.string().optional().transform(v => v === '' ? undefined : v).describe('Explicit venue account ID to trade on. Omit to use your default venue account (used only when you have exactly one, or an operator default is set).'),
+  // Consumer-injected platform risk context. These fields are intentionally
+  // omitted from the LLM-visible schema below but must survive boundary parsing.
+  capital: z.string().optional().transform(v => v === '' ? undefined : v),
+  riskPosture: RiskPostureSchema.optional(),
+  riskOverrides: AgentRiskOverridesSchema.optional(),
 });
 
 export const SubmitDecisionParamsSchema = submitDecisionParams;

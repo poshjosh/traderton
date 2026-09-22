@@ -84,7 +84,7 @@ export function buildRiskContractOpsFromRiskSource(
     },
 
     async adjustOverrides(proposedChanges: Record<string, number | null>): Promise<{ ok: boolean; error?: string; contract?: ResolvedAgentRiskContract }> {
-      if (!options.setRiskOverrides) return { ok: false, error: 'risk override store unavailable' };
+      if (!options.setRiskOverrides) return { ok: false, error: 'B1: risk override store unavailable' };
       const contract = await this.getContract();
       const next = { ...overrides };
       for (const [field, value] of Object.entries(proposedChanges)) {

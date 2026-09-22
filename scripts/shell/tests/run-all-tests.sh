@@ -96,8 +96,15 @@ if [[ "${RUN_E2E}" == "true" ]]; then
     record 1 "Boundary E2E (stack did not start)"
   else
     ok "Boundary is ready."
-    ( cd "${ROOT}" && node packages/boundary/dist/dev/boundary-e2e.js )
-    record "$?" "Boundary E2E (market-intel signed invokes)"
+    if [[ ! -f "${ROOT}/.env" ]]; then
+      err "Boundary E2E requires ${ROOT}/.env so its signed invokes use the boundary's configured HMAC identity."
+      record 1 "Boundary E2E (missing .env)"
+    else
+      # Compose passes .env to the boundary; load the same identity for the
+      # host-side invoker so its signed caller/key pair matches the server.
+      ( cd "${ROOT}" && node --env-file=.env packages/boundary/dist/dev/boundary-e2e.js )
+      record "$?" "Boundary E2E (market-intel signed invokes)"
+    fi
   fi
 else
   header "3 / Boundary E2E (skipped)"
