@@ -638,8 +638,15 @@ const removeWatchTool: AgentTool<TradingToolContext> = {
 // ---------------------------------------------------------------------------
 
 const CheckWatchesParamsSchema = z.object({
+  // coerce: LLMs may emit booleans as strings ("true"/"false").
   removeTriggered: z
-    .boolean()
+    .preprocess((v) => {
+      if (typeof v === 'string') {
+        if (v === 'true') return true;
+        if (v === 'false') return false;
+      }
+      return v;
+    }, z.boolean())
     .optional()
     .default(false)
     .describe('When true, automatically remove watches that have triggered. Default: false.'),
@@ -670,7 +677,7 @@ const checkWatchesTool: AgentTool<TradingToolContext> = {
 
     const raw = await ctx.redis.hgetall(watchesKey(ctx.agentId));
     if (!raw) {
-      return { success: true, data: { ok: true, triggered: [], unchecked: [] } };
+      return { success: true, data: { ok: true, triggered: [], unchecked: [], totalWatches: 0 } };
     }
 
     const watches = Object.values(raw)
@@ -678,7 +685,7 @@ const checkWatchesTool: AgentTool<TradingToolContext> = {
       .filter((w): w is WatchEntry => w !== null);
 
     if (watches.length === 0) {
-      return { success: true, data: { ok: true, triggered: [], unchecked: [] } };
+      return { success: true, data: { ok: true, triggered: [], unchecked: [], totalWatches: 0 } };
     }
 
     // Step 6: Lazy repair for watches that lack pinned identity fields.

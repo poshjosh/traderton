@@ -283,6 +283,29 @@ describe('check_watches', () => {
     expect((result.data as { triggered: unknown[] }).triggered).toHaveLength(0);
   });
 
+  it('coerces string booleans for removeTriggered (LLM emits "false")', async () => {
+    const getPrice = vi.fn().mockResolvedValue({ ok: false, error: { code: 'price.not_found', message: 'not found' } });
+    const resolvePriceTarget = vi.fn().mockResolvedValue({ ok: false, error: { code: 'price.not_found', message: 'not found' } });
+    const ctx = makeCtx({ priceService: { getPrice, resolvePriceTarget } });
+
+    // A string "false" must round-trip through the schema as boolean false.
+    const result = await checkWatchesTool.execute({ removeTriggered: 'false' as unknown as boolean }, ctx);
+
+    expect(result.success).toBe(true);
+    expect((result.data as { totalWatches: number }).totalWatches).toBe(0);
+  });
+
+  it('reports totalWatches: 0 when the agent has no watches', async () => {
+    const getPrice = vi.fn().mockResolvedValue({ ok: false, error: { code: 'price.not_found', message: 'not found' } });
+    const resolvePriceTarget = vi.fn().mockResolvedValue({ ok: false, error: { code: 'price.not_found', message: 'not found' } });
+    const ctx = makeCtx({ priceService: { getPrice, resolvePriceTarget } });
+
+    const result = await checkWatchesTool.execute({ removeTriggered: false }, ctx);
+
+    expect(result.success).toBe(true);
+    expect((result.data as { totalWatches: number }).totalWatches).toBe(0);
+  });
+
   it('detects "above" threshold crossing', async () => {
     const getPrice = vi.fn()
       .mockResolvedValueOnce(okPrice(150))
