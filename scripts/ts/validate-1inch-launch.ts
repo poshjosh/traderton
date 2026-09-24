@@ -64,10 +64,12 @@ const NC = '\x1b[0m';
 function pass(msg: string) { console.log(`${GREEN}[PASS]${NC} ${msg}`); }
 function fail(msg: string) { console.error(`${RED}[FAIL]${NC} ${msg}`); }
 function info(msg: string) { console.log(`${YELLOW}[INFO]${NC} ${msg}`); }
+function warn(msg: string) { console.log(`${YELLOW}[WARN]${NC} ${msg}`); }
 
 interface ValidationResult {
   step: string;
   passed: boolean;
+  warn?: boolean;
   detail?: string;
 }
 
@@ -77,6 +79,11 @@ function record(step: string, passed: boolean, detail?: string) {
   results.push({ step, passed, detail });
   if (passed) pass(`${step}${detail ? ` — ${detail}` : ''}`);
   else fail(`${step}${detail ? ` — ${detail}` : ''}`);
+}
+
+function recordWarn(step: string, detail?: string) {
+  results.push({ step, passed: true, warn: true, detail });
+  warn(`${step}${detail ? ` — ${detail}` : ''}`);
 }
 
 // ─── Validation Steps ───────────────────────────────────────────────────────
@@ -131,10 +138,11 @@ async function validateRouterConfig(): Promise<boolean> {
     return true;
   }
 
-  // routerAddress is recommended for MVP launch but optional in adapter construction
-  record('Router config', false,
+  // routerAddress is recommended for MVP launch but optional in adapter construction.
+  // Emit a WARN (not FAIL) so a dry-run missing only the router address still passes.
+  recordWarn('Router config',
     'ONEINCH_ROUTER_ADDRESS not set — transaction filtering will use broader wallet-activity inference (weaker for recovery)');
-  return false;
+  return true;
 }
 
 async function validateLiveExecution(adapter: OneInchSwapAdapter): Promise<{ ok: boolean; txHash?: string }> {
@@ -276,18 +284,16 @@ async function main() {
   }
 
   printSummary();
-  const allPassed = results.every((r) => r.passed);
-  const routerMissing = results.some((r) => r.step === 'Router config' && !r.passed);
+  const failures = results.filter((r) => !r.passed).length;
+  const warnings = results.filter((r) => r.warn).length;
 
-  if (allPassed) {
+  if (failures === 0) {
+    if (warnings > 0) {
+      info('Validation passed with warning(s): configure ONEINCH_ROUTER_ADDRESS before production launch');
+    }
     process.exit(0);
-  } else if (routerMissing && results.filter((r) => !r.passed).length === 1) {
-    // Router missing is a warning, not a hard failure for dry-run
-    info('Validation passed with warning: configure ONEINCH_ROUTER_ADDRESS before production launch');
-    process.exit(0);
-  } else {
-    process.exit(1);
   }
+  process.exit(1);
 }
 
 function printSummary() {
@@ -295,13 +301,15 @@ function printSummary() {
   console.log('───────────────────────────────────────────────────────');
   console.log('  Results:');
   for (const r of results) {
-    const icon = r.passed ? `${GREEN}✓${NC}` : `${RED}✗${NC}`;
+    const icon = r.warn ? `${YELLOW}⚠${NC}` : r.passed ? `${GREEN}✓${NC}` : `${RED}✗${NC}`;
     console.log(`    ${icon} ${r.step}`);
   }
-  const passed = results.filter((r) => r.passed).length;
+  const passed = results.filter((r) => r.passed && !r.warn).length;
+  const warned = results.filter((r) => r.warn).length;
   const total = results.length;
   console.log('');
   console.log(`  ${passed}/${total} checks passed`);
+  if (warned > 0) console.log(`  ${warned} warning(s) — see [WARN] lines above`);
   console.log('───────────────────────────────────────────────────────');
 }
 

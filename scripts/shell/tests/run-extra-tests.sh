@@ -42,6 +42,11 @@ warn()   { echo -e "${YELLOW}[extra]${RESET} $*"; }
 err()    { echo -e "${RED}[extra]${RESET} $*" >&2; }
 header() { echo -e "\n${BOLD}${CYAN}== $* ==${RESET}"; }
 
+# Result counters for a clear PASS/SKIP/FAIL summary.
+EXECUTED=0
+SKIPPED=0
+FAILED=0
+
 ENV_FILE="${ROOT}/.env.ops.dev"
 for ((i=1; i<=$#; i++)); do
   case "${!i}" in
@@ -61,18 +66,29 @@ else
 fi
 
 header "Tier 5 / Venue-adapter integration (self-skip without credentials)"
-log "Running venue integration suites…"
-( cd "${ROOT}" && pnpm exec vitest run \
-    packages/venues/src/hyperliquid.integration.test.ts \
-    packages/venues/src/bybit.integration.test.ts \
-    packages/venues/src/oneinch.integration.test.ts )
-CODE=$?
+TIER5_CREDS_PRESENT=false
+if [[ -n "${HYPERLIQUID_TESTNET_API_KEY:-}" || -n "${BYBIT_TESTNET_API_KEY:-}" || -n "${ONEINCH_API_KEY:-}" ]]; then
+  TIER5_CREDS_PRESENT=true
+fi
 
-echo ""
-if [[ $CODE -eq 0 ]]; then
-  ok "Venue integration suites passed (or self-skipped without credentials)."
+if [[ "${TIER5_CREDS_PRESENT}" == "false" ]]; then
+  warn "No venue credentials present — all Tier 5 integration suites will self-skip."
+  SKIPPED=$((SKIPPED + 3))   # hyperliquid, bybit, oneinch
 else
-  err "Venue integration suites failed (exit ${CODE})."
+  log "Running venue integration suites…"
+  CODE=0
+  ( cd "${ROOT}" && pnpm exec vitest run \
+      packages/venues/src/hyperliquid.integration.test.ts \
+      packages/venues/src/bybit.integration.test.ts \
+      packages/venues/src/oneinch.integration.test.ts ) || CODE=$?
+  echo ""
+  if [[ $CODE -eq 0 ]]; then
+    ok "Venue integration suites passed."
+    EXECUTED=$((EXECUTED + 1))
+  else
+    err "Venue integration suites failed (exit ${CODE})."
+    FAILED=$((FAILED + 1))
+  fi
 fi
 
 # == Tier 6 / Venue-launch validators (opt-in operator scripts) ==
@@ -83,7 +99,7 @@ fi
 
 # Runs the wrapper; skips cleanly (return 0) when required credentials are
 # absent. By default ALL named vars must be set; `--any` runs when at least one
-# is (mirrors the validator's own env-var prerequisites). `|| VALIDATOR_CODE=1`
+# is (mirrors the validator's own env-var prerequisites). The trailing `|| :`
 # masks failures from `set -e` so both validators always run and failures
 # aggregate into the final exit code.
 venue_validator_dry_run() {
@@ -100,27 +116,38 @@ venue_validator_dry_run() {
     fi
   done
   if (( any == 0 && ${#missing[@]} > 0 )) || (( any == 1 && present == 0 )); then
-    warn "Skipping ${script} — missing required venue credential(s): ${missing[*]:-${*}} (operator-only opt-in; set them in .env.ops.dev to run)."
+    warn "Skipped ${script} — missing optional venue credential(s): ${missing[*]:-${*}} (operator-only opt-in; set them in .env.ops.dev to run)."
+    SKIPPED=$((SKIPPED + 1))
     return 0
   fi
   log "Running ${script} (dry-run)…"
   if bash "${ROOT}/scripts/shell/tests/${script}"; then
     ok "${script} dry-run passed."
+    EXECUTED=$((EXECUTED + 1))
   else
     err "${script} dry-run failed."
+    FAILED=$((FAILED + 1))
     return 1
   fi
 }
 
 header "Tier 6 / Venue-launch validators (opt-in operator scripts)"
-VALIDATOR_CODE=0
-venue_validator_dry_run validate-1inch.sh ONEINCH_API_KEY ONEINCH_PRIVATE_KEY || VALIDATOR_CODE=1
-venue_validator_dry_run --any validate-jupiter.sh SOLANA_WALLET_PRIVATE_KEY JUPITER_WALLET_ADDRESS JUPITER_PRIVATE_KEY || VALIDATOR_CODE=1
+venue_validator_dry_run validate-1inch.sh ONEINCH_API_KEY ONEINCH_PRIVATE_KEY || :
+venue_validator_dry_run --any validate-jupiter.sh SOLANA_WALLET_PRIVATE_KEY JUPITER_WALLET_ADDRESS JUPITER_PRIVATE_KEY || :
 
 echo ""
-if [[ $CODE -ne 0 || $VALIDATOR_CODE -ne 0 ]]; then
-  err "Extra tests failed."
+header "Summary"
+log "Executed & passed: ${EXECUTED}"
+if [[ $SKIPPED -gt 0 ]]; then warn "Skipped (missing optional credentials): ${SKIPPED}"; fi
+if [[ $FAILED -gt 0 ]]; then err "Failed: ${FAILED}"; fi
+
+if [[ $FAILED -ne 0 ]]; then
+  err "Extra tests failed (${FAILED} failed)."
   exit 1
 fi
-ok "All extra tests passed."
+if [[ $EXECUTED -eq 0 && $SKIPPED -gt 0 ]]; then
+  warn "No credential-gated suites actually ran (${EXECUTED} executed, ${SKIPPED} skipped)."
+  exit 0
+fi
+ok "Extra tests passed (${EXECUTED} executed, ${SKIPPED} skipped)."
 exit 0
