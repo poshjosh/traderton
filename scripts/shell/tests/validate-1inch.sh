@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # validate-1inch.sh — Operator shell wrapper for 1inch launch validation.
 #
-# Sources credentials from .env, then runs the TS validation script.
+# Sources credentials from .env.ops.dev, then runs the TS validation script.
 # Operator-run, not CI.
 #
 # Usage:
@@ -12,7 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
-ENV_FILE="${REPO_ROOT}/.env"
+ENV_FILE="${REPO_ROOT}/.env.ops.dev"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "[✗] Missing ${ENV_FILE}"

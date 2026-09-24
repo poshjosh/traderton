@@ -20,7 +20,9 @@
 # Usage:
 #   scripts/shell/tests/run-extra-tests.sh           # runs the venue suites (skip w/o keys)
 #   scripts/shell/tests/run-extra-tests.sh --all     # same (single tier today)
-#   scripts/shell/tests/run-extra-tests.sh --env-file .env
+#   scripts/shell/tests/run-extra-tests.sh --env-file .env.ops.dev
+#
+# Env file defaults to .env.ops.dev; override with --env-file.
 #
 # Exit codes: 0 = passed (incl. clean skips); 1 = a suite failed.
 
@@ -40,7 +42,7 @@ warn()   { echo -e "${YELLOW}[extra]${RESET} $*"; }
 err()    { echo -e "${RED}[extra]${RESET} $*" >&2; }
 header() { echo -e "\n${BOLD}${CYAN}== $* ==${RESET}"; }
 
-ENV_FILE="${ROOT}/.env"
+ENV_FILE="${ROOT}/.env.ops.dev"
 for ((i=1; i<=$#; i++)); do
   case "${!i}" in
     --env-file) j=$((i+1)); ENV_FILE="${!j}" ;;
@@ -76,7 +78,7 @@ fi
 # == Tier 6 / Venue-launch validators (opt-in operator scripts) ==
 # Operator-run dry-run validation of the Jupiter / 1inch venue adapters
 # (scripts/ts/validate-*-launch.ts). They hit LIVE venue endpoints and need
-# venue credentials in .env, so they are NOT part of the default green run.
+# venue credentials in .env.ops.dev, so they are NOT part of the default green run.
 # Dry-run only — --execute is left to the operator, by hand.
 
 # Runs the wrapper; skips cleanly (return 0) when required credentials are
@@ -98,7 +100,7 @@ venue_validator_dry_run() {
     fi
   done
   if (( any == 0 && ${#missing[@]} > 0 )) || (( any == 1 && present == 0 )); then
-    warn "Skipping ${script} — missing required venue credential(s): ${missing[*]:-${*}} (operator-only opt-in; set them in .env to run)."
+    warn "Skipping ${script} — missing required venue credential(s): ${missing[*]:-${*}} (operator-only opt-in; set them in .env.ops.dev to run)."
     return 0
   fi
   log "Running ${script} (dry-run)…"
