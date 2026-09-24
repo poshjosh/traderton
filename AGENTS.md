@@ -1,152 +1,78 @@
-# AGENTS.md
+# AGENTS.MD
 
-Rules for AI agents working on **Traderton** — trading infrastructure for
-AI/LLM agents (crypto now; forex, commodities, equities, and more later),
-exposed over API now and MCP/skills later.
+Rules and guidelines for AI agents working on this traderton codebase.
 
-## Read first — tiered (the docs ARE the project's memory)
+## Project Overview
 
-A fresh session knows nothing of the reasoning behind this project unless it reads
-the docs. Read the **always-read** tier at session start; consult the rest **when the
-topic is relevant** (pointers below). Every live doc still binds; the tiers only change
-reading *order/cost*.
+Traderton is an independently owned trading platform for AI/LLM
+agents. It owns trading related instructions, tool contracts, risk and execution
+policy, venue integrations, credentials, persistence, and trading documentation.
 
-**Always-read at session start (small — the minimum to not do damage):**
+This is a Node.js 22+, TypeScript strict, ESM, pnpm monorepo using Vitest,
+PostgreSQL, and Redis. 
 
-1. **This file (AGENTS.md)** — the hard rules (below).
-2. **[docs/CANONICAL-STATE.md](./docs/CANONICAL-STATE.md)** — **START HERE. The single source
-   of truth for what is TRUE NOW**: current state, target state, the invariants (law), the
-   open decisions, the settled-decisions index, and the pointer map to every live doc. When it
-   and another doc disagree about state/decisions/invariants, the canonical brief wins. It tells
-   you which docs to read for depth and which are historical.
-3. **[docs/001-parity-ledger.md](./docs/001-parity-ledger.md)** — the live parity status +
-   cutover gates. **The source of truth for capability done vs. pending.** Update it as you work.
+## Development
 
-Those three orient you. The canonical brief points you to the rest below **when relevant**:
+### Quick help scripts
 
-**Consult when relevant (live; authoritative for their own scope):**
+- `scripts/shell/tests/run-all-tests.sh --e2e`
+- `scripts/shell/tests/run-extra-tests.sh --all`
+- `scripts/shell/run/build-and-run.sh` 
+- `scripts/shell/run/reset-and-run.sh` - start afresh db, redis etc also with some basic user setup
+- `scripts/shell/run/reset-and-run-xstack.sh` - like reset-and-run.sh, but also starts the external trading service (traderton)
 
-- **[docs/004-decision-log.md](./docs/004-decision-log.md)** — the *why* behind every decision.
-  Read when a rule seems arbitrary or a case isn't covered.
-- **[docs/000-vision.md](./docs/000-vision.md)** — the goal, the copy-never-author law, the 17
-  settled decisions. *(Its REST-cutover framing is CORRECT and settled — CANONICAL-STATE §3; in-process
-  is a supported non-cutover path.)*
-- **[docs/003-anomalies-and-deviations.md](./docs/003-anomalies-and-deviations.md)** — forced
-  deviations + source-fix request log. Read/append when you hit a deviation.
-- **[docs/010-improvement-backlog.md](./docs/010-improvement-backlog.md)** — deliberate,
-  non-blocking later-options (graded Value/Effort + Risk-if-deferred). NOT cutover obligations
-  (those → 001/003) or bugs.
-- **[docs/005-consumer-boundary-contract.md](./docs/005-consumer-boundary-contract.md)** — the
-  M2 REST/HMAC contract. Read at consumption/cutover.
-- **[docs/006-source-capability-manifest.md](./docs/006-source-capability-manifest.md)** — the
-  static parity inventory the ledger scores against.
-- **[docs/007-operational-readiness.md](./docs/007-operational-readiness.md)** — the cutover
-  proof (latency/equivalence/restart/rollback). Read at L3/cutover.
-- **[docs/024-verification-and-consumption-roadmap.md](./docs/024-verification-and-consumption-roadmap.md)**
-  — the post-M1 level roadmap (L1 done, L2 skipped, F done, L3 next). *(REST-only-cutover = correct/settled;
-  its "L3 = herobids-owner territory" is superseded by CANONICAL-STATE §5 — we work the consumption branch
-  in herobids ourselves.)*
-- **[archive/](./archive/)** — **historical (do NOT re-execute):** the extraction roadmap + phase
-  plans, the M1 review, the Phase-9b authoring plan + per-item proposals/prompts, and the F
-  proposals/prompts. This is the *how-we-got-here* reasoning trail (incl. the F1–F2c landing logs
-  in `archive/features/013-9b-authoring-plan.md` §8.5–§8.8). Consult for history; the canonical
-  brief + the live docs are authoritative for what's true now.
+### Useful commands
 
-Do not rely on prior chat context — assume you have none. If a decision isn't in these
-docs, it does not exist yet: decide it deliberately and record it (in the canonical brief +
-the relevant live doc).
+```bash
+pnpm install            # install workspace dependencies
+pnpm build              # build packages
+pnpm test               # run Vitest suite
+pnpm lint               # TypeScript typecheck
+pnpm test:integration   # integration suite (requires its documented services)
+```
 
-## Where you are / where to start
+- Run focused tests for changed behavior, then `pnpm lint` and the relevant
+  build/test suite before declaring code work complete.
+- Preserve existing trading behavior and contracts unless a change is
+  explicitly intended. Record gaps or deliberate behavior changes in the
+  relevant active plan; extraction parity history is not a ban on new features.
+- Validate inputs at trust boundaries; use domain types and ports where they
+  already exist. Do not bypass strict TypeScript checks, swallow errors, or add
+  dependencies without justification. Keep tests behavior-focused.
+- Keep operator/deploy configuration separate from trading/instance settings;
+  consult [configuration best practices](./docs/best-practices/configuration.md)
+  before changing either.
 
-**Read [docs/CANONICAL-STATE.md](./docs/CANONICAL-STATE.md) §2–§3 for the authoritative version.**
-In brief (2026-09-08):
+## Code Conventions
 
-- **Extraction (M1 library) is complete**, and **Phase 9b authoring items A–E are complete on
-  `main`.**
-- **F — the M2 REST boundary — is COMPLETE on branch `f-m2-rest`** (F1+F2a+F2b+F2c), proven
-  end-to-end (compose up + all 7 of 005's required-verification tests). **NOT merged to `main`**
-  (merge gate unmet). L1 done (its fix cherry-picked to `main` as `f7a0dd1`); L2 skipped.
-- **The next work is L3 — herobids consumes `@traderton/*` over REST → cutover** (the merge-gate work),
-  governed by [024](./docs/024-verification-and-consumption-roadmap.md). SETTLED (CANONICAL-STATE §3/§5):
-  the cutover shape is **REST** (no in-process cutover); the work happens **in herobids, on a designated
-  `consume-traderton` branch** (the read-only exception is IN FORCE for that branch only — §5). herobids
-  `main` and all other branches stay untouchable; merging the branch = cutover, human-approved.
-- Run the loop: investigate → **decision checkpoint (route four-risk choices to a fresh decision
-  agent — [docs/008-decision-process.md](./docs/008-decision-process.md))** → implement → coordinator
-  loop → verify end-to-end → update docs. **Run it autonomously to the branch, across slices, without
-  pausing between them** — the merge to `main` is the ONE hard stop (008 §6, the autonomy contract).
-  Each level/item on its own branch. Nothing merges to `main` without the human (the merge gate).
+### Language & Style
 
-## The rule you must not break
+- TypeScript with `strict: true`. Target ES2022, ESM only.
+- `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters` enabled.
+- Use meaningful, descriptive names. Variables are nouns, functions are verbs.
+- Tool names use lower snake case.
+- Prefer action-first tool names.
+- Prefer `verb_noun` or `verb_noun_qualifier` when possible.
+- Avoid noun-first and hyphenated tool names.
+- Bad: `code_execute`, `get-overview-from-market`.
+- Good: `execute_code`, `get_market_overview`.
+- Keep functions short and single-purpose (SRP).
+- Avoid over-engineering — write the simplest code that meets requirements (KISS).
+- DRY: abstract only when duplication is proven, not preemptive.
 
-We are extracting Traderton from the existing [herobids](../herobids/) system by
-**copy-and-delete**, not rewriting from scratch.
+### Error Handling
 
-> **Copy, never author.** Every line of trading behaviour must arrive by being
-> copied from the source system. The only things you author are **deletions**
-> and the **thin seams** where platform couplings are cut.
+- Use `ok()` / `err()` helpers for constructing results.
+- Error codes are namespaced dot-strings: `venue.timeout`, `risk.exceeded`, etc.
+- Distinguish fatal (cannot operate safely → crash) from warn-and-continue (sub-optimal → log + proceed).
+- Every async loop must reschedule itself on failure (`finally` or top-level catch).
 
-- Do not reimplement trading logic from your own model of how it "should" work.
-- Do not write new tests that assert your assumptions. Bring the source tests
-  across; they are the parity harness.
-- After every deletion: the build compiles and the copied tests pass. If not,
-  you found a real dependency or cut a seam wrong — fix it there before moving on.
-- The bar is **feature parity** with the source, not "does it run." We may
-  improve; we must not degrade. Anything you can't preserve goes in the ledger
-  as **Gap** or **Deferred** — never silently dropped.
+### Type Safety
 
-### Source-fix requests
-
-When the cleanest seam requires reshaping the source, you may *request* a
-behaviour-preserving change in herobids — you must never edit herobids yourself.
-The change is made, tested, gated, and released in herobids by the owner; then
-you copy from the improved source. Requests must be behaviour-preserving
-(validated by herobids' existing tests) — they may not alter trading behaviour.
-Log each request and the resulting herobids version in
-[docs/003-anomalies-and-deviations.md](./docs/003-anomalies-and-deviations.md).
-Prefer a clean in-Traderton deletion when one exists; reserve source requests
-for seams a deletion cannot cut without authoring non-trivial logic.
-
-## Source system — READ-ONLY
-
-`../herobids` relative to this repo — the `herobids` monorepo, where
-trading currently lives fused with an agent + messaging platform.
-
-**Work only in this repo (`.` / `../traderton` when viewed from the sibling
-checkout). Treat
-herobids as read-only source — read and copy from it, never modify it.** All
-builds, tests, and git operations run in this repo.
-
-**⚠️ A consumption-phase EXCEPTION is coming (NOT yet in force).** The next milestone (L3)
-is herobids consuming `@traderton/*`, which inherently requires *editing* herobids (deleting
-its trading code, wiring the library). The proposed exception (see
-[docs/CANONICAL-STATE.md](./docs/CANONICAL-STATE.md) §5): the READ-ONLY rule is lifted **for a
-designated herobids consumption branch only** — herobids `main` and all other branches stay
-untouchable, and extraction-era copying still obeys copy-never-author. **This exception is
-PENDING explicit human confirmation** (who edits herobids; which consumption path first —
-CANONICAL-STATE §6 O1/O2). **Until the human confirms it, herobids remains fully READ-ONLY.**
-
-## `main` branch discipline — do not break
-
-**`main` holds ONLY production code that is a target state or a major milestone of
-that state — something we keep for a while. NEVER indeterminate, temporary, or
-scaffolding state.** Verification harnesses, intermediate/exploratory work, and
-anything whose keep/discard disposition is still open do NOT belong on `main`;
-they live on branches until they are decided.
-
-**Never merge to `main` without the human's explicit approval.** "Reviewed +
-green" is NOT license to merge — merge is the human's decision, not a step in any
-loop. Keep work on a branch (branch-per-level / per-milestone) and ask.
-
-**The merge gate — merge to `main` only when ALL of these hold:**
-1. herobids consumes the traderton library;
-2. all tests pass;
-3. the setup has been run both locally and on staging for a while — manual,
-   visual, and black-box tests;
-4. manual approval is given to merge.
-
-Keep durable production fixes SEPARATE from scaffolding so a keep-forever change
-is never entangled with an undecided/temporary one in the same merge.
+- Define interfaces/types for all inputs, outputs, and data structures.
+- Use branded types for domain values (`Quantity`, `Price`, `OrderId`, `FillId`).
+- Validate at system boundaries (API input, config load, venue responses) with Zod.
+- Interior code trusts already-validated types — no redundant runtime checks.
 
 ## Environment files — `.example` twins are the committed source of truth
 
