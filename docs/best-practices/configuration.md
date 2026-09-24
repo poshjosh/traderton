@@ -21,13 +21,20 @@ entry point**, never in library/business code.
 
 ## Environment files — `.example` twins are the committed source of truth
 
-Operator/deploy-time env inputs are supplied via `.env*` files. **Real `.env*` files are
+Operator/deploy-time env inputs are supplied via `.env*` files, **split by role** so that
+runtime/boundary inputs and operator credentials never share a file. **Real `.env*` files are
 gitignored; every `.env*` file has a committed `.example` twin, and the `.example` is the
-source of truth** for what an operator must set to run the boundary.
+source of truth** for what an operator must set.
 
 ```
-.env             ← real values, gitignored (never committed)
-.env.example     ← committed, self-documenting twin
+.env                       ← runtime/boundary inputs (real values, gitignored)
+.env.example               ← committed twin — boundary/runtime inputs ONLY
+.env.ops.dev               ← local operator/test/validator creds (gitignored)
+.env.ops.dev.example       ← committed twin — local ops/validator/test creds
+.env.ops.staging           ← remote staging operator creds (gitignored)
+.env.ops.staging.example   ← committed twin — remote staging ops creds
+.env.ops.production        ← remote production operator creds (gitignored)
+.env.ops.production.example ← committed twin — remote production ops creds
 ```
 
 The `.gitignore` enforces the mechanism (ignore all real `.env*`, then explicitly un-ignore
@@ -37,14 +44,37 @@ each `.example`):
 .env
 .env.*
 !.env.example
+!.env.ops.dev.example
+!.env.ops.staging.example
+!.env.ops.production.example
 ```
+
+### The role split
+
+Each family owns a distinct surface — do not mix them:
+
+- **`.env` / `.env.example`** — the M2 **boundary/runtime** inputs: DB/Redis URLs, the HMAC
+  consumer triple, boundary tuning knobs, and optional integrations. Read at the boundary
+  entry point (`packages/boundary/src/bin.ts`).
+- **`.env.ops.dev` / `.env.ops.dev.example`** — **local** operator/test/validator credentials
+  (venue keys, wallets). Local test/validator scripts (`run-extra-tests.sh`, `validate-1inch.sh`,
+  `validate-jupiter.sh`) default to this file.
+- **`.env.ops.staging` / `.env.ops.staging.example`** — operator/validator credentials for the
+  **staging** environment.
+- **`.env.ops.production` / `.env.ops.production.example`** — operator/validator credentials for
+  the **production** environment.
+
+"Do not mix them" refers to *roles/credentials*: operator private keys, wallets, and testnet
+credentials belong in `.env.ops.*`, never `.env`. Note that a few runtime API keys —
+`ONEINCH_API_KEY` and `JUPITER_API_KEY` — are intentionally **duplicated** into `.env.ops.*`
+because the validators read the same key; this overlap is expected, not a mixing of roles.
 
 ### Why
 
-A newcomer (human or agent) reads the committed `.example` and immediately knows **which
-`.env` to create and exactly which keys it needs** — without reading the code or leaking a
-secret. It is documentation that cannot drift silently, because the rule below keeps it in
-lockstep with the code.
+A newcomer (human or agent) reads the committed `.example` twins and immediately knows **which
+`.env*` file to create for each role and exactly which keys it needs** — without reading the
+code or leaking a secret. It is documentation that cannot drift silently, because the rule
+below keeps it in lockstep with the code.
 
 ### The rule (authoring/implementing agents MUST follow)
 
