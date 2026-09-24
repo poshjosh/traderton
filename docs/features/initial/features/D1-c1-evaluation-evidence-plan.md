@@ -277,9 +277,9 @@ exports re-point → row-shape/parity verification.** Read-path-only slice throu
 ### Sub-step 3 — Register + document (Traderton-FIRST, per 005/006)
 - **Files:** `traderton/packages/boundary/src/registry.ts` (ensure the new tools are in the registry
   list — automatic if added to an existing barrel; else add the new `agentEvidenceTools` import).
-  `docs/006-source-capability-manifest.md` (add the three tools to the inventory);
-  `docs/005-consumer-boundary-contract.md` (document the new read tools — names, params, payload
-  shapes, `read-database` category). Update `docs/001-parity-ledger.md` (D1-c1 status).
+  `docs/features/initial/06-source-capability-manifest.md` (add the three tools to the inventory);
+  `docs/features/initial/05-consumer-boundary-contract.md` (document the new read tools — names, params, payload
+  shapes, `read-database` category). Update `docs/features/initial/01-parity-ledger.md` (D1-c1 status).
 - **Position vs 005/006:** these are **new boundary tools → must be documented Traderton-first**
   (005 = the contract herobids consumes; 006 = the parity inventory). This sub-step is the
   Traderton-first documentation gate before herobids consumes them.

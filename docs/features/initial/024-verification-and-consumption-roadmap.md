@@ -164,6 +164,13 @@ Also settled here: the **in-process library remains a permanently-supported cons
 REST-only) — see [000](./000-vision.md) + [004](./004-decision-log.md); the deployment posture (REST-first)
 is legal, not architectural.
 
+**L3 verification carry-forward (2026-09-24):** skipping the bare-library L2 did not waive the promised
+REST-boundary differential. No completed L3e differential or representative load report was recorded by
+A8/C5 certification, so both remain blocking Step 16 obligations in herobids' External Backend program.
+Step 16 uses read-only pre-removal Herobids oracle
+`1f6978d740d45e466cf4149617b8afc1c721e751`; its dedicated plan must define the identical-input corpus,
+normalization, dependencies, and load profile before operator-approved staging execution.
+
 ## What this roadmap does NOT change
 
 - The extraction phases (009) and their status — unaffected; 009 remains the extraction authority.

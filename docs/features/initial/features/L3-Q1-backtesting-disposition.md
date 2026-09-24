@@ -13,9 +13,9 @@ legal-isolation). So it had to either move **behind the Traderton boundary (Opti
 see §5.
 
 **Reads:** [CANONICAL-STATE.md](../CANONICAL-STATE.md) (legal-isolation law, merge gate),
-herobids `docs/features/2026/09/10/001-consume-traderton/004-l3d-plan.md` §H (the deferred
-classification), herobids `docs/features/2026/05/01/initial/009-phase-3-plan.md` (the original
-port spec), herobids `docs/features/2026/06/15/013-backtesting-agent-tools.md` (the
+herobids `docs/features/initial/features/2026/09/10/001-consume-traderton/004-l3d-plan.md` §H (the deferred
+classification), herobids `docs/features/initial/features/2026/05/01/initial/009-phase-3-plan.md` (the original
+port spec), herobids `docs/features/initial/features/2026/06/15/013-backtesting-agent-tools.md` (the
 never-built agent-tools variant).
 
 ## 1. What backtesting is today (grounded in code)

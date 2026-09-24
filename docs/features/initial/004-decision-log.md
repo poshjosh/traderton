@@ -15,7 +15,7 @@ don't obviously cover. The reasoning tells you which way to lean.
 Trading was fused into an agent + messaging platform through four seams: a
 shared database schema, shared streaming infra, shared config, and a shared
 risk gate. Attempts to draw a clean tool-invocation boundary (the herobids
-`docs/features/pending/000-capability-foundations` set) specified the
+`docs/features/initial/features/pending/000-capability-foundations` set) specified the
 request/response tool contract well but left the *data*, *streaming*, *config*,
 and *risk-gate authority* seams unowned. Trading is also becoming its own
 product (own TLD, external API/MCP/skills for other agents), which justifies a
@@ -573,6 +573,14 @@ preserves the deployment optionality (isolate-behind-REST today; plug-in-process
    exercised the full execution path live. Manufacturing a mechanical corpus was judged high-cost /
    low-marginal-value over L3's eventual REST-boundary differential. Order (when L2 is done at
    all): L1 → L2 → F → L3, L2 before-F-or-skipped.
+4. **The L3 REST differential remains mandatory at Step 16** (2026-09-24). A8/C5 suites and the
+  24-hour cross-stack soak did not produce the promised side-by-side report or a representative load
+  report. Skipping L2 did not waive L3e. Step 16 therefore uses read-only pre-removal Herobids oracle
+  `1f6978d740d45e466cf4149617b8afc1c721e751` (the parent of package-removal commit
+  `55c5375664bceb093444832b0145419d4d9ef684`) and must define identical inputs, normalization, and load
+  profile before execution. Existing parity, boundary, A8/C5, and soak evidence remains supporting
+  evidence only. This preserves the recorded parity/readiness policy; it does not authorize staging
+  mutation or a merge.
 
 ## Why there is an interim "library consumer" milestone (M1) before the API (M2)
 
@@ -651,7 +659,7 @@ deferred `maxBots` decision) from quietly becoming a backdoor around copy-never-
 
 ## Why Phase 10 (infra) is a shared versioned module, not copy-and-delete
 
-Settled 2026-09-07. Full decision + verified source facts: [docs/features/012-shared-infra-module-decision.md](../archive/features/012-shared-infra-module-decision.md).
+Settled 2026-09-07. Full decision + verified source facts: [docs/features/initial/features/012-shared-infra-module-decision.md](../archive/features/012-shared-infra-module-decision.md).
 
 Every other phase moves trading code by copy-and-delete because herobids *stops* owning that code — trading
 relocates to Traderton and herobids becomes a consumer. **Infra is the exception: herobids does not stop
@@ -1280,7 +1288,7 @@ Grounding the carve-out found `apps/api/src/routes/credentials.ts` (`POST/GET/DE
 
 ## D1-c1 — evaluation-evidence reads over the boundary (2026-09-12, decision agent = Contemplator; SETTLED WITHIN RULES)
 
-**Plan:** `docs/features/D1-c1-evaluation-evidence-plan.md`. Re-point the herobids PLATFORM agent-evaluation subsystem's reads of the trading tables (fills/journal/positions/bots) over the boundary so the tables can drop (D1-c4). Evaluation analyses RAW rows (redaction, per-fill timing, security-scan) → the reads return FULL ROW arrays.
+**Plan:** `docs/features/initial/features/D1-c1-evaluation-evidence-plan.md`. Re-point the herobids PLATFORM agent-evaluation subsystem's reads of the trading tables (fills/journal/positions/bots) over the boundary so the tables can drop (D1-c4). Evaluation analyses RAW rows (redaction, per-fill timing, security-scan) → the reads return FULL ROW arrays.
 
 **Ruling on full-trading-STATE-rows over the boundary: APPROVE-WITH-CONSTRAINT, settled within rules (no ratification).**
 - The derived-only contract rule (tool-contract.ts) is a MARKET-DATA rule — its text/justification are entirely about `scannerCandleFetcher`/pool fetch ("must not fetch trading CANDLE/pool data"), i.e. keeping the platform out of the market-data pipeline. It does NOT reach trading STATE rows. Trading-state-to-the-owning-consumer is a different, permissible category.

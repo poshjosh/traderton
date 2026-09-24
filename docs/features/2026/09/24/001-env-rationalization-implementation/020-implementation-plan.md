@@ -4,7 +4,7 @@
 
 Adopt a role-based environment-file layout that mirrors herobids' operator workflow while satisfying Traderton's stricter `.example`-twin rule and reducing ambiguity around test skips, validator warnings, and runtime-vs-ops ownership.
 
-This plan uses the variable mapping table in `docs/features/pending/001-env-file-design-and-variable-mapping.md` as the source of truth for file placement.
+This plan uses the variable mapping table in `docs/features/2026/09/24/001-env-rationalization-implementation/010-env-file-design-and-variable-mapping.md` as the source of truth for file placement.
 
 ## Success Criteria
 

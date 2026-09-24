@@ -3,7 +3,7 @@
 **Status:** DONE — implemented on traderton `l3-integration` (commit `b0e866e`) +
 herobids `consume-traderton` (commit `61d67fda`). Live-venue `--execute` verification
 deferred to a human with creds; see §9 Outstanding Issues.
-**Doc home:** mirrors `traderton/docs/features/shell-test-cross-stack-plan.md` (the parent plan) and `herobids-config-cleanup-plan.md`.
+**Doc home:** mirrors `traderton/docs/features/initial/features/shell-test-cross-stack-plan.md` (the parent plan) and `herobids-config-cleanup-plan.md`.
 
 ---
 
@@ -65,7 +65,7 @@ herobids test entrypoints) comes after this.
 - Prefer completing the extraction faithfully (copy source behaviour) over inventing.
 - For any FOUR-RISK / contract-level choice (changing a boundary contract, a settled
   decision, or behaviour that ripples), do NOT gut-fix: surface it and route to a
-  decision/pressure-test agent (see `traderton/docs/008-decision-process.md`). This
+  decision/pressure-test agent (see `traderton/docs/features/initial/08-decision-process.md`). This
   slice is NOT expected to hit one — it's a copy+repoint+delete — but if you do, stop.
 
 ---
@@ -86,7 +86,7 @@ that now lives in traderton. Then delete the originals from herobids.
 herobids API `/health` + does direct venue-quote HTTP probes; it imports no adapter
 code and is operator-only (not CI). Its own header says it does NOT validate adapter
 wiring/signer/execution. **Decision: DEFER** it to the traderton improvement backlog
-(`traderton/docs/010-improvement-backlog.md`) as a low-value venue-reachability item;
+(`traderton/docs/features/initial/10-improvement-backlog.md`) as a low-value venue-reachability item;
 do NOT migrate or delete it in this slice. Add a one-line backlog entry noting the
 deferral. (Rationale: it's not a parity test; migrating it now is scope creep.)
 
@@ -231,7 +231,7 @@ verification is deferred to a human with creds.
 ---
 
 ## 6. Commits (separate, per repo)
-- traderton (`l3-integration`): `git add traderton/scripts/ts/validate-jupiter-launch.ts traderton/scripts/ts/validate-1inch-launch.ts traderton/scripts/shell/tests/validate-jupiter.sh traderton/scripts/shell/tests/validate-1inch.sh traderton/.env.example traderton/docs/010-improvement-backlog.md` (+ run-extra-tests.sh if you wired a tier). Message e.g. `test(venues): migrate 1inch/jupiter launch validators from herobids`.
+- traderton (`l3-integration`): `git add traderton/scripts/ts/validate-jupiter-launch.ts traderton/scripts/ts/validate-1inch-launch.ts traderton/scripts/shell/tests/validate-jupiter.sh traderton/scripts/shell/tests/validate-1inch.sh traderton/.env.example traderton/docs/features/initial/10-improvement-backlog.md` (+ run-extra-tests.sh if you wired a tier). Message e.g. `test(venues): migrate 1inch/jupiter launch validators from herobids`.
 - herobids (`consume-traderton`): `git add -u` the four deleted paths (or `git rm` them). Message e.g. `chore(tests): remove venue launch validators (migrated to traderton)`.
 
 ---

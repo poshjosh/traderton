@@ -123,14 +123,14 @@ The primary documents now agree:
   correct as a historical table-drop decision. The current `001` row supersedes
   its final-sounding platform classification with **temporary platform
   retention—reassessment required before legal-isolation sign-off**.
-- `docs/011-premerge-backlog.md:78` labels the earlier FULL-set inclusion as
+- `docs/features/initial/11-premerge-backlog.md:78` labels the earlier FULL-set inclusion as
   "[historical, RETRACTED]" and records the c4.9h platform-KEEP ruling.
-  `docs/011-premerge-backlog.md:185` calls the former omission CRITICAL but
-  RESOLVED, and `docs/011-premerge-backlog.md:205` records that the later
+  `docs/features/initial/11-premerge-backlog.md:185` calls the former omission CRITICAL but
+  RESOLVED, and `docs/features/initial/11-premerge-backlog.md:205` records that the later
   16-table drop left `market_assessment_*` untouched.
-- `docs/005-consumer-boundary-contract.md` has no `market_assessment` reference;
+- `docs/features/initial/05-consumer-boundary-contract.md` has no `market_assessment` reference;
   it creates no contrary boundary obligation.
-- `docs/004-decision-log.md:314-315` refers only to the copied
+- `docs/features/initial/04-decision-log.md:314-315` refers only to the copied
   `market_assessment_artifacts -> market_assessment_runs` foreign key. It does
   not make a contrary ownership ruling.
 
@@ -290,7 +290,7 @@ directories; Traderton runtime code; `main`.
 ```sh
 cd /Users/chinomso.ikwuagwu/dev_ai/hero-trade/herobids
 rg -n 'backfill-realized-pnl-delta' . \
-  -g '!docs/features/2026/09/10/001-consume-traderton/004-l3d-plan.md'
+  -g '!docs/features/initial/features/2026/09/10/001-consume-traderton/004-l3d-plan.md'
 rg -n '"@herobids/engine"' apps/api/package.json
 rg -n '"@herobids/venues"' apps/worker/package.json scripts/package.json
 pnpm exec tsc --noEmit -p apps/api/tsconfig.json
@@ -355,7 +355,7 @@ the local packages compiling.
 
 ### Mandatory decision checkpoint
 
-Run `traderton/docs/008-decision-process.md` before selecting a route. The
+Run `traderton/docs/features/initial/08-decision-process.md` before selecting a route. The
 neutral question is:
 
 > After local trading packages are removed, where do the static DTO and port
@@ -482,7 +482,7 @@ either branch to `main`.
 - The label "market data / market assessment" hides two different ownership
   boundaries. Do not use temporary assessment retention to justify moving
   market-data provider logic back into Herobids.
-- The historic `herobids/docs/features/2026/09/10/001-consume-traderton/004-l3d-plan.md`
+- The historic `herobids/docs/features/initial/features/2026/09/10/001-consume-traderton/004-l3d-plan.md`
   still describes old package-removal terrain. It is historical evidence only;
   re-run the `rg` commands here and rely on the canonical state, parity ledger,
   and current pre-merge backlog for live decisions.

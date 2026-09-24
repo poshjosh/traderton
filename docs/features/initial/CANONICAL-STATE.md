@@ -105,6 +105,13 @@ LIVE and KEPT (herobids consumes `agent.technical.scan_completed` messages Trade
 - **B3 = the deferred swap `score_candidate` build** (token→pool behind the boundary; approach ratified).
 - Then package/table deletions (LAST) + L3e differential/soak + the merge gate.
 
+**Verification carry-forward (2026-09-24):** A8/C5 suites and the 24-hour cross-stack soak did not produce
+the required L3e REST differential or representative load report. Those gates remain **Pending** and are
+carried into herobids' 2026-09-24 External Backend program, Step 16. The read-only pre-removal Herobids
+oracle is pinned at `1f6978d740d45e466cf4149617b8afc1c721e751` (the parent of package-removal commit
+`55c5375664bceb093444832b0145419d4d9ef684`). Copied parity tests, boundary end-to-end suites, A8/C5 runs,
+and soak evidence support the gate but do not replace the differential or load reports.
+
 ## 3. Target state & what's next
 
 **End state:** herobids consumes `@traderton/*` and its own trading code is retired; Traderton runs as
@@ -204,7 +211,7 @@ human; recorded here (Traderton is the authority until cutover).
   its own credential-custody design pass (transport, encryption-at-rest, never-logged). **Its own slice
   (L3-P1), sequenced AFTER L3c authoring, BEFORE L3e** (L3c unit-tests against a stub and does not need it).
   Staging may operator-seed accounts in the interim. **APPROVED 2026-09-08 —
-  [docs/features/L3-P1-provision-venue-account-proposal.md](./features/L3-P1-provision-venue-account-proposal.md);
+  [docs/features/initial/features/L3-P1-provision-venue-account-proposal.md](./features/L3-P1-provision-venue-account-proposal.md);
   decisions:** **D1** = ONE tool `provision_venue_account` (credential + venue_account in one idempotent
   call, returns `venueAccountId`); **D2** = credentials cross the wire in the payload (HMAC+TLS →
   `encryptCredential` at rest → never logged; result is metadata only); **D3** = the copied per-user
@@ -336,7 +343,7 @@ Later settled decisions (reasoning in [004](./004-decision-log.md), records wher
 
 ## 8. Where things live (pointer map)
 
-**Live docs (authoritative for their scope; stay in `docs/`):**
+**Live docs (authoritative for their scope; stay in `docs/features/initial/):**
 - [000-vision.md](./000-vision.md) — the goal, the copy-never-author law, "herobids becomes a consumer,"
   the 17 settled decisions. The vision/law. *(Its REST-cutover framing is CORRECT and settled — see §3;
   in-process is a supported non-cutover path, not the shipping shape.)*

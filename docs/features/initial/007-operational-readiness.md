@@ -96,6 +96,20 @@ copied tests and historical journals can substitute. For extracted source
 behavior, side-by-side equivalence against herobids remains mandatory before
 irreversible cutover.
 
+### Post-Removal Oracle Protocol
+
+If the legacy implementation has already been removed from the active tree,
+run it from a read-only git worktree pinned immediately before removal. Do not
+restore it to the shipping branch or route production traffic through it. The
+verification plan must record the pin, identical-input corpus, dependency
+fixtures, nondeterministic-field normalization, and comparison report format.
+
+For the Herobids cutover, the pinned oracle is
+`1f6978d740d45e466cf4149617b8afc1c721e751`, the parent of trading-package
+removal commit `55c5375664bceb093444832b0145419d4d9ef684`. Copied parity tests,
+boundary end-to-end suites, A8/C5 runs, and soak evidence are supporting
+evidence; they do not replace the differential report.
+
 ### Equivalence Criteria
 
 Equivalence passes when all of the following hold:

@@ -7,7 +7,7 @@ BOTH `market-data` and `strategy` from herobids. The candle-fetching classificat
 explicit open question the investigation slice must resolve before the tool contracts are final.
 
 **Reads:** [CANONICAL-STATE.md](../CANONICAL-STATE.md) (legal-isolation, merge gate),
-herobids `docs/features/2026/09/10/001-consume-traderton/004-l3d-plan.md` §H (the deferred
+herobids `docs/features/initial/features/2026/09/10/001-consume-traderton/004-l3d-plan.md` §H (the deferred
 classification of `market-data` + `strategy`).
 
 ## 1. What Q2 is

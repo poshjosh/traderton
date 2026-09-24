@@ -11,7 +11,7 @@ uses are not one thing; they split three ways. Resolution:
 
 **Reads:** [CANONICAL-STATE.md](../CANONICAL-STATE.md) (legal-isolation, merge gate),
 [L3-Q2-market-intelligence-coupling.md](./L3-Q2-market-intelligence-coupling.md) (the candle-fetcher
-join), herobids `docs/features/2026/09/10/001-consume-traderton/004-l3d-plan.md` §H (deferred `venues`).
+join), herobids `docs/features/initial/features/2026/09/10/001-consume-traderton/004-l3d-plan.md` §H (deferred `venues`).
 
 ## 1. What Q3 is
 

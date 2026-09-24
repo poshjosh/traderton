@@ -168,7 +168,7 @@ logic. HTTP/HMAC lives in the client, not in any trading core (that core is now 
   `pending_approval` stays a *herobids* outcome produced by the platform approval gate BEFORE the boundary
   call (the boundary only executes an already-approved decision). Confirm.
 - **D4 — L3 sub-phasing (§7)** — confirm L3a→L3e, read-path-before-write, delete-last.
-- **D5 — This proposal's home + the herobids-side doc.** This spec is in traderton `docs/features/`; the
+- **D5 — This proposal's home + the herobids-side doc.** This spec is in traderton `docs/features/initial/features/`; the
   herobids branch will also need a short in-herobids record (its own AGENTS/README note that trading is now
   consumed over REST). Confirm you want both.
 

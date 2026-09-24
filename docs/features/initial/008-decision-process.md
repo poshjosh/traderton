@@ -53,10 +53,10 @@ Copy this per question. The implementer fills it; it must be neutral (no ranking
    - Copy, never author — <+ the precedence note: top rule wins when copying preserves a coupling>
    - Parity, not liveness — "we may improve; we must NOT degrade"; nothing silently dropped
    - main-branch / merge-gate — nothing merges to main without explicit human approval
-   (pointer: traderton/docs/000-vision.md, CANONICAL-STATE §4, this doc)
+   (pointer: traderton/docs/features/initial/00-vision.md, CANONICAL-STATE §4, this doc)
 
 4. Relevant prior decisions (SELECTIVE — only those that constrain/precede this one)
-   - <decision + one-line summary + pointer>  (full log: traderton/docs/004-decision-log.md)
+   - <decision + one-line summary + pointer>  (full log: traderton/docs/features/initial/04-decision-log.md)
 
 5. The question (NEUTRAL — no options implied, no lean)
 
@@ -209,12 +209,12 @@ between them — stopping ONLY at the enumerated hard stops below. This section 
 durable (survives context compaction) and keeps the safeguards intact.
 
 ### 8.1 The driver loop
-Maintain a sequenced **pre-merge backlog** (docs/010-improvement-backlog.md holds later-options;
+Maintain a sequenced **pre-merge backlog** (docs/features/initial/10-improvement-backlog.md holds later-options;
 the CUTOVER-blocking backlog lives in 001's Deferred-required rows + a working checklist). Run:
 
   pick next UNBLOCKED backlog item → investigate → **decision checkpoint (route four-risk via §3)**
   → implement (both repo sides) → CodeReviewer → verify with REAL build/lint/test (+ boundary e2e
-  where behaviour warrants) → commit focused → update durable docs/journal → **immediately pick the
+  where behaviour warrants) → commit focused → update durable docs/features/initial/ournal → **immediately pick the
   next unblocked item and begin it.**
 
 The final step of every slice is "select + start the next slice." That IS the continuity

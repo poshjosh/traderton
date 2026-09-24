@@ -1,7 +1,7 @@
 # Shell-Test Cross-Stack Plan — testing herobids-consuming-traderton before merge
 
 Status: PLAN ONLY (do not implement from this doc directly; hand to the Implementer slice by slice).
-Doc home convention: mirrors `traderton/docs/features/herobids-config-cleanup-plan.md`.
+Doc home convention: mirrors `traderton/docs/features/initial/features/herobids-config-cleanup-plan.md`.
 
 ## 0. Goal & framing
 
@@ -63,7 +63,7 @@ herobids (`/Users/chinomso.ikwuagwu/dev_ai/hero-trade/herobids`):
   imports nothing; NOT in CI (operator-only).
 - Unstable-test gate already exists in `run-extra-tests.sh`: `RUN_UNSTABLE_LLM_LATENCY_TESTS=1`
   un-skips `agent-trade-test`, `preset-review-gap-closure`, `scanner-provider-smoke` (Tier 5),
-  documented against bug `docs/bug-reports/2026/09/05/001-agent-activation-timeout-cumulative-launch-latency.md`.
+  documented against bug `docs/features/initial/ug-reports/2026/09/05/001-agent-activation-timeout-cumulative-launch-latency.md`.
 
 traderton (`/Users/chinomso.ikwuagwu/dev_ai/hero-trade/traderton`):
 - Compose: `docker-compose.yml` — services `postgres` (`5432`), `redis` (`6379`), `migrate`,
@@ -267,7 +267,7 @@ LOW-PRIORITY**, because venue reachability is now a traderton concern (traderton
 Recommended concrete form: fold the direct-quote reachability probe into a small traderton
 operator script (e.g. `traderton/scripts/shell/tests/validate-venue-reachability.sh`) OR defer it to
 the improvement backlog. It does NOT block Slice 2's core migration (the two adapter parity scripts).
-**Recommendation: DEFER** to the traderton improvement backlog (`docs/010-improvement-backlog.md`) as
+**Recommendation: DEFER** to the traderton improvement backlog (`docs/features/initial/10-improvement-backlog.md`) as
 a low-value/low-effort item and DELETE the herobids original in Slice 2 only if nothing references it;
 otherwise leave it in herobids until the backlog item lands. Flag this for the human to confirm the
 disposition (delete-now vs defer-then-delete).

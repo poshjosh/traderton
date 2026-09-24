@@ -1,7 +1,7 @@
 # Slice 3 — Prune & repoint the herobids test entrypoints for the cross-stack world
 
 **Status:** IMPLEMENTED — 4a/4b/4c/5 DONE (one commit, see §6). Outstanding LOW notes at the bottom.
-**Doc home:** mirrors `traderton/docs/features/shell-test-cross-stack-plan.md` (parent).
+**Doc home:** mirrors `traderton/docs/features/initial/features/shell-test-cross-stack-plan.md` (parent).
 **Depends on:** Slice 1 (cross-stack harness — DONE) and Slice 2 (venue validators
 migrated out of herobids). Do Slice 2 first; this slice assumes the `validate-*`
 scripts are already gone from herobids.
