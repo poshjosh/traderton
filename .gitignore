@@ -15,6 +15,9 @@ build/
 .env
 .env.*
 !.env.example
+!.env.ops.dev.example
+!.env.ops.staging.example
+!.env.ops.production.example
 
 # IDE
 .vscode/
