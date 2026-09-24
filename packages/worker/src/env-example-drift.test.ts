@@ -10,6 +10,21 @@
  *   (b) every `process.env['X']` literal across packages (ex-tests).
  * Guard 2 — `config/default.yaml` has a value for (near enough) every leaf the
  *   code documents, i.e. the ENV_OVERRIDES target paths resolve to a present key.
+ * Guard 3 — `.env.ops.*.example` files are in lockstep with each other and with
+ *   their documented var set (validator secrets + testnet creds + dup'd runtime
+ *   keys), and do not commit real secret values.
+ *
+ * The "every new .env variant must have a committed .example twin" rule is
+ * enforced by the `.gitignore` negation rules:
+ *   .env
+ *   .env.*
+ *   !.env.example
+ *   !.env.ops.dev.example
+ *   !.env.ops.staging.example
+ *   !.env.ops.production.example
+ * Any future `.env.foo` real file is ignored unless its `.env.foo.example` twin
+ * is explicitly un-ignored — so a future author must extend BOTH `.gitignore`
+ * (add the negation line) AND this test (add the path constant + expected keys).
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -18,6 +33,9 @@ import { resolve, join } from 'node:path';
 // packages/worker/src → repo root is ../../..
 const REPO_ROOT = resolve(new URL('.', import.meta.url).pathname, '../../..');
 const ENV_EXAMPLE = resolve(REPO_ROOT, '.env.example');
+const OPS_DEV_EXAMPLE = resolve(REPO_ROOT, '.env.ops.dev.example');
+const OPS_STAGING_EXAMPLE = resolve(REPO_ROOT, '.env.ops.staging.example');
+const OPS_PROD_EXAMPLE = resolve(REPO_ROOT, '.env.ops.production.example');
 const CONFIG_TS = resolve(REPO_ROOT, 'packages/worker/src/config.ts');
 const DEFAULT_YAML = resolve(REPO_ROOT, 'config/default.yaml');
 const PACKAGES_DIR = resolve(REPO_ROOT, 'packages');
@@ -86,14 +104,31 @@ function processEnvLiterals(): string[] {
   return [...keys];
 }
 
-/** Env var names documented in .env.example (both active `KEY=` and commented `# KEY=`). */
-function envExampleKeys(): Set<string> {
-  const src = readFileSync(ENV_EXAMPLE, 'utf8');
+/** Env var names documented in an example file (both active `KEY=` and commented `# KEY=`). */
+function envExampleKeys(file: string = ENV_EXAMPLE): Set<string> {
+  const src = readFileSync(file, 'utf8');
   const keys = new Set<string>();
   const re = /^\s*#?\s*([A-Z][A-Z0-9_]+)=/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) keys.add(m[1]!);
   return keys;
+}
+
+/** Env var name → value (value after `=`, inline comment stripped) from an example file. */
+function envExampleValues(file: string): Map<string, string> {
+  const src = readFileSync(file, 'utf8');
+  const values = new Map<string, string>();
+  const re = /^\s*#?\s*([A-Z][A-Z0-9_]+)=(.*)$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) {
+    let value = m[2]!;
+    // Strip any inline `# comment` (whitespace-prefixed) before trimming, so the
+    // trailing spaces in `KEY=                    # comment` don't survive.
+    const hash = value.search(/\s+#/);
+    if (hash !== -1) value = value.slice(0, hash);
+    values.set(m[1]!, value.trim());
+  }
+  return values;
 }
 
 describe('.env.example is in lockstep with the code that reads env vars', () => {
@@ -165,5 +200,92 @@ describe('config/default.yaml has a value for every ENV_OVERRIDES target (self-d
       .filter((p) => !OPTIONAL_NO_DEFAULT_PATHS.has(p))
       .filter((p) => !pathPresent(p));
     expect(missing, `ENV_OVERRIDES target paths missing a value in default.yaml: ${missing.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('.env.ops.*.example files are in lockstep with each other and their docs', () => {
+  // The operator/test/validator examples carry credentials that are NOT all read
+  // as `process.env['X']` literals in packages/ (validators live under scripts/ts/,
+  // integration tests use describe.skipIf), so they can't be guarded by the literal
+  // walk — we assert them against an explicit expected key set instead.
+  const OPS_EXAMPLES = [
+    ['dev', OPS_DEV_EXAMPLE],
+    ['staging', OPS_STAGING_EXAMPLE],
+    ['production', OPS_PROD_EXAMPLE],
+  ] as const;
+
+  // Union of validator secrets + Tier5/6 testnet creds + runtime keys duplicated
+  // into ops. Mirrors the Variable Mapping Table in
+  // docs/features/2026/09/24/001-env-rationalization-implementation/010-env-file-design-and-variable-mapping.md.
+  const EXPECTED_OPS_KEYS = [
+    'ONEINCH_PRIVATE_KEY',
+    'SOLANA_WALLET_PRIVATE_KEY',
+    'SOLANA_RPC_URL',
+    'JUPITER_WALLET_ADDRESS',
+    'JUPITER_PRIVATE_KEY',
+    'SWAP_AMOUNT',
+    'SLIPPAGE_BPS',
+    'HYPERLIQUID_TESTNET_API_KEY',
+    'HYPERLIQUID_TESTNET_SECRET',
+    'HYPERLIQUID_TESTNET_ACCOUNT_ADDRESS',
+    'BYBIT_TESTNET_API_KEY',
+    'BYBIT_TESTNET_SECRET',
+    'BASE_RPC_URL',
+    'ONEINCH_API_URL',
+    'ONEINCH_API_KEY',
+    'JUPITER_API_KEY',
+    'JUPITER_API_URL',
+    'ONEINCH_CHAIN_ID',
+    'ONEINCH_ROUTER_ADDRESS',
+    'NODE_ENV',
+    'LOG_FORMAT',
+  ];
+
+  // Secret-shaped var names — must be left blank/placeholder in committed examples.
+  // Non-secret vars (URLs, chain id, NODE_ENV, LOG_FORMAT, amounts, bps) MAY have defaults.
+  const SECRET_VAR_RE = /(_PRIVATE_KEY|_SECRET|_API_KEY|_SIGNING_SECRET|_ENCRYPTION_KEY)$/;
+
+  it('documents the same key set across all three ops examples', () => {
+    const baseline = [...envExampleKeys(OPS_DEV_EXAMPLE)].sort();
+    for (const [label, file] of OPS_EXAMPLES) {
+      if (label === 'dev') continue; // skip self-comparison of the baseline
+      const keys = [...envExampleKeys(file)].sort();
+      const missing = baseline.filter((k) => !keys.includes(k));
+      const extra = keys.filter((k) => !baseline.includes(k));
+      expect(
+        { missing, extra },
+        `.env.ops.${label}.example diverges from .env.ops.dev.example ` +
+          `(missing: ${missing.join(', ') || 'none'}; extra: ${extra.join(', ') || 'none'})`,
+      ).toEqual({ missing: [], extra: [] });
+    }
+  });
+
+  it('documents every expected ops var in every example', () => {
+    for (const [label, file] of OPS_EXAMPLES) {
+      const documented = envExampleKeys(file);
+      const missing = EXPECTED_OPS_KEYS.filter((k) => !documented.has(k));
+      const extra = [...documented].filter((k) => !EXPECTED_OPS_KEYS.includes(k));
+      expect(
+        missing,
+        `Expected ops vars missing from .env.ops.${label}.example: ${missing.join(', ') || 'none'}`,
+      ).toEqual([]);
+      expect(
+        extra,
+        `Ops vars in .env.ops.${label}.example not listed in EXPECTED_OPS_KEYS: ${extra.join(', ') || 'none'}`,
+      ).toEqual([]);
+    }
+  });
+
+  it('does not commit real secret values (secret-shaped vars left blank)', () => {
+    for (const [label, file] of OPS_EXAMPLES) {
+      const values = envExampleValues(file);
+      const leaked = [...values.entries()]
+        .filter(([key, value]) => SECRET_VAR_RE.test(key) && value !== '')
+        .map(([key, value]) => `${key}=${value}`);
+      expect(
+        leaked,
+        `Secret-shaped vars with non-empty values committed in .env.ops.${label}.example: ${leaked.join(', ')}`,
+      ).toEqual([]);
+    }
   });
 });
