@@ -5,7 +5,7 @@
 // integration pattern). Tests 1–6 drive the REAL boundary via `app.inject`
 // against `createBoundaryApp` wired to a REAL Postgres-backed
 // `BoundaryInvocationRepository` + a REAL `BotRepository`. Test 7 needs the
-// docker-compose stack (see docker-compose.yml + scripts/run-integration.sh) and
+// docker-compose stack (see docker-compose.yml + scripts/shell/tests/run-integration.sh) and
 // is skipped unless BOUNDARY_BASE_URL points at a running boundary.
 //
 // F2c authors NO trading behaviour — these assert ALREADY-BUILT behaviour. The
@@ -502,7 +502,7 @@ describe.skipIf(SKIP)('boundary 005 required verification (integration)', () => 
   // ── 005 item 7: compose/staging startup reaches a healthy /health/ready ─────
   // This is the one test that needs the actual compose stack. It is skipped
   // unless BOUNDARY_BASE_URL points at a running boundary (the runner brings the
-  // stack up first). See scripts/run-integration.sh + docker-compose.yml.
+  // stack up first). See scripts/shell/tests/run-integration.sh + docker-compose.yml.
   describe('7. compose startup reaches a healthy /health/ready', () => {
     const BASE_URL = process.env['BOUNDARY_BASE_URL'];
     it.skipIf(!BASE_URL)('the running boundary serves /health/ready', async () => {

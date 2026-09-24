@@ -994,7 +994,7 @@ behaviour authored.
 - **`boundary.verification.integration.test.ts`** — the 7 tests, 1:1 with 005 §Required Verification, gated
   on `DATABASE_URL`+`REDIS_URL`. Test #4 (one invocation + one downstream effect) drives **paper-mode
   `create_bot`** with `enqueueLifecycle` stubbed (no live venue) → asserts exactly one `bots` row + one
-  `boundary_invocations` row on a same-key retry. `scripts/run-integration.sh` + a `test:integration` script
+  `boundary_invocations` row on a same-key retry. `scripts/shell/tests/run-integration.sh` + a `test:integration` script
   migrate-then-test; the default `pnpm test` is UNCHANGED (gated tests skip).
 
 **CodeReviewer disposition:** no CRITICAL/HIGH; faithful copy-adapt, the 7 tests non-tautological, the signer

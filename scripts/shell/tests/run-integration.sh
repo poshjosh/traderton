@@ -8,8 +8,8 @@
 # env vars — so CI's default run is unaffected (item-E / F2a discipline).
 #
 # Usage:
-#   scripts/run-integration.sh                 # spin up throwaway containers, migrate, test, tear down
-#   DATABASE_URL=... REDIS_URL=... scripts/run-integration.sh --no-containers
+#   scripts/shell/tests/run-integration.sh                 # spin up throwaway containers, migrate, test, tear down
+#   DATABASE_URL=... REDIS_URL=... scripts/shell/tests/run-integration.sh --no-containers
 #                                              # reuse an already-running DB/Redis (e.g. docker compose)
 #
 # Test #7 (compose /health/ready) additionally needs a running boundary; set
@@ -17,7 +17,7 @@
 # skips. Bring the full stack up with `docker compose up --build` for #7.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../../.."
 
 MANAGE_CONTAINERS=1
 if [[ "${1:-}" == "--no-containers" ]]; then

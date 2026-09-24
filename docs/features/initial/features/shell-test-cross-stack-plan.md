@@ -73,7 +73,7 @@ traderton (`/Users/chinomso.ikwuagwu/dev_ai/hero-trade/traderton`):
   `CREDENTIAL_ENCRYPTION_KEY=0000…` (64 hex). **Its postgres/redis ports collide with herobids.**
 - Harness: `scripts/shell/tests/run-all-tests.sh` (unit + integration + `--e2e` boundary stack +
   signed invokes via `packages/boundary/dist/dev/boundary-e2e.js`), `run-extra-tests.sh`,
-  `scripts/run-integration.sh`.
+  `scripts/shell/tests/run-integration.sh`.
 - Venues: `@traderton/venues` (`packages/venues`) exports `JupiterSwapAdapter`, `OneInchSwapAdapter`,
   `JupiterConfirmationPoller`, `EvmConfirmationPoller`, `SolanaSigner`, `deriveSolanaAddress`,
   `EvmSigner`, `quantity` lives in `@traderton/domain`. Adapters already exist at

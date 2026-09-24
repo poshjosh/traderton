@@ -9,7 +9,7 @@ import { provisioningTools } from './provisioning.js';
  * DATABASE_URL-gated integration test (L3-P1). Skips locally; runs against real
  * Postgres when DATABASE_URL is set — same pattern as the F2a
  * boundary-invocations integration test. Migrations are applied by
- * scripts/run-integration.sh before the gated suite runs.
+ * scripts/shell/tests/run-integration.sh before the gated suite runs.
  *
  * Proves the real provisioning path: `provision_venue_account` creates a real
  * `user_credentials` row + a linked `venue_accounts` row, and the persisted

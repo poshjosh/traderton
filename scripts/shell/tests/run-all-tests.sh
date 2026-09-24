@@ -7,7 +7,7 @@
 #
 # Test tiers (in order):
 #   1. Unit tests          — pure vitest, no external services (`pnpm test`)
-#   2. Integration tests   — DB + Redis gated suites (scripts/run-integration.sh)
+#   2. Integration tests   — DB + Redis gated suites (scripts/shell/tests/run-integration.sh)
 #   3. Boundary E2E        — the full docker compose stack (postgres + redis +
 #                            migrate + boundary), then REAL signed invokes of the
 #                            market-intelligence read tools asserting real data.
@@ -71,7 +71,7 @@ header "1 / Unit tests"
 
 # --- Tier 2: Integration (DB + Redis) ----------------------------------------
 header "2 / Integration tests (DB + Redis)"
-( cd "${ROOT}" && bash scripts/run-integration.sh ); record "$?" "Integration tests"
+( cd "${ROOT}" && bash scripts/shell/tests/run-integration.sh ); record "$?" "Integration tests"
 
 # --- Tier 3: Boundary E2E (opt-in) -------------------------------------------
 if [[ "${RUN_E2E}" == "true" ]]; then

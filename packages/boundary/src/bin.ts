@@ -190,7 +190,7 @@ async function main(): Promise<void> {
         }),
         parseHtmlFn: createFallbackCalendarParser({
           baseUrl: process.env['LLM_BASE_URL'],
-          model: process.env['LLM_MODEL'] ?? 'anthropic/claude-sonnet-4-5',
+          model: process.env['LLM_MODEL'] ?? 'anthropic/claude-sonnet-latest',
           timeoutMs: Number(process.env['LLM_TIMEOUT_MS'] ?? 60_000),
           ...(process.env['LLM_API_KEY'] ? { apiKey: process.env['LLM_API_KEY'] } : {}),
         }),
