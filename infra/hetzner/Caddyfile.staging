@@ -1,0 +1,28 @@
+{
+    email support@openaidom.com
+}
+
+# Traderton execution boundary — machine-to-machine (Herobids → Traderton).
+# TLS terminated here; HMAC authenticates every call at the boundary.
+api.staging.traderton.com {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        -Server
+    }
+
+    reverse_proxy boundary:8080
+}
+
+# Public site / frontend — human-facing. Must never reach the execution surface.
+staging.traderton.com {
+    encode zstd gzip
+
+    @execution path /internal /internal/* /health /health/*
+    respond @execution 404
+
+    reverse_proxy site:80
+}

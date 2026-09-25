@@ -1,0 +1,8 @@
+[Unit]
+Description=Check Traderton staging backup freshness
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=traderton-backup-health.service
+[Install]
+WantedBy=timers.target

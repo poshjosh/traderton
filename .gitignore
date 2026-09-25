@@ -18,6 +18,10 @@ build/
 !.env.ops.dev.example
 !.env.ops.staging.example
 !.env.ops.production.example
+!infra/hetzner/.env.staging.example
+!infra/hetzner/.env.backup.example
+!infra/hetzner/.env.terraform.example
+!infra/hetzner/*.tfvars.example
 
 # IDE
 .vscode/

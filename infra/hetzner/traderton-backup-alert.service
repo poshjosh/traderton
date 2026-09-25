@@ -1,0 +1,6 @@
+[Unit]
+Description=Alert on failed Traderton staging backup
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/traderton/staging
+ExecStart=/bin/bash /opt/traderton/staging/backup-alert.sh failed

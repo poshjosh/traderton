@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- infrastructure code to infra/hetzner
+
 ## 0.0.2-2026.09.24
 
 ### Changed

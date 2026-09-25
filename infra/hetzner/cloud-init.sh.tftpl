@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euo pipefail
+
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose-v2 ufw restic
+systemctl enable --now docker
+install -d -m 0700 /etc/traderton-staging /srv/traderton /opt/traderton/staging
+touch /etc/traderton-staging/host-marker
+
+# ── Configure UFW ────────────────────────────────────────
+# Mirrors herobids infra/hetzner/cloud-init.yaml. UFW rules persist across
+# reboots before Docker resumes containers, so there is no container-resume
+# window where the boundary port is unfiltered.
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw --force enable

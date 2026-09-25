@@ -1,0 +1,9 @@
+[Unit]
+Description=Off-host Traderton staging database backup
+Requires=docker.service traderton-data.service
+After=docker.service traderton-data.service
+OnFailure=traderton-backup-alert.service
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/traderton/staging
+ExecStart=/opt/traderton/staging/backup.sh

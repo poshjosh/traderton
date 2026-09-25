@@ -1,0 +1,29 @@
+# Traderton staging — Terraform variable inputs.
+# Copy to staging.tfvars and fill in real values. Never commit real secrets.
+
+# Environment name (drives resource naming, workspace, and S3 state key).
+environment = "staging"
+
+# Hetzner datacenter for the Traderton VM.
+location = "fsn1"
+
+# VM type; choose after reviewing capacity.
+server_type = "cx23"
+
+# Operator public SSH key (full public key string, e.g. ssh-ed25519 AAAA...).
+# No public-key path here — Traderton reads the raw key into hcloud_ssh_key.
+ssh_public_key = ""
+
+# Operator IPv4 /32 SSH ingress addresses. Individual addresses only.
+ssh_source_cidrs = [
+  # "203.0.113.7/32",
+]
+
+# Public hostname for the Traderton API (TLS-terminated by Caddy; HMAC-auth).
+api_hostname = "api.staging.traderton.com"
+
+# Public hostname for the human-facing site (frontend, later).
+site_hostname = "staging.traderton.com"
+
+# Persistent Postgres/Redis data volume size in GiB.
+data_volume_size_gb = 50

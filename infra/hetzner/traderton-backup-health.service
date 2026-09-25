@@ -1,0 +1,6 @@
+[Unit]
+Description=Alert on stale Traderton staging backups
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/traderton/staging
+ExecStart=/opt/traderton/staging/backup-health.sh

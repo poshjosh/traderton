@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?Postgres digest required}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: traderton
+      POSTGRES_DB: traderton
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Postgres password required}
+    volumes:
+      - /srv/traderton/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U traderton -d traderton"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: ${REDIS_IMAGE:?Redis digest required}
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1000", "--appendonly", "no"]
+    volumes:
+      - /srv/traderton/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    image: ${BOUNDARY_IMAGE:?Boundary digest required}
+    command: ["pnpm", "--filter", "@traderton/db", "db:migrate"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Database URL required}
+      NODE_ENV: staging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["migrate"]
+
+  boundary:
+    image: ${BOUNDARY_IMAGE:?Boundary digest required}
+    restart: unless-stopped
+    env_file: .env.staging
+    environment:
+      BOUNDARY_HOST: 0.0.0.0
+      BOUNDARY_PORT: "8080"
+    # No host port: the boundary is reachable only via caddy on the compose
+    # network. HMAC authenticates every call; TLS is terminated at caddy.
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      boundary:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:
