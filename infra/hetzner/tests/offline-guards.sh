@@ -40,15 +40,16 @@ grep -Fq 'ALERT_SMTP_HOST' .env.backup.example
 # Local deploy helper must copy an explicit runtime list over SSH, never secrets or state.
 [[ -f scripts/deploy.sh ]] || { echo 'scripts/deploy.sh missing' >&2; exit 1; }
 grep -Fq 'RUNTIME_FILES=(' scripts/deploy.sh
-grep -Fq 'terraform output -raw public_ip' scripts/deploy.sh
+grep -Fq 'terraform_output -raw public_ip' scripts/deploy.sh
 grep -Fq 'scp ' scripts/deploy.sh
+grep -Fq '_ssh_opts.sh' scripts/deploy.sh
 grep -Fq './deploy.sh --confirm-staging' scripts/deploy.sh
 # The uploaded runtime list must never include Terraform state, tfvars, or real env files.
 if awk '/RUNTIME_FILES=\(/{f=1} f{print} f&&/\)/{exit}' scripts/deploy.sh | grep -Eq '\.env\.(staging|backup)|staging\.tfvars|\.tfstate|\.terraform'; then
   echo 'Deploy helper must not upload Terraform state, tfvars, or real env files' >&2
   exit 1
 fi
-for script in deploy.sh scripts/deploy.sh backup.sh backup-job.sh backup-alert.sh backup-health.sh check-backup-success.sh plan-apply.sh mount-data.sh cloud-init.sh.tftpl; do
+for script in deploy.sh scripts/deploy.sh scripts/resolve-images.sh backup.sh backup-job.sh backup-alert.sh backup-health.sh check-backup-success.sh plan-apply.sh mount-data.sh cloud-init.sh.tftpl; do
   bash -n "$script"
 done
 

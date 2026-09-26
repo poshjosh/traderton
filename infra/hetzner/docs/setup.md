@@ -30,7 +30,7 @@ You'll paste the **public** key (`.pub`) into Traderton's tfvars, and use the **
 
 ### Step 2
 
-**Create the Terraform variables file.** Copy `infra/hetzner/staging.tfvars.example` → `infra/hetzner/staging.tfvars`, then fill in values, including `ssh_public_key`.
+**Create the Terraform variables file.** Copy `infra/hetzner/environment.tfvars.example` → `infra/hetzner/staging.tfvars`, then fill in values, including `ssh_public_key`.
 
 for `ssh_source_cidrs`, get your real public IPv4 as a /32 by running the following command:
 
@@ -97,46 +97,38 @@ For AAAA record
 dig @8.8.8.8 AAAA staging.traderton.com +short
 ```
 
-## Phase 5
+## Phase 5 - Deploy
+
+- **Resolve the image references and digest.** Run the helper to pull the images
+  and print the three values that go in `.env.staging` (`POSTGRES_IMAGE`,
+  `REDIS_IMAGE`, `BOUNDARY_DIGEST`):
+
+Get the ghcr-image-sha from the github actions page: https://github.com/poshjosh/traderton/actions from the build-and-push action. Use the value in the below script:
+
+```sh
+cd traderton/infra/hetzner
+bash scripts/resolve-images.sh --release-sha <ghcr-image-sha>
+```
+
+  It prints each value and where to put it. Copy them into `infra/hetzner/.env.staging`.
+
+- **Get the git commit full SHA** (40 hex chars) using the below script:
+
+```sh
+cd /Users/chinomso.ikwuagwu/dev_ai/traderton
+git rev-parse origin/main
+```
 
 - **Deploy the runtime on the VM.** From your laptop, run the local helper script:
 
 ```sh
 cd traderton/infra/hetzner
-bash scripts/deploy.sh --env staging --release-sha <full-release-sha_40-chars>
+bash scripts/deploy.sh --env staging --release-sha <git-commit-full-sha>
 ```
 
-  It resolves the VM IP via `terraform output public_ip`, copies the runtime files + `.env.staging` (mode 600) + `.env.backup` to `/opt/traderton/staging` over SSH, then runs the on-VM `./deploy.sh --confirm-staging <sha>`.
+  It resolves the VM IP via `terraform_output -raw public_ip`, copies the runtime files + `.env.staging` (mode 600) + `.env.backup` to `/opt/traderton/staging` over SSH, then runs the on-VM `./deploy.sh --confirm-staging <sha>`.
 
-   - **Before deploying, the boundary image must exist in ghcr.io.** The `.github/workflows/build-push.yml` workflow builds and pushes it automatically on every push to `main` (tag `ghcr.io/<owner>/traderton:sha-<40-char-sha>`). No manual build/push needed.
+   - **Before deploying, the boundary image must exist in ghcr.io.** The `.github/workflows/build-push.yml` workflow builds and pushes it automatically on every push to `main` (tag `ghcr.io/<owner>/traderton:sha-<40-char-sha>`). No manual build/push needed. After pushing to main, wait till the build and push action is successful, see: https://github.com/poshjosh/traderton/actions
    - **Set `GHCR_USERNAME` and `GHCR_TOKEN` in `.env.staging`** to a GitHub token with `read:packages` scope, so `deploy.sh` can `docker login ghcr.io` and pull the private image. See the "Image Build And Registry" section of `traderton/infra/hetzner/README.md`.
 
 - **Verify Traderton is up**: `https://api.staging.traderton.com/health/ready` should return HTTP 200.
-
-=============
-
-## Phase 2 — Herobids
-
-1. **Create the Terraform variables file.** Copy `herobids/infra/hetzner/remote.tfvars.example` → `staging.tfvars`, fill in `hcloud_token`, `ssh_public_key_path`, `deploy_ssh_private_key`, `git_repo_url`, `app_domain = "staging.openaidom.com"`, `environment = "staging"`. See `herobids/infra/hetzner/remote.tfvars.example`.
-
-2. **Create the backend credentials file.** Copy `herobids/infra/hetzner/.env.backend.example` → `.env.backend`, fill in the same S3 bucket/credentials from Phase 0 step 3.
-
-3. **Provision the staging server.** Follow the "Staging" section of `herobids/infra/hetzner/README.md` (the `./scripts/provision.sh --env staging --var-file staging.tfvars` flow).
-
-4. **Create the app env file.** Copy `herobids/.env.example` → `.env.staging`, fill in staging-safe secrets (JWT, OAuth, LLM keys, mock billing). See `herobids/.env.example`.
-
-5. **Deploy.** Follow the "Staging" section of `herobids/infra/hetzner/README.md`: `./scripts/setup-env.sh --env staging --file .env.staging` then `./deploy.sh --env staging --env-file .env.staging`.
-
-6. **Seed an admin user** (one-time): `ADMIN_EMAIL=you@example.com ADMIN_PASSWORD=... ./scripts/seed-admin.sh --env staging`.
-
-7. **Add DNS** for Herobids: point `staging.openaidom.com` (A record) at the Herobids staging server IP.
-
-8. **Run the smoke test.** Follow `herobids/infra/hetzner/scripts/smoke-test.sh --env staging` and the runbook at `herobids/docs/runbooks/staging-smoke-test.md`.
-
----
-
-## Phase 3 — Wire them together
-
-1. **Point Herobids at Traderton.** In Herobids' `.env.staging` (both API and worker), set `TRADERTON_BOUNDARY_URL=https://api.staging.traderton.com` and matching HMAC values (`BOUNDARY_CONSUMER_ID`, `BOUNDARY_KEY_ID`, `BOUNDARY_SIGNING_SECRET`) that match what you put in Traderton's `.env.staging`. See the "For that later live validation" section of `traderton/infra/hetzner/README.md`.
-
-2. **Verify the handoff**: from a running Herobids container, `curl https://api.staging.traderton.com/health/ready` → 200, and confirm an unsigned call returns `authentication.invalid_caller`.

@@ -20,8 +20,8 @@
  *   .env.*
  *   !.env.example
  *   !.env.ops.dev.example
- *   !.env.ops.staging.example
- *   !.env.ops.production.example
+ *   !.env.ops.environment.example
+ *   !.env.ops.environment.example
  * Any future `.env.foo` real file is ignored unless its `.env.foo.example` twin
  * is explicitly un-ignored — so a future author must extend BOTH `.gitignore`
  * (add the negation line) AND this test (add the path constant + expected keys).
@@ -34,8 +34,8 @@ import { resolve, join } from 'node:path';
 const REPO_ROOT = resolve(new URL('.', import.meta.url).pathname, '../../..');
 const ENV_EXAMPLE = resolve(REPO_ROOT, '.env.example');
 const OPS_DEV_EXAMPLE = resolve(REPO_ROOT, '.env.ops.dev.example');
-const OPS_STAGING_EXAMPLE = resolve(REPO_ROOT, '.env.ops.staging.example');
-const OPS_PROD_EXAMPLE = resolve(REPO_ROOT, '.env.ops.production.example');
+const OPS_STAGING_EXAMPLE = resolve(REPO_ROOT, '.env.ops.environment.example');
+const OPS_PROD_EXAMPLE = resolve(REPO_ROOT, '.env.ops.environment.example');
 const CONFIG_TS = resolve(REPO_ROOT, 'packages/worker/src/config.ts');
 const DEFAULT_YAML = resolve(REPO_ROOT, 'config/default.yaml');
 const PACKAGES_DIR = resolve(REPO_ROOT, 'packages');

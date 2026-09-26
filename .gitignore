@@ -15,10 +15,8 @@ build/
 .env
 .env.*
 !.env.example
-!.env.ops.dev.example
-!.env.ops.staging.example
-!.env.ops.production.example
-!infra/hetzner/.env.staging.example
+!.env.ops.environment.example
+!infra/hetzner/.env.environment.example
 !infra/hetzner/.env.backup.example
 !infra/hetzner/.env.terraform.example
 !infra/hetzner/*.tfvars.example

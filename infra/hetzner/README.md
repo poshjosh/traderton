@@ -12,7 +12,7 @@ end-to-end runbook, follow [`docs/setup.md`](./docs/setup.md).
 
 | Artifact | Purpose |
 | --- | --- |
-| `main.tf`, `backend.tf`, `staging.tfvars.example` | Terraform: Hetzner VM, firewall, data volume; S3 remote state + DynamoDB locking. Environment selected by `--env`, which picks `<env>.tfvars`, the workspace, and state key `traderton/<env>/terraform.tfstate`. |
+| `main.tf`, `backend.tf`, `environment.tfvars.example` | Terraform: Hetzner VM, firewall, data volume; S3 remote state + DynamoDB locking. Environment selected by `--env`, which picks `<env>.tfvars`, the workspace, and state key `traderton/<env>/terraform.tfstate`. |
 | `plan-apply.sh` | Saved-plan gate: `init` → `workspace` → `plan`/`apply` with a SHA-256 digest tied to the reviewed plan. |
 | `scripts/deploy.sh` | Local helper: resolves the VM IP via `terraform output public_ip`, scp's the runtime files + `.env.staging` + `.env.backup`, then runs the on-host deploy. |
 | `deploy.sh` | Runs **on the VM**: verifies host/marker, `docker login ghcr.io`, pulls and starts Postgres/Redis/boundary, applies migrations, checks readiness. |
@@ -43,7 +43,7 @@ serve every environment, differing only through `<env>.tfvars` and the runtime
 
 ## Variables
 
-See `staging.tfvars.example` for the full, commented set. Key inputs:
+See `environment.tfvars.example` for the full, commented set. Key inputs:
 `environment`, `location`, `server_type`, `ssh_public_key`,
 `ssh_source_cidrs` (operator `/32` addresses only), `api_hostname`,
 `site_hostname`, `data_volume_size_gb`.

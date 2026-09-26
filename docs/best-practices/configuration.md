@@ -32,9 +32,9 @@ source of truth** for what an operator must set.
 .env.ops.dev               ← local operator/test/validator creds (gitignored)
 .env.ops.dev.example       ← committed twin — local ops/validator/test creds
 .env.ops.staging           ← remote staging operator creds (gitignored)
-.env.ops.staging.example   ← committed twin — remote staging ops creds
+.env.ops.environment.example   ← committed twin — remote staging ops creds
 .env.ops.production        ← remote production operator creds (gitignored)
-.env.ops.production.example ← committed twin — remote production ops creds
+.env.ops.environment.example ← committed twin — remote production ops creds
 ```
 
 The `.gitignore` enforces the mechanism (ignore all real `.env*`, then explicitly un-ignore
@@ -45,8 +45,8 @@ each `.example`):
 .env.*
 !.env.example
 !.env.ops.dev.example
-!.env.ops.staging.example
-!.env.ops.production.example
+!.env.ops.environment.example
+!.env.ops.environment.example
 ```
 
 ### The role split
@@ -59,9 +59,9 @@ Each family owns a distinct surface — do not mix them:
 - **`.env.ops.dev` / `.env.ops.dev.example`** — **local** operator/test/validator credentials
   (venue keys, wallets). Local test/validator scripts (`run-extra-tests.sh`, `validate-1inch.sh`,
   `validate-jupiter.sh`) default to this file.
-- **`.env.ops.staging` / `.env.ops.staging.example`** — operator/validator credentials for the
+- **`.env.ops.staging` / `.env.ops.environment.example`** — operator/validator credentials for the
   **staging** environment.
-- **`.env.ops.production` / `.env.ops.production.example`** — operator/validator credentials for
+- **`.env.ops.production` / `.env.ops.environment.example`** — operator/validator credentials for
   the **production** environment.
 
 "Do not mix them" refers to *roles/credentials*: operator private keys, wallets, and testnet
