@@ -24,6 +24,7 @@
 // that fail BEFORE any side effect. No venue is driven; no trading state mutated.
 
 import { describe, it, expect } from 'vitest';
+import dns from 'node:dns';
 import {
   signInvoke,
   signRequest,
@@ -36,6 +37,29 @@ const BASE_URL = process.env['BOUNDARY_BASE_URL'];
 const CONSUMER_ID = process.env['BOUNDARY_CONSUMER_ID'];
 const KEY_ID = process.env['BOUNDARY_KEY_ID'];
 const SECRET = process.env['BOUNDARY_SIGNING_SECRET'];
+
+// Optional DNS pin (mirror of `curl --resolve <host>:443:<ip>`). On machines whose
+// outbound DNS is intercepted (Zscaler etc.), Node's `fetch` cannot resolve the
+// boundary hostname and every call times out with `ConnectTimeoutError`, even
+// though `curl --resolve` to the same IP succeeds. When BOUNDARY_RESOLVE_IP is
+// set, we patch `node:dns.lookup` (which undici's fetch uses) to pin the
+// BOUNDARY_BASE_URL host to that IP — for the test only, never for production
+// clients. Unset → normal DNS (localhost / a working resolver).
+const RESOLVE_IP = process.env['BOUNDARY_RESOLVE_IP'];
+if (RESOLVE_IP && BASE_URL) {
+  const host = new URL(BASE_URL).hostname;
+  const originalLookup = dns.lookup;
+  dns.lookup = (hostname, options, callback) => {
+    if (typeof options === 'function') { callback = options; options = {}; }
+    if (hostname === host) {
+      if (options && (options as { all?: boolean }).all) {
+        return callback(null, [{ address: RESOLVE_IP, family: 4 }]);
+      }
+      return callback(null, RESOLVE_IP, 4);
+    }
+    return originalLookup(hostname, options, callback);
+  };
+}
 
 const INVOKE_PATH = '/internal/v1/tools:invoke';
 const STATUS_PATH = '/internal/v1/invocations/';
