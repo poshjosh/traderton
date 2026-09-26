@@ -40,7 +40,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Provide --release-sha <40-character commit SHA>' >&2; exit 2; }
+# When no explicit --release-sha is given, resolve the pushed HEAD and wait for
+# the matching GitHub "Build and Push" run to complete, then use its SHA. This
+# makes the deploy fully automated: push → deploy.sh blocks until the image is
+# built/pushed, then proceeds. An explicit --release-sha still short-circuits
+# the CI gate (e.g. a re-deploy of an already-built commit).
+if [[ -z "$RELEASE_SHA" ]]; then
+  echo "==> No --release-sha given; waiting for CI build-and-push of origin/main..."
+  RELEASE_SHA="$(bash "${SCRIPT_DIR}/wait-for-build.sh" | tail -n1)"
+fi
+
+[[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'ERROR: could not resolve a release SHA (pass --release-sha <commit> explicitly)' >&2; exit 2; }
 
 for t in terraform scp ssh; do
   command -v "$t" >/dev/null 2>&1 || { echo "ERROR: $t is required." >&2; exit 1; }
