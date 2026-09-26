@@ -55,7 +55,7 @@ docker compose --env-file .env.staging config --quiet
 ghcr_token=$(sed -n 's/^GHCR_TOKEN=//p' .env.staging)
 printf '%s' "$ghcr_token" | docker login ghcr.io -u "$ghcr_username" --password-stdin
 unset ghcr_username ghcr_token
-docker compose --env-file .env.staging pull postgres redis boundary
+docker compose --env-file .env.staging pull postgres redis boundary caddy
 docker compose --env-file .env.staging up -d postgres redis
 docker compose --env-file .env.staging --profile migrate run --rm migrate
 # Record the intended release before the new image runs. If readiness below
@@ -80,6 +80,8 @@ if [[ "$ready" != true ]]; then
   echo 'Boundary did not become ready' >&2
   exit 1
 fi
+# Bring up Caddy (TLS on 80/443) now that the boundary is healthy.
+docker compose --env-file .env.staging up -d caddy
 install -m 0644 traderton-backup.service traderton-backup-alert.service traderton-backup.timer traderton-backup-health.service traderton-backup-health.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now traderton-backup.timer

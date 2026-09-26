@@ -99,25 +99,30 @@ dig @8.8.8.8 AAAA staging.traderton.com +short
 
 ## Phase 5 - Deploy
 
-- **Resolve the image references and digest.** Run the helper to pull the images
-  and print the three values that go in `.env.staging` (`POSTGRES_IMAGE`,
-  `REDIS_IMAGE`, `BOUNDARY_DIGEST`):
+ - **Set `GHCR_USERNAME` and `GHCR_TOKEN` in `.env.staging`** to a GitHub token with `read:packages` scope, so `deploy.sh` can `docker login ghcr.io` and pull the private image. See the "Image Build And Registry" section of `traderton/infra/hetzner/README.md`.
+ 
+ - **Commit any changes, then push to main.** 
+ 
+ - **Wait** After pushing to main, wait till the build-and-push action is successful, see: https://github.com/poshjosh/traderton/actions - this produces a new commit SHA and a new image digest.
 
-Get the ghcr-image-sha from the github actions page: https://github.com/poshjosh/traderton/actions from the build-and-push action. Use the value in the below script:
-
-```sh
-cd traderton/infra/hetzner
-bash scripts/resolve-images.sh --release-sha <ghcr-image-sha>
-```
-
-  It prints each value and where to put it. Copy them into `infra/hetzner/.env.staging`.
-
-- **Get the git commit full SHA** (40 hex chars) using the below script:
+ - **Get the git commit full SHA** (40 hex chars) using the below script:
 
 ```sh
 cd /Users/chinomso.ikwuagwu/dev_ai/traderton
 git rev-parse origin/main
 ```
+
+
+- **Resolve the image references and digest.** Run the helper to pull the images
+  and print the three values that go in `.env.staging` (`POSTGRES_IMAGE`,
+  `REDIS_IMAGE`, `BOUNDARY_DIGEST`):
+
+```sh
+cd traderton/infra/hetzner
+bash scripts/resolve-images.sh --release-sha <git-commit-full-sha>
+```
+
+It prints each value and where to put it. Copy them into `infra/hetzner/.env.staging`.
 
 - **Deploy the runtime on the VM.** From your laptop, run the local helper script:
 
@@ -126,9 +131,12 @@ cd traderton/infra/hetzner
 bash scripts/deploy.sh --env staging --release-sha <git-commit-full-sha>
 ```
 
-  It resolves the VM IP via `terraform_output -raw public_ip`, copies the runtime files + `.env.staging` (mode 600) + `.env.backup` to `/opt/traderton/staging` over SSH, then runs the on-VM `./deploy.sh --confirm-staging <sha>`.
+It resolves the VM IP via `terraform_output -raw public_ip`, copies the runtime files + `.env.staging` (mode 600) + `.env.backup` to `/opt/traderton/staging` over SSH, then runs the on-VM `./deploy.sh --confirm-staging <sha>`.
 
-   - **Before deploying, the boundary image must exist in ghcr.io.** The `.github/workflows/build-push.yml` workflow builds and pushes it automatically on every push to `main` (tag `ghcr.io/<owner>/traderton:sha-<40-char-sha>`). No manual build/push needed. After pushing to main, wait till the build and push action is successful, see: https://github.com/poshjosh/traderton/actions
-   - **Set `GHCR_USERNAME` and `GHCR_TOKEN` in `.env.staging`** to a GitHub token with `read:packages` scope, so `deploy.sh` can `docker login ghcr.io` and pull the private image. See the "Image Build And Registry" section of `traderton/infra/hetzner/README.md`.
+- **Verify Traderton is up**: 
 
-- **Verify Traderton is up**: `https://api.staging.traderton.com/health/ready` should return HTTP 200.
+```sh
+curl --resolve 'api.staging.traderton.com:443:2.28.19.89' https://api.staging.traderton.com/health/ready -v
+```
+
+`https://api.staging.traderton.com/health/ready` should return HTTP 200.
