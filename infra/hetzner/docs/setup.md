@@ -99,7 +99,7 @@ dig @8.8.8.8 AAAA staging.traderton.com +short
 
 ## Phase 5 - Deploy
 
- - **Set `GHCR_USERNAME` and `GHCR_TOKEN` in `.env.staging`** to a GitHub token with `read:packages` scope, so `deploy.sh` can `docker login ghcr.io` and pull the private image. See the "Image Build And Registry" section of `traderton/infra/hetzner/README.md`.
+ - **Set `GHCR_USERNAME` and `GHCR_TOKEN` in `.env.staging`** to a GitHub token with `read:packages` scope, so `deploy-on-host.sh` can `docker login ghcr.io` and pull the private image. See the "Image Build And Registry" section of `traderton/infra/hetzner/README.md`.
  
  - **Commit any changes, then push to main.** 
  
@@ -131,7 +131,7 @@ cd traderton/infra/hetzner
 bash scripts/deploy.sh --env staging --release-sha <git-commit-full-sha>
 ```
 
-It resolves the VM IP via `terraform_output -raw public_ip`, copies the runtime files + `.env.staging` (mode 600) + `.env.backup` to `/opt/traderton/staging` over SSH, then runs the on-VM `./deploy.sh --confirm-staging <sha>`.
+It resolves the VM IP via `terraform_output -raw public_ip`, copies the runtime files + `.env.staging` (mode 600) + `.env.backup` to `/opt/traderton/staging` over SSH, then runs the on-VM `./deploy-on-host.sh --confirm-staging <sha>`.
 
 - **Verify Traderton is up**: 
 

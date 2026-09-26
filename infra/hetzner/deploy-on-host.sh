@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# deploy-on-host.sh — runs ON the staging VM (NOT from your laptop). Performs
+# the actual compose lifecycle: verifies host/marker + root, derives DATABASE_URL
+# and the pinned BOUNDARY_IMAGE, `docker login ghcr.io`, pulls, migrates, starts
+# boundary + caddy, and waits for readiness.
+#
+# This is uploaded to the VM by the LOCAL entrypoint `scripts/deploy.sh` and
+# invoked there as `./deploy-on-host.sh --confirm-staging <sha>`. Do NOT run it
+# directly from your laptop — it self-guards on the host marker and will refuse.
+#
+# Local deploy flow: `scripts/deploy.sh` (laptop) → uploads this file → SSHes in
+# → runs `./deploy-on-host.sh --confirm-staging <sha>` on the VM.
 set -euo pipefail
 
 cd "$(dirname "$0")"

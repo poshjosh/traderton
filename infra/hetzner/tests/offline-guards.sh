@@ -10,7 +10,7 @@ if grep -Eq '^resource "hcloud_network(_subnet)?" ' -- *.tf; then
 fi
 grep -Fq 'Requires=traderton-data.service' docker-data.conf
 grep -Fq 'Before=docker.service' traderton-data.service
-grep -Fq 'install -m 0644 docker-data.conf /etc/systemd/system/docker.service.d/traderton-data.conf' deploy.sh
+grep -Fq 'install -m 0644 docker-data.conf /etc/systemd/system/docker.service.d/traderton-data.conf' deploy-on-host.sh
 grep -Fq 'api_hostname' main.tf
 # UFW opens 22/80/443; the boundary itself is reachable only via Caddy HTTP.
 grep -Fq -- 'ufw allow 22/tcp' cloud-init.sh.tftpl
@@ -23,9 +23,9 @@ if grep -Eq 'DOCKER-USER|TRADERTON_BOUNDARY|iptables-restore' cloud-init.sh.tftp
   echo 'Staging firewall must use UFW (herobids convention), not a DOCKER-USER iptables chain' >&2
   exit 1
 fi
-grep -Fq 'ufw status' deploy.sh
-grep -Fq 'UFW ${port}/tcp allow is absent' deploy.sh
-grep -Fq 'for port in 80 443' deploy.sh
+grep -Fq 'ufw status' deploy-on-host.sh
+grep -Fq 'UFW ${port}/tcp allow is absent' deploy-on-host.sh
+grep -Fq 'for port in 80 443' deploy-on-host.sh
 grep -Fq '@execution path /internal /internal/* /health /health/*' Caddyfile.staging
 grep -Fq 'respond @execution 404' Caddyfile.staging
 grep -Fq 'reverse_proxy site:80' Caddyfile.staging
@@ -43,13 +43,13 @@ grep -Fq 'RUNTIME_FILES=(' scripts/deploy.sh
 grep -Fq 'terraform_output -raw public_ip' scripts/deploy.sh
 grep -Fq 'scp ' scripts/deploy.sh
 grep -Fq '_ssh_opts.sh' scripts/deploy.sh
-grep -Fq './deploy.sh --confirm-staging' scripts/deploy.sh
+grep -Fq './deploy-on-host.sh --confirm-staging' scripts/deploy.sh
 # The uploaded runtime list must never include Terraform state, tfvars, or real env files.
 if awk '/RUNTIME_FILES=\(/{f=1} f{print} f&&/\)/{exit}' scripts/deploy.sh | grep -Eq '\.env\.(staging|backup)|staging\.tfvars|\.tfstate|\.terraform'; then
   echo 'Deploy helper must not upload Terraform state, tfvars, or real env files' >&2
   exit 1
 fi
-for script in deploy.sh scripts/deploy.sh scripts/resolve-images.sh backup.sh backup-job.sh backup-alert.sh backup-health.sh check-backup-success.sh plan-apply.sh mount-data.sh cloud-init.sh.tftpl; do
+for script in deploy-on-host.sh scripts/deploy.sh scripts/resolve-images.sh backup.sh backup-job.sh backup-alert.sh backup-health.sh check-backup-success.sh plan-apply.sh mount-data.sh cloud-init.sh.tftpl; do
   bash -n "$script"
 done
 
@@ -77,11 +77,11 @@ COMPOSE_PROFILES=migrate docker compose -f compose.yaml config --no-env-resoluti
   .services.boundary.pids_limit == 256
 ' > /dev/null
 
-if bash deploy.sh --confirm-staging invalid >/dev/null 2>&1; then
+if bash deploy-on-host.sh --confirm-staging invalid >/dev/null 2>&1; then
   echo 'Deploy accepted an unpinned release' >&2
   exit 1
 fi
-if bash deploy.sh --confirm-staging 0123456789012345678901234567890123456789 >/dev/null 2>&1; then
+if bash deploy-on-host.sh --confirm-staging 0123456789012345678901234567890123456789 >/dev/null 2>&1; then
   echo 'Deploy accepted a non-staging host' >&2
   exit 1
 fi

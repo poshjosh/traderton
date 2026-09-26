@@ -24,7 +24,7 @@ REPO=""
 SHA=""
 
 # Known-minimum CI duration before the first poll (see note below).
-waitBeforePolling=60
+waitBeforePollingSeconds=60
 POLL_INTERVAL=10
 
 while [[ $# -gt 0 ]]; do
@@ -66,19 +66,24 @@ find_run_id() {
     | sed -n 's/.*"id": \([0-9]\{1,\}\).*/\1/p' | head -n1
 }
 
-# ── waitBeforePolling — why it is a named variable, not a bare `sleep 60` ─────
+# ── waitBeforePollingSeconds — why a named variable, not a bare `sleep 60` ────
 # 1. It is the ONE place to tune when the build gets faster/slower (image size,
 #    cache misses, runner load) — no hunting through the loop body.
 # 2. It documents the assumption: CI empirically takes ~66s, so polling before
 #    this point is a pure waste of (rate-limited) API calls.
-# 3. It is trivially overridable via `waitBeforePolling=90 deploy.sh ...`
+# 3. It is trivially overridable via `waitBeforePollingSeconds=90 deploy.sh ...`
 #    without editing the script.
 # ─────────────────────────────────────────────────────────────────────────────
-for ((i = 1; i <= waitBeforePolling; i++)); do
-  printf 'waiting %d of %ds for build-and-push to finish...\r' "$i" "$waitBeforePolling"
-  sleep 1
+# Progress is written to STDERR so it stays visible even when this script's
+# stdout is captured by the caller (`sha=$(wait-for-build.sh | tail -n1)`).
+# Only the final release SHA is written to stdout, on its own line.
+# ─────────────────────────────────────────────────────────────────────────────
+remaining=$waitBeforePollingSeconds
+while [[ $remaining -gt 0 ]]; do
+  printf 'waiting %ds for CI build-and-push of %s...\n' "$remaining" "$SHA" >&2
+  sleep 5
+  remaining=$((remaining - 5))
 done
-echo
 
 # ── Poll until the run completes; print progress on one overwriting line. ────
 RUN_ID=""
@@ -89,22 +94,20 @@ for ((attempt = 1; attempt <= 90; attempt++)); do
     conclusion="$("${curl_args[@]}" "${API_URL}/${RUN_ID}" 2>/dev/null | sed -n 's/.*"conclusion": "\([^"]*\)".*/\1/p' | head -n1)"
 
     if [[ "$status" == "completed" ]]; then
-      echo
       if [[ "$conclusion" == "success" ]]; then
-        echo "CI build succeeded for ${SHA}"
+        printf '\nCI build-and-push succeeded: %s\n' "$SHA" >&2
         echo "$SHA"
         exit 0
       fi
-      echo "ERROR: CI build for ${SHA} completed with conclusion '${conclusion:-none}'" >&2
+      printf '\nCI build-and-push FAILED for %s (conclusion=%s)\n' "$SHA" "${conclusion:-none}" >&2
       exit 1
     fi
-    printf 'polling GitHub Actions run %s (status=%s)...\r' "$RUN_ID" "${status:-queued}"
+    printf 'polling GitHub Actions run %s (status=%s)...\r' "$RUN_ID" "${status:-queued}" >&2
   else
-    printf 'polling GitHub Actions (run not listed yet)...\r' "$attempt"
+    printf 'polling GitHub Actions (run not listed yet, attempt %s)...\r' "$attempt" >&2
   fi
   sleep "$POLL_INTERVAL"
 done
 
-echo
-echo "ERROR: timed out waiting for CI build of ${SHA}" >&2
+printf '\nERROR: timed out waiting for CI build of %s\n' "$SHA" >&2
 exit 1

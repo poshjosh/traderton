@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # deploy.sh — push the Traderton staging runtime to the VM and run the on-host
-# deploy. Runs from your laptop; the on-VM deploy.sh does the actual compose
-# lifecycle. Mirrors the Herobids local → remote deploy convention.
+# deploy. Runs from your laptop; the on-VM deploy-on-host.sh does the actual
+# compose lifecycle. Mirrors the Herobids local → remote deploy convention.
 #
 # Usage:
 #   deploy.sh [--env <staging|production>] [--env-file <path>] \
@@ -67,7 +67,7 @@ IP=$(terraform_output -raw public_ip)
 # The runtime files that must live in /opt/traderton/staging — explicit list,
 # never a blanket copy, so secrets and Terraform state are never uploaded.
 RUNTIME_FILES=(
-  Caddyfile.staging compose.yaml deploy.sh
+  Caddyfile.staging compose.yaml deploy-on-host.sh
   mount-data.sh backup.sh backup-job.sh backup-alert.sh backup-health.sh check-backup-success.sh
   docker-data.conf
   traderton-data.service traderton-backup.service traderton-backup-alert.service
@@ -89,4 +89,4 @@ fi
 
 echo "==> Running on-host deploy (--confirm-staging ${RELEASE_SHA})"
 ssh "${scp_args[@]}" "root@${IP}" \
-  "cd /opt/traderton/staging && chmod 600 .env.staging && ./deploy.sh --confirm-staging ${RELEASE_SHA}"
+  "cd /opt/traderton/staging && chmod 600 .env.staging && ./deploy-on-host.sh --confirm-staging ${RELEASE_SHA}"
