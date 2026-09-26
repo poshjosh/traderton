@@ -14,11 +14,6 @@ server_type = "cx23"
 # No public-key path here — Traderton reads the raw key into hcloud_ssh_key.
 ssh_public_key = ""
 
-# Operator IPv4 /32 SSH ingress addresses. Individual addresses only.
-ssh_source_cidrs = [
-  # "203.0.113.7/32",
-]
-
 # Public hostname for the Traderton API (TLS-terminated by Caddy; HMAC-auth).
 api_hostname = "api.staging.traderton.com"
 

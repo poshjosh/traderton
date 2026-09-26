@@ -38,7 +38,7 @@ class FirewallProxyTests(unittest.TestCase):
         self.assertNotIn("DOCKER-USER", TEMPLATE)
 
     def test_deploy_requires_ufw_80_443_allow(self):
-        deploy = (ROOT / "deploy.sh").read_text()
+        deploy = (ROOT / "deploy-on-host.sh").read_text()
         self.assertIn("ufw status", deploy)
         self.assertIn('UFW ${port}/tcp allow is absent', deploy)
         self.assertIn("for port in 80 443", deploy)
@@ -61,15 +61,12 @@ class FirewallProxyTests(unittest.TestCase):
         mount.chmod(0o700)
         sha = "a" * 40
         (self.directory / ".env.staging").write_text(
-            f"POSTGRES_IMAGE=postgres@sha256:{'c' * 64}\n"
-            f"REDIS_IMAGE=redis@sha256:{'d' * 64}\n"
             "POSTGRES_PASSWORD=fixture\n"
-            f"BOUNDARY_DIGEST=sha256:{'b' * 64}\n"
             "REDIS_URL=redis://fixture\nBOUNDARY_CONSUMER_ID=fixture\n"
             "BOUNDARY_KEY_ID=fixture\nBOUNDARY_SIGNING_SECRET=fixture\n"
             f"CREDENTIAL_ENCRYPTION_KEY={'e' * 64}\n"
             "GHCR_USERNAME=fixture\nGHCR_TOKEN=fixture\n")
-        deploy = (ROOT / "deploy.sh").read_text().replace(
+        deploy = (ROOT / "deploy-on-host.sh").read_text().replace(
             "/etc/traderton-staging/host-marker", str(marker))
         (self.directory / "deploy.sh").write_text(deploy)
         for command, body in {
@@ -95,15 +92,12 @@ class FirewallProxyTests(unittest.TestCase):
         mount.chmod(0o700)
         sha = "a" * 40
         (self.directory / ".env.staging").write_text(
-            f"POSTGRES_IMAGE=postgres@sha256:{'c' * 64}\n"
-            f"REDIS_IMAGE=redis@sha256:{'d' * 64}\n"
             "POSTGRES_PASSWORD=fixture\n"
-            f"BOUNDARY_DIGEST=sha256:{'b' * 64}\n"
             "REDIS_URL=redis://fixture\nBOUNDARY_CONSUMER_ID=fixture\n"
             "BOUNDARY_KEY_ID=fixture\nBOUNDARY_SIGNING_SECRET=fixture\n"
             f"CREDENTIAL_ENCRYPTION_KEY={'e' * 64}\n"
             "GHCR_USERNAME=fixture\nGHCR_TOKEN=fixture\n")
-        deploy = (ROOT / "deploy.sh").read_text().replace(
+        deploy = (ROOT / "deploy-on-host.sh").read_text().replace(
             "/etc/traderton-staging/host-marker", str(marker)).replace(
             "/etc/traderton-staging/release-sha", str(self.directory / "release-sha")).replace(
             "/etc/traderton-staging/image-digest", str(self.directory / "image-digest"))

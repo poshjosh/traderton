@@ -13,14 +13,14 @@ end-to-end runbook, follow [`docs/setup.md`](./docs/setup.md).
 | Artifact | Purpose |
 | --- | --- |
 | `main.tf`, `backend.tf`, `environment.tfvars.example` | Terraform: Hetzner VM, firewall, data volume; S3 remote state + DynamoDB locking. Environment selected by `--env`, which picks `<env>.tfvars`, the workspace, and state key `traderton/<env>/terraform.tfstate`. |
-| `plan-apply.sh` | Saved-plan gate: `init` → `workspace` → `plan`/`apply` with a SHA-256 digest tied to the reviewed plan. |
+| `plan-apply.sh` | `init` → `workspace` → `plan` (review) → `apply`, with an interactive confirm + `--yes`. Mirrors Herobids `provision.sh`; only extra guard is a bold warning when the plan DESTROYS resources. |
 | `scripts/deploy.sh` | Local helper: resolves the VM IP via `terraform output public_ip`, scp's the runtime files + `.env.staging` + `.env.backup`, then runs the on-host deploy. |
 | `deploy-on-host.sh` | Runs **on the VM**: verifies host/marker, `docker login ghcr.io`, pulls and starts Postgres/Redis/boundary, applies migrations, checks readiness. |
 | `compose.yaml`, `Caddyfile.staging` | Runtime stack: Postgres/Redis/boundary + Caddy TLS (port 80/443). The boundary publishes no host port — reachable only through Caddy. |
 | `cloud-init.sh.tftpl` | First-boot provisioning: Docker, Compose, restic, UFW (22/80/443). |
 | `backup.sh`, `backup-job.sh`, `backup-alert.sh`, `backup-health.sh`, `*.service`, `*.timer` | Daily restic backup of Postgres/Redis + SMTP alerts + freshness checks. |
 | `.env.*.example` | Committed templates for `.env.terraform`, `.env.staging`, `.env.backup` (real values are gitignored). |
-| `tests/` | Offline guards (`offline-guards.sh` + `guard-plan.py`) plus `terraform test` and Python unit tests. |
+| `tests/` | Offline guards (`offline-guards.sh`), plus `terraform test` and Python unit tests. |
 
 ## Workflow at a glance
 
@@ -44,8 +44,7 @@ serve every environment, differing only through `<env>.tfvars` and the runtime
 ## Variables
 
 See `environment.tfvars.example` for the full, commented set. Key inputs:
-`environment`, `location`, `server_type`, `ssh_public_key`,
-`ssh_source_cidrs` (operator `/32` addresses only), `api_hostname`,
+`environment`, `location`, `server_type`, `ssh_public_key`, `api_hostname`,
 `site_hostname`, `data_volume_size_gb`.
 
 ## Local checks

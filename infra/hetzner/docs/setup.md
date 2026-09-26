@@ -32,31 +32,14 @@ You'll paste the **public** key (`.pub`) into Traderton's tfvars, and use the **
 
 **Create the Terraform variables file.** Copy `infra/hetzner/environment.tfvars.example` → `infra/hetzner/staging.tfvars`, then fill in values, including `ssh_public_key`.
 
-for `ssh_source_cidrs`, get your real public IPv4 as a /32 by running the following command:
-
-```sh
-curl -4 ifconfig.co
-# example output
-# 136.226.170.119
-```
-
-use the value like this:
-
-```tfvars
-ssh_source_cidrs = [
-  "136.226.170.119/32",
-]
-```
-
 ## Phase 3
 
-3. **Provision the VM** (plan first, review, then apply):
+3. **Provision the VM** (plan, review, then apply):
 
 ```sh
 cd traderton/infra/hetzner
-bash plan-apply.sh --env staging plan ~/traderton-staging.tfplan
-# review the plan, then:
-bash plan-apply.sh --env staging apply ~/traderton-staging.tfplan
+bash plan-apply.sh --env staging
+# review the plan output; answer 'y' to apply (or pass --yes for automation)
 ```
 
 This creates the VM, firewall, and data volume. Get the public IP with `terraform output public_ip`.
@@ -112,17 +95,6 @@ cd /Users/chinomso.ikwuagwu/dev_ai/traderton
 git rev-parse origin/main
 ```
 
-
-- **Resolve the image references and digest.** Run the helper to pull the images
-  and print the three values that go in `.env.staging` (`POSTGRES_IMAGE`,
-  `REDIS_IMAGE`, `BOUNDARY_DIGEST`):
-
-```sh
-cd traderton/infra/hetzner
-bash scripts/resolve-images.sh --release-sha <git-commit-full-sha>
-```
-
-It prints each value and where to put it. Copy them into `infra/hetzner/.env.staging`.
 
 - **Deploy the runtime on the VM.** From your laptop, run the local helper script:
 

@@ -22,19 +22,15 @@ release_sha=$2
 [[ -f /etc/traderton-staging/host-marker && "$(hostname -s)" == traderton-staging ]] || { echo 'Not the Traderton staging VM' >&2; exit 1; }
 [[ $(id -u) == 0 ]] || { echo 'Run as root on the staging VM' >&2; exit 1; }
 [[ -f .env.staging && $(stat -c %a .env.staging) == 600 && $(stat -c %u .env.staging) == 0 ]] || { echo 'Provide root-owned .env.staging (mode 600)' >&2; exit 1; }
-for key in POSTGRES_IMAGE REDIS_IMAGE POSTGRES_PASSWORD BOUNDARY_DIGEST REDIS_URL BOUNDARY_CONSUMER_ID BOUNDARY_KEY_ID BOUNDARY_SIGNING_SECRET CREDENTIAL_ENCRYPTION_KEY GHCR_USERNAME GHCR_TOKEN; do
+for key in POSTGRES_PASSWORD REDIS_URL BOUNDARY_CONSUMER_ID BOUNDARY_KEY_ID BOUNDARY_SIGNING_SECRET CREDENTIAL_ENCRYPTION_KEY GHCR_USERNAME GHCR_TOKEN; do
   grep -Eq "^${key}=.+" .env.staging || { echo "Missing $key in .env.staging" >&2; exit 1; }
 done
-for key in POSTGRES_IMAGE REDIS_IMAGE; do
-  value=$(sed -n "s/^${key}=//p" .env.staging)
-  [[ "$value" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] || { echo "$key must be digest-pinned" >&2; exit 1; }
-done
-boundary_digest=$(sed -n 's/^BOUNDARY_DIGEST=//p' .env.staging)
-[[ "$boundary_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'BOUNDARY_DIGEST must be a sha256:<64-hex> digest' >&2; exit 1; }
 ghcr_username=$(sed -n 's/^GHCR_USERNAME=//p' .env.staging)
 [[ "$ghcr_username" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo 'GHCR_USERNAME must be a lowercase ghcr.io owner' >&2; exit 1; }
-# Derive the full boundary image reference from the owner + release SHA + digest.
-boundary_image="ghcr.io/${ghcr_username}/traderton:sha-${release_sha}@${boundary_digest}"
+# Derive the full boundary image reference from the owner + release SHA tag
+# (the build-push workflow tags each commit as ghcr.io/<owner>/traderton:sha-<commit>,
+# which is unique and immutable — no separate digest pin needed).
+boundary_image="ghcr.io/${ghcr_username}/traderton:sha-${release_sha}"
 # Derive DATABASE_URL from POSTGRES_PASSWORD (URL-encode the password).
 postgres_password=$(sed -n 's/^POSTGRES_PASSWORD=//p' .env.staging)
 encoded_password=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$postgres_password")

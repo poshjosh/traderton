@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# plan-apply.sh — env-aware Terraform plan/review/apply with a saved-plan gate.
+# plan-apply.sh — env-aware Terraform plan/review/apply (mirrors Herobids provision.sh).
+#
+# Converged from the bespoke saved-plan digest gate to the Herobids convention:
+# a plain `terraform plan` the operator reviews, an interactive confirm, then
+# `terraform apply`. No saved-plan file, no SHA-256 digest gate, no guard-plan.py.
+# The only extra safety net retained (at operator request) is a BOLD WARNING when
+# the plan would DESTROY resources — it does not block, it just forces review.
 #
 # Usage:
-#   plan-apply.sh [--env <staging|production>] [--backend-env-file <path>] plan <absolute saved-plan path>
-#   plan-apply.sh [--env <staging|production>] [--backend-env-file <path>] apply <absolute saved-plan path>
+#   plan-apply.sh [--env <staging|production>] [--var-file <path>] [--backend-env-file <path>] [--yes]
 #
 # The environment selects the <env>.tfvars var-file, the terraform workspace,
 # and the S3 backend key traderton/<env>/terraform.tfstate (mirrors Herobids).
@@ -13,6 +18,7 @@ cd "$(dirname "$0")"
 ENVIRONMENT="staging"
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-${PWD}/.env.terraform}"
 VAR_FILE=""
+AUTO_APPROVE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -31,18 +37,17 @@ while [[ $# -gt 0 ]]; do
       [[ -n "$VAR_FILE" ]] || { echo 'ERROR: --var-file requires a path' >&2; exit 2; }
       shift 2
       ;;
+    --yes|--auto-approve)
+      AUTO_APPROVE=true
+      shift
+      ;;
     *)
-      break
+      echo "ERROR: Unknown option: $1" >&2
+      exit 2
       ;;
   esac
 done
 
-umask 077
-if [[ $# != 2 || ( "$1" != plan && "$1" != apply ) ]]; then
-  echo 'Usage: plan-apply.sh [--env <staging|production>] [--var-file <path>] [--backend-env-file <path>] plan|apply <absolute saved-plan path>' >&2
-  exit 2
-fi
-[[ "$2" == /* ]] || { echo 'Use an absolute saved-plan path' >&2; exit 2; }
 [[ "$ENVIRONMENT" =~ ^[a-z0-9_-]+$ ]] || { echo 'Invalid environment name' >&2; exit 2; }
 
 if [[ -z "$VAR_FILE" ]]; then
@@ -64,7 +69,7 @@ if [[ -f "$BACKEND_ENV_FILE" ]]; then
   set +a
 fi
 
-for command_name in terraform jq python3 sha256sum; do
+for command_name in terraform jq; do
   command -v "$command_name" >/dev/null 2>&1 || { echo "ERROR: ${command_name} is required." >&2; exit 1; }
 done
 
@@ -86,23 +91,53 @@ fi
 terraform init "${INIT_ARGS[@]}"
 terraform workspace select "$ENVIRONMENT" 2>/dev/null || terraform workspace new "$ENVIRONMENT"
 
-plan_file=$2
-digest_file="${plan_file}.sha256"
-if [[ "$1" == plan ]]; then
-  [[ ! -e "$plan_file" && ! -e "$digest_file" ]] || { echo 'Saved plan or digest already exists' >&2; exit 2; }
-  trap 'rm -f -- "$plan_file" "$digest_file"' ERR
-  terraform plan -input=false -out="$plan_file" -no-color -var-file="$VAR_FILE" > /dev/null
-else
-  [[ -f "$plan_file" && -f "$digest_file" ]] || { echo 'Saved plan or digest is missing' >&2; exit 2; }
-  [[ "$(sha256sum "$plan_file" | cut -d ' ' -f 1)" == "$(<"$digest_file")" ]] || { echo 'Saved plan identity changed' >&2; exit 1; }
+# ─── Plan (operator reviews this output) ─────────────────────────────────────
+echo ""
+echo "==> [${ENVIRONMENT}] Running terraform plan..."
+PLAN_FILE="/tmp/traderton-${ENVIRONMENT}.tfplan"
+terraform plan -input=false -no-color -var-file="$VAR_FILE" -out="$PLAN_FILE"
+
+# ─── DELETE warning — bold, non-blocking (the only retained guard) ───────────
+plan_json="$(mktemp)"
+trap 'rm -f -- "$plan_json" "$PLAN_FILE"' EXIT
+terraform show -json "$PLAN_FILE" > "$plan_json"
+# Count resources whose action list includes "delete" and that are NOT a
+# create-then-delete (delete-before-create replace is genuinely destructive).
+delete_count="$(jq -r '
+  [.resource_changes[]?
+   | select(.change.actions | index("delete") != null)
+   | select((.change.actions | index("create") | not) or
+            (.change.actions | index("delete")) < (.change.actions | index("create")))
+  ] | length
+' "$plan_json")"
+
+if [[ "${delete_count:-0}" != "0" ]]; then
+  printf '\033[1;31m'
+  echo '══════════════════════════════════════════════════════════════════'
+  echo '  ⚠️  WARNING: THIS PLAN WILL DESTROY RESOURCES ⚠️'
+  echo "       ${delete_count} resource(s) are being deleted or replaced."
+  echo '  Review the plan above carefully before confirming.'
+  echo '══════════════════════════════════════════════════════════════════'
+  printf '\033[0m'
 fi
-plan_json=$(mktemp)
-trap 'rm -f -- "$plan_json"' EXIT
-terraform show -json "$plan_file" > "$plan_json"
-python3 tests/guard-plan.py "$plan_json"
-if [[ "$1" == plan ]]; then
-  sha256sum "$plan_file" | cut -d ' ' -f 1 > "$digest_file"
+
+# ─── Confirmation (mirrors Herobids: interactive, with --yes escape hatch) ───
+if [[ "$AUTO_APPROVE" == "true" ]]; then
+  echo "==> --yes/--auto-approve passed: skipping confirmation prompt."
 else
-  [[ "$(sha256sum "$plan_file" | cut -d ' ' -f 1)" == "$(<"$digest_file")" ]] || { echo 'Saved plan identity changed during review' >&2; exit 1; }
-  terraform apply -input=false -no-color "$plan_file"
+  echo ""
+  read -rp "Apply this plan? [y/N] " CONFIRM
+  if [[ ! "$CONFIRM" =~ ^[Yy] ]]; then
+    echo "Aborted. Re-run with the same arguments to apply."
+    exit 0
+  fi
+fi
+
+# ─── Apply ───────────────────────────────────────────────────────────────────
+echo ""
+echo "==> [${ENVIRONMENT}] Running terraform apply..."
+if [[ "$AUTO_APPROVE" == "true" ]]; then
+  terraform apply -input=false -no-color -auto-approve "$PLAN_FILE"
+else
+  terraform apply -input=false -no-color "$PLAN_FILE"
 fi

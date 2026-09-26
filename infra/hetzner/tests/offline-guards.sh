@@ -49,16 +49,14 @@ if awk '/RUNTIME_FILES=\(/{f=1} f{print} f&&/\)/{exit}' scripts/deploy.sh | grep
   echo 'Deploy helper must not upload Terraform state, tfvars, or real env files' >&2
   exit 1
 fi
-for script in deploy-on-host.sh scripts/deploy.sh scripts/resolve-images.sh backup.sh backup-job.sh backup-alert.sh backup-health.sh check-backup-success.sh plan-apply.sh mount-data.sh cloud-init.sh.tftpl; do
+for script in deploy-on-host.sh scripts/deploy.sh backup.sh backup-job.sh backup-alert.sh backup-health.sh check-backup-success.sh plan-apply.sh mount-data.sh cloud-init.sh.tftpl; do
   bash -n "$script"
 done
 
 private_ip=10.77.1.20
-export POSTGRES_IMAGE="postgres:16@sha256:$(printf 'b%.0s' {1..64})"
-export REDIS_IMAGE="redis:7@sha256:$(printf 'c%.0s' {1..64})"
 export POSTGRES_PASSWORD=fixture
 export DATABASE_URL=postgres://traderton:fixture@postgres:5432/traderton
-export BOUNDARY_IMAGE="ghcr.io/poshjosh/traderton:sha-0123456789012345678901234567890123456789@sha256:$(printf 'a%.0s' {1..64})"
+export BOUNDARY_IMAGE="ghcr.io/poshjosh/traderton:sha-0123456789012345678901234567890123456789"
 COMPOSE_PROFILES=migrate docker compose -f compose.yaml config --no-env-resolution --format json | jq -e -r '
   (.services.boundary | has("ports") | not) and
   .services.boundary.expose == ["8080"] and

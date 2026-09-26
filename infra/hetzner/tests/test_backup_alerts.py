@@ -69,7 +69,7 @@ class BackupAlertTests(unittest.TestCase):
         self.assertIn("OnFailure=traderton-backup-alert.service", (ROOT / "traderton-backup.service").read_text())
         self.assertIn("ExecStart=/bin/bash /opt/traderton/staging/backup-alert.sh failed",
                       (ROOT / "traderton-backup-alert.service").read_text())
-        self.assertIn("traderton-backup-alert.service", (ROOT / "deploy.sh").read_text())
+        self.assertIn("traderton-backup-alert.service", (ROOT / "deploy-on-host.sh").read_text())
         shutil.copy(ROOT / "backup-job.sh", self.directory / "backup-job.sh")
         shutil.copy(ROOT / "backup-alert.sh", self.directory / "backup-alert.sh")
         (self.directory / ".env.backup").write_text("ALERT_TO=ops@example.test\n")
@@ -116,7 +116,7 @@ class BackupAlertTests(unittest.TestCase):
         self.environment["MOCK_OWNER"] = "1000"
         for name, script, args in (
             ("backup.sh", ROOT / "backup.sh", ()),
-            ("deploy.sh", ROOT / "deploy.sh", ("--confirm-staging", "a" * 40))):
+            ("deploy.sh", ROOT / "deploy-on-host.sh", ("--confirm-staging", "a" * 40))):
             with self.subTest(script=name):
                 (self.directory / name).write_text(script.read_text().replace(
                     "/etc/traderton-staging/host-marker", str(marker)))
@@ -129,7 +129,7 @@ class BackupAlertTests(unittest.TestCase):
 
         self.environment["MOCK_OWNER"] = "0"
         self.assertIn("Missing backup credential", self.run_script(self.directory / "backup.sh").stderr)
-        self.assertIn("Missing POSTGRES_IMAGE", self.run_script(self.directory / "deploy.sh", *args).stderr)
+        self.assertIn("Missing POSTGRES_PASSWORD", self.run_script(self.directory / "deploy.sh", *args).stderr)
 
     def test_health_rejects_non_root_owned_backup_configuration_before_sourcing(self):
         marker = self.directory / "host-marker"

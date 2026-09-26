@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: ${POSTGRES_IMAGE:?Postgres digest required}
+    image: postgres:16
     restart: unless-stopped
     environment:
       POSTGRES_USER: traderton
@@ -15,7 +15,7 @@ services:
       retries: 20
 
   redis:
-    image: ${REDIS_IMAGE:?Redis digest required}
+    image: redis:7
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1000", "--appendonly", "no"]
     volumes:
@@ -27,7 +27,7 @@ services:
       retries: 20
 
   migrate:
-    image: ${BOUNDARY_IMAGE:?Boundary digest required}
+    image: ${BOUNDARY_IMAGE:?Boundary image required}
     command: ["pnpm", "--filter", "@traderton/db", "db:migrate"]
     environment:
       DATABASE_URL: ${DATABASE_URL:?Database URL required}
@@ -38,7 +38,7 @@ services:
     profiles: ["migrate"]
 
   boundary:
-    image: ${BOUNDARY_IMAGE:?Boundary digest required}
+    image: ${BOUNDARY_IMAGE:?Boundary image required}
     restart: unless-stopped
     env_file: .env.staging
     environment:

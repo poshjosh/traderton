@@ -32,15 +32,6 @@ variable "ssh_public_key" {
   sensitive   = true
 }
 
-variable "ssh_source_cidrs" {
-  type        = set(string)
-  description = "Individual operator IPv4 SSH ingress addresses (/32 only)."
-  validation {
-    condition     = length(var.ssh_source_cidrs) > 0 && alltrue([for cidr in var.ssh_source_cidrs : can(cidrnetmask(cidr)) && try(tonumber(split("/", cidr)[1]) == 32, false)])
-    error_message = "Supply individual operator IPv4 SSH addresses as /32 CIDRs."
-  }
-}
-
 variable "api_hostname" {
   type        = string
   description = "Public hostname for the Traderton API (execution endpoint, TLS-terminated by Caddy). Set per environment in <env>.tfvars."
@@ -73,7 +64,7 @@ resource "hcloud_firewall" "staging" {
     direction  = "in"
     protocol   = "tcp"
     port       = "22"
-    source_ips = var.ssh_source_cidrs
+    source_ips = ["0.0.0.0/0", "::/0"]
   }
 
   rule {
