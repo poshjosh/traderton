@@ -100,7 +100,7 @@ git rev-parse origin/main
 
 ```sh
 cd traderton/infra/hetzner
-bash scripts/deploy.sh --env staging --release-sha <git-commit-full-sha>
+bash scripts/deploy.sh --env staging
 ```
 
 It resolves the VM IP via `terraform_output -raw public_ip`, copies the runtime files + `.env.staging` (mode 600) + `.env.backup` to `/opt/traderton/staging` over SSH, then runs the on-VM `./deploy-on-host.sh --confirm-staging <sha>`.
@@ -112,3 +112,9 @@ curl --resolve 'api.staging.traderton.com:443:2.28.19.89' https://api.staging.tr
 ```
 
 `https://api.staging.traderton.com/health/ready` should return HTTP 200.
+
+Test if need (staging only)
+
+```sh
+scripts/shell/tests/run-live-boundary.sh --env-file infra/hetzner/.env.staging
+```
