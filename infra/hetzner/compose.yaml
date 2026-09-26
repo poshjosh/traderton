@@ -44,6 +44,11 @@ services:
     environment:
       BOUNDARY_HOST: 0.0.0.0
       BOUNDARY_PORT: "8080"
+      # DATABASE_URL is derived by deploy.sh (URL-encoded POSTGRES_PASSWORD) and
+      # exported there — it is NOT committed in .env.staging. Without this, the
+      # boundary falls back to config/default.yaml's localhost URL and cannot
+      # reach Postgres on the compose network.
+      DATABASE_URL: ${DATABASE_URL:?Database URL required}
     # No host port: the boundary is reachable only via caddy on the compose
     # network. HMAC authenticates every call; TLS is terminated at caddy.
     expose:
