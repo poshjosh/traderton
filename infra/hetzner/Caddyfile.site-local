@@ -1,0 +1,20 @@
+# LOCAL ONLY — mirrors the PUBLIC-SITE vhost of Caddyfile.staging, but over
+# plain HTTP so the path guard can be exercised locally without TLS/ACME.
+#
+# This reproduces the staging guard VERBATIM:
+#   - the public site reverse-proxies `site:80`
+#   - /internal* and /health* return 404 (never reach the execution surface)
+# The staging apex (api.staging.traderton.com → boundary:8080) is intentionally
+# ABSENT here — the local stack has no boundary, and the public site must never
+# proxy it. The offline layer of tests/site-isolation.sh checks the real
+# Caddyfile.staging keeps these directives in lockstep.
+#
+# `http://` scheme + explicit :80 disables Caddy automatic-HTTPS redirects.
+http://staging.traderton.com:80, http://localhost:80 {
+	encode zstd gzip
+
+	@execution path /internal /internal/* /health /health/*
+	respond @execution 404
+
+	reverse_proxy site:80
+}

@@ -1,0 +1,13 @@
+# LOCAL ONLY — static file server for the `site` container.
+#
+# Serves the public site content on container port 80. In the local stack
+# (infra/hetzner/compose.site-local.yaml) the real Caddyfile.staging reverse-
+# proxies `staging.traderton.com` to `site:80`, so this file server sits behind
+# the same path guard that production uses.
+#
+# The canonical reference docs (docs/reference/*) are mounted read-only at
+# /srv/docs/reference so the authored summaries on /docs/ link to real files.
+:80 {
+	root * /srv
+	file_server browse
+}

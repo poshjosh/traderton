@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Service status — Traderton</title>
+    <meta
+      name="description"
+      content="Traderton service status — a human-facing overview of platform components."
+    />
+    <link rel="stylesheet" href="/assets/style.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary">
+        <a class="brand" href="/">Traderton</a>
+        <ul>
+          <li><a href="/docs/">Docs</a></li>
+          <li><a href="/status.html" aria-current="page">Status</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main id="main">
+      <h1>Service status</h1>
+      <p class="lede">
+        A human-facing overview of Traderton's components. This page is static;
+        it does not probe the execution surface. For incident history and live
+        uptime, a dedicated status feed will be linked here.
+      </p>
+
+      <table class="status-table">
+        <caption class="visually-hidden">Traderton component status</caption>
+        <thead>
+          <tr>
+            <th scope="col">Component</th>
+            <th scope="col">Description</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Execution boundary</th>
+            <td>The machine-to-machine trading boundary (agent hosts connect here).</td>
+            <td>Operational</td>
+          </tr>
+          <tr>
+            <th scope="row">Venue connectivity</th>
+            <td>Connectivity to supported trading venues.</td>
+            <td>Operational</td>
+          </tr>
+          <tr>
+            <th scope="row">Documentation</th>
+            <td>This public site and the venue/reference guides.</td>
+            <td>Operational</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="note">
+        Statuses on this page are reviewed and updated manually. They are not a
+        live health probe of the execution boundary.
+      </p>
+    </main>
+
+    <footer class="site-footer">
+      <p>Traderton — the trading product. Agent hosting is provided separately.</p>
+    </footer>
+  </body>
+</html>

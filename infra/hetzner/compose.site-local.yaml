@@ -1,0 +1,52 @@
+# LOCAL ONLY — exercise the public site + the real Caddy path guard locally.
+#
+# This file is NOT part of the staging deploy. The staging compose.yaml,
+# scripts/deploy.sh (RUNTIME_FILES), and deploy-on-host.sh are UNCHANGED by this
+# work. Adding the `site` service to the STAGING compose + shipping site content
+# to the VM is task T4.2 — an infrastructure HARD STOP that needs operator
+# approval. See docs/features/2026/10/01/001-minimal-public-site/001-plan.md §8.
+#
+# Run locally:
+#   docker compose -f infra/hetzner/compose.site-local.yaml up -d
+#   curl -s -H 'Host: staging.traderton.com' http://localhost/            # 200
+#   curl -s -o /dev/null -w '%{http_code}' -H 'Host: staging.traderton.com' \
+#        http://localhost/health                                          # 404
+#
+# Override the host HTTP port if 80 is taken: SITE_HTTP_PORT=8088 docker compose ...
+services:
+  site:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    volumes:
+      - ../../site/Caddyfile.local:/etc/caddy/Caddyfile:ro
+      # Public site content at the web root. Mounted read-write (not :ro) ONLY so
+      # Docker can create the nested /srv/docs/reference mountpoint below; the
+      # file server never writes. (Local test convenience, not a security claim.)
+      - ../../site:/srv
+      # Canonical reference docs surfaced under /docs/reference/* (read-only).
+      - ../../docs/reference:/srv/docs/reference:ro
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      # HTTP only locally — the path guard is exercised over http://; TLS is a
+      # publish-time (T4.2) concern.
+      - "${SITE_HTTP_PORT:-80}:80"
+    volumes:
+      # Caddyfile.site-local mirrors the PUBLIC-SITE vhost of Caddyfile.staging
+      # over plain HTTP (staging auto-redirects HTTP→HTTPS, which would 308 away
+      # before the guard runs). tests/site-isolation.sh asserts the two stay in
+      # lockstep (same @execution guard, same site:80 proxy, no boundary proxy).
+      - ./Caddyfile.site-local:/etc/caddy/Caddyfile:ro
+      - site_local_caddy_data:/data
+      - site_local_caddy_config:/config
+    depends_on:
+      - site
+
+volumes:
+  site_local_caddy_data:
+  site_local_caddy_config:
