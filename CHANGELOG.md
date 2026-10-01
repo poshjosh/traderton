@@ -8,6 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Canonical trading reference docs (herobids Phase 2, Step 6).** `docs/reference/*` now owns the trading venue guides (Hyperliquid/Bybit/Jupiter/1inch + funding-wallets), the crypto-ecosystem reference, and a trading glossary — moved from the herobids host platform so Traderton owns the trading product's reference material.
+- **Minimal public site (Step 7).** Static `staging.traderton.com` site under `site/` (product identity, docs/venue guides, service status) with a local-only serving stack (`infra/hetzner/compose.site-local.yaml`) and an execution-boundary isolation test (`infra/hetzner/tests/site-isolation.sh`). Publishing (DNS/TLS/deploy) is prepared but not executed — see `docs/features/2026/10/01/001-minimal-public-site/002-publish-prep.md`.
 - infrastructure code to infra/hetzner
 - Live signed-call integration suite (`packages/boundary/src/boundary.live.integration.test.ts`) + runner `scripts/shell/tests/run-live-boundary.sh` — drives the full signed contract (HMAC auth, envelope validation, deadline, status, `submit_decision` dry-run) against a deployed boundary over HTTPS.
 
