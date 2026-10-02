@@ -1,0 +1,10 @@
+# Baked into the staging site image (Dockerfile.site). Static file server on
+# :80 serving the public site at /srv. This container carries NO execution
+# surface and NO path guard — the edge Caddy (Caddyfile.staging) owns the
+# /internal* + /health* → 404 guard and reverse-proxies staging.traderton.com
+# here. Kept byte-for-byte equivalent to site/Caddyfile.local (asserted by
+# tests/site-isolation.sh).
+:80 {
+	root * /srv
+	file_server browse
+}

@@ -35,3 +35,16 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
             ghcr.io/${{ github.repository }}:latest
+
+      # Public static site (staging.traderton.com). Same commit SHA tag model as
+      # the boundary image; deploy-on-host.sh derives SITE_IMAGE as
+      # ghcr.io/<owner>/traderton-site:sha-<commit>.
+      - name: Build and push site
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.site
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}-site:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository }}-site:latest

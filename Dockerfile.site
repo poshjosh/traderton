@@ -1,0 +1,32 @@
+# Public static site image for staging.traderton.com (T4.2).
+#
+# Bakes the static site (site/) and the canonical reference docs
+# (docs/reference/ → /srv/docs/reference) into a stock caddy:2-alpine running a
+# plain file server on container port 80. The site carries NO execution surface;
+# the path guard (/internal*, /health* → 404) lives in the EDGE Caddy
+# (Caddyfile.staging), which reverse-proxies staging.traderton.com → site:80.
+#
+# Published by .github/workflows/build-push.yml as
+#   ghcr.io/<owner>/traderton-site:sha-<commit>
+# and pulled on the VM by deploy-on-host.sh (SITE_IMAGE), mirroring the boundary
+# image model.
+FROM caddy:2-alpine
+
+# File-server config: serve /srv on :80. Mirrors site/Caddyfile.local, but is
+# baked into the image (no bind mount) for the staging deploy.
+COPY site/Caddyfile.image /etc/caddy/Caddyfile
+
+# Public site content at the web root, with the canonical reference docs nested
+# under /docs/reference so the authored summaries on /docs/ link to real files.
+COPY site/ /srv/
+COPY docs/reference/ /srv/docs/reference/
+
+# Drop the baked-in site Caddyfile source out of the web root (it is config, not
+# content). The web root is /srv; /srv/Caddyfile.local and /srv/Caddyfile.image
+# would otherwise be publicly listable.
+RUN rm -f /srv/Caddyfile.local /srv/Caddyfile.image
+
+EXPOSE 80
+
+HEALTHCHECK --interval=5s --timeout=3s --retries=20 \
+  CMD wget -q -O /dev/null http://localhost:80/ || exit 1

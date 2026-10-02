@@ -70,6 +70,26 @@ services:
       timeout: 3s
       retries: 20
 
+  site:
+    image: ${SITE_IMAGE:?Site image required}
+    restart: unless-stopped
+    # No host port: reachable only via caddy on the compose network. The site
+    # carries no execution surface; the edge Caddy owns the /internal* +
+    # /health* → 404 guard (Caddyfile.staging).
+    expose:
+      - "80"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:80/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -82,6 +102,8 @@ services:
       - caddy_config:/config
     depends_on:
       boundary:
+        condition: service_healthy
+      site:
         condition: service_healthy
 
 volumes:

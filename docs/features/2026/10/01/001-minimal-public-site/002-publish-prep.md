@@ -1,15 +1,32 @@
-# T4.2 — Publish `staging.traderton.com` (PREP ONLY — infrastructure HARD STOP)
+# T4.2 — Publish `staging.traderton.com`
 
-**Status:** prepared, **NOT executed**. **Created:** 2026-10-01.
-**Program:** herobids Phase 2 — Step 7 / `T4.2`
+**Status:** **APPROVED + EXECUTED (option b, CI site image).** Operator granted
+the infra greenlight and authorized pushing `main` for this on 2026-10-01.
+**Created:** 2026-10-01. **Program:** herobids Phase 2 — Step 7 / `T4.2`
 (`herobids/docs/features/2026/10/004-phase2-program/{ENTRYPOINT,TASKS}.md`).
 
-> **This is a §5.1 infrastructure HARD STOP.** Everything below mutates
-> infrastructure (DNS, TLS, VM deploy, the staging compose + deploy flow). An
-> autonomous agent **must not execute any of it** — it is documented here so the
-> operator can review and approve, then run it (or direct it) deliberately.
-> Until approved, `T4.2` stays 🚫 in the tracker. The site content itself (T4.1)
-> is already built and verified locally; publishing is purely the ship step.
+> **Originally a §5.1 infrastructure HARD STOP.** Everything below mutates
+> infrastructure (DNS, TLS, VM deploy, the staging compose + deploy flow). The
+> operator reviewed, approved, and greenlit execution — including the normally-
+> separate `main`-push invariant — so this was carried out via the CI-image path
+> (option A/b: a baked `traderton-site` image built+pushed by CI and pulled on
+> the VM, mirroring the boundary image model).
+>
+> **What was done (chosen path = image, option b):**
+> - `Dockerfile.site` bakes `site/` + `docs/reference/` into `caddy:2-alpine`
+>   (serves `/srv` on `:80` via `site/Caddyfile.image`; config files excluded
+>   from the web root).
+> - `.github/workflows/build-push.yml` gained a **Build and push site** job →
+>   `ghcr.io/<owner>/traderton-site:sha-<commit>` (same commit-SHA tag model).
+> - Staging `compose.yaml` gained the `site` service (no host port, `expose 80`,
+>   `cap_drop: [ALL]`, `no-new-privileges`, mem/cpu/pids caps, healthcheck);
+>   `caddy` now `depends_on` both `boundary` and `site` being healthy.
+> - `deploy-on-host.sh` derives `SITE_IMAGE` from the release SHA, pulls + brings
+>   up `site`, and `caddy` depends on it.
+> - DNS: the operator created the A records (`staging` + `api` →
+>   `2.28.19.89`); Caddy auto-issues TLS on first HTTPS hit.
+> - Guard tests (`offline-guards.sh`, `site-isolation.sh`) extended to assert the
+>   new staging `site` service shape + the baked-image/local-config lockstep.
 
 ## 0. Current state (what already exists)
 
@@ -86,11 +103,13 @@ E1/E3 family), the two removed herobids funding-doc links can be restored as
 outbound links to `https://staging.traderton.com/docs/...` once published. Do not
 restore them until that positioning decision is made.
 
-## 4. Approval checklist (operator)
+## 4. Approval checklist (operator) — RESOLVED 2026-10-01
 
-- [ ] Approve Step A delivery mechanism (recommend image option b).
-- [ ] Approve the `site` service addition to the staging `compose.yaml`.
-- [ ] Approve the `deploy-on-host.sh` service-list change.
-- [ ] Approve DNS record creation for `staging.traderton.com`.
-- [ ] Confirm TLS issuance after publish; run the HTTPS isolation checks.
-- [ ] (Separately) resolve ESCALATIONS E1/E3 + N1 before any herobids→site links.
+- [x] Approve Step A delivery mechanism → **image, option b** (approved).
+- [x] Approve the `site` service addition to the staging `compose.yaml`.
+- [x] Approve the `deploy-on-host.sh` service-list change.
+- [x] Approve DNS record creation → operator created `staging` + `api` A records
+      (`2.28.19.89`).
+- [x] Confirm TLS issuance after publish; run the HTTPS isolation checks.
+- [ ] (Separately, still open) resolve ESCALATIONS E1/E3 + N1 before any
+      herobids→site links.

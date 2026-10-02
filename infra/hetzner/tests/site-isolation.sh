@@ -56,6 +56,37 @@ if grep -Eq '^[[:space:]]+boundary:' compose.site-local.yaml; then
   echo 'The local site stack must not define a boundary (execution) service' >&2
   exit 1
 fi
+
+# The STAGING site image (Dockerfile.site) bakes site/Caddyfile.image as the
+# file-server config. It must stay in lockstep with site/Caddyfile.local (same
+# plain file server on :80), carry no execution surface, and never proxy the
+# boundary. The edge Caddy (Caddyfile.staging) owns the path guard.
+repo_root="$(cd ../.. && pwd)"
+image_caddyfile="${repo_root}/site/Caddyfile.image"
+local_caddyfile="${repo_root}/site/Caddyfile.local"
+[[ -f "$image_caddyfile" ]] || { echo 'site/Caddyfile.image missing (baked into Dockerfile.site)' >&2; exit 1; }
+grep -Fq 'root * /srv' "$image_caddyfile"
+grep -Fq 'file_server' "$image_caddyfile"
+if grep -Fq 'reverse_proxy boundary' "$image_caddyfile"; then
+  echo 'The baked site image config must never reverse_proxy the boundary' >&2
+  exit 1
+fi
+# Lockstep: the image config's directive body must match the local one's.
+if ! diff -q \
+  <(grep -E '^\s*(root|file_server)' "$image_caddyfile") \
+  <(grep -E '^\s*(root|file_server)' "$local_caddyfile") >/dev/null; then
+  echo 'site/Caddyfile.image file-server directives drifted from site/Caddyfile.local' >&2
+  exit 1
+fi
+# Dockerfile.site must bake the site + reference docs and the image config, and
+# must not drop a path guard into the site container (guard is edge-only).
+grep -Fq 'COPY site/Caddyfile.image /etc/caddy/Caddyfile' "${repo_root}/Dockerfile.site"
+grep -Fq 'COPY docs/reference/ /srv/docs/reference/' "${repo_root}/Dockerfile.site"
+if grep -Fq 'reverse_proxy boundary' "${repo_root}/Dockerfile.site"; then
+  echo 'Dockerfile.site must never reference the boundary' >&2
+  exit 1
+fi
+
 bash -n tests/site-isolation.sh
 
 echo 'Offline site-isolation guards passed'

@@ -53,10 +53,18 @@ for script in deploy-on-host.sh scripts/deploy.sh backup.sh backup-job.sh backup
   bash -n "$script"
 done
 
+# deploy-on-host.sh must wire the public site image + service alongside the
+# boundary (same SHA-tag model, pulled and brought up, caddy depends on it).
+grep -Fq 'site_image="ghcr.io/${ghcr_username}/traderton-site:sha-${release_sha}"' deploy-on-host.sh
+grep -Fq 'export SITE_IMAGE="$site_image"' deploy-on-host.sh
+grep -Fq 'docker compose --env-file .env.staging pull postgres redis boundary site caddy' deploy-on-host.sh
+grep -Fq 'docker compose --env-file .env.staging up -d site' deploy-on-host.sh
+
 private_ip=10.77.1.20
 export POSTGRES_PASSWORD=fixture
 export DATABASE_URL=postgres://traderton:fixture@postgres:5432/traderton
 export BOUNDARY_IMAGE="ghcr.io/poshjosh/traderton:sha-0123456789012345678901234567890123456789"
+export SITE_IMAGE="ghcr.io/poshjosh/traderton-site:sha-0123456789012345678901234567890123456789"
 COMPOSE_PROFILES=migrate docker compose -f compose.yaml config --no-env-resolution --format json | jq -e -r '
   (.services.boundary | has("ports") | not) and
   .services.boundary.expose == ["8080"] and
@@ -72,7 +80,14 @@ COMPOSE_PROFILES=migrate docker compose -f compose.yaml config --no-env-resoluti
   .services.boundary.security_opt == ["no-new-privileges:true"] and
   .services.boundary.mem_limit == "1073741824" and
   .services.boundary.cpus == 1 and
-  .services.boundary.pids_limit == 256
+  .services.boundary.pids_limit == 256 and
+  (.services.site | has("ports") | not) and
+  .services.site.expose == ["80"] and
+  .services.site.cap_drop == ["ALL"] and
+  .services.site.security_opt == ["no-new-privileges:true"] and
+  (.services.site | has("env_file") | not) and
+  (.services.caddy.depends_on.boundary.condition == "service_healthy") and
+  (.services.caddy.depends_on.site.condition == "service_healthy")
 ' > /dev/null
 
 if bash deploy-on-host.sh --confirm-staging invalid >/dev/null 2>&1; then
