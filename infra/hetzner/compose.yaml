@@ -78,9 +78,13 @@ services:
     # /health* → 404 guard (Caddyfile.staging).
     expose:
       - "80"
+    # Hardened, but Caddy binds :80 via a file capability (NET_BIND_SERVICE) on
+    # /usr/bin/caddy. Drop everything EXCEPT that one cap, and do NOT set
+    # no-new-privileges (it blocks the file-cap exec → "operation not permitted"
+    # crash-loop). The boundary (Node on 8080, unprivileged) can drop ALL; Caddy
+    # on :80 cannot.
     cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
+    cap_add: [NET_BIND_SERVICE]
     mem_limit: 256m
     cpus: 0.5
     pids_limit: 128

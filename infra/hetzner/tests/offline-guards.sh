@@ -84,7 +84,7 @@ COMPOSE_PROFILES=migrate docker compose -f compose.yaml config --no-env-resoluti
   (.services.site | has("ports") | not) and
   .services.site.expose == ["80"] and
   .services.site.cap_drop == ["ALL"] and
-  .services.site.security_opt == ["no-new-privileges:true"] and
+  .services.site.cap_add == ["NET_BIND_SERVICE"] and
   (.services.site | has("env_file") | not) and
   (.services.caddy.depends_on.boundary.condition == "service_healthy") and
   (.services.caddy.depends_on.site.condition == "service_healthy")
