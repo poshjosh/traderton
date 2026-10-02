@@ -19,8 +19,6 @@
  *   .env
  *   .env.*
  *   !.env.example
- *   !.env.ops.dev.example
- *   !.env.ops.environment.example
  *   !.env.ops.environment.example
  * Any future `.env.foo` real file is ignored unless its `.env.foo.example` twin
  * is explicitly un-ignored — so a future author must extend BOTH `.gitignore`
@@ -33,9 +31,9 @@ import { resolve, join } from 'node:path';
 // packages/worker/src → repo root is ../../..
 const REPO_ROOT = resolve(new URL('.', import.meta.url).pathname, '../../..');
 const ENV_EXAMPLE = resolve(REPO_ROOT, '.env.example');
-const OPS_DEV_EXAMPLE = resolve(REPO_ROOT, '.env.ops.dev.example');
-const OPS_STAGING_EXAMPLE = resolve(REPO_ROOT, '.env.ops.environment.example');
-const OPS_PROD_EXAMPLE = resolve(REPO_ROOT, '.env.ops.environment.example');
+// `.env.ops.dev.example` was renamed to `.env.ops.environment.example` — a single
+// ops example twin now covers every operator/test/validator deployment.
+const OPS_ENVIRONMENT_EXAMPLE = resolve(REPO_ROOT, '.env.ops.environment.example');
 const CONFIG_TS = resolve(REPO_ROOT, 'packages/worker/src/config.ts');
 const DEFAULT_YAML = resolve(REPO_ROOT, 'config/default.yaml');
 const PACKAGES_DIR = resolve(REPO_ROOT, 'packages');
@@ -203,15 +201,13 @@ describe('config/default.yaml has a value for every ENV_OVERRIDES target (self-d
   });
 });
 
-describe('.env.ops.*.example files are in lockstep with each other and their docs', () => {
+describe('.env.ops.environment.example is in lockstep with its documented var set', () => {
   // The operator/test/validator examples carry credentials that are NOT all read
   // as `process.env['X']` literals in packages/ (validators live under scripts/ts/,
   // integration tests use describe.skipIf), so they can't be guarded by the literal
   // walk — we assert them against an explicit expected key set instead.
   const OPS_EXAMPLES = [
-    ['dev', OPS_DEV_EXAMPLE],
-    ['staging', OPS_STAGING_EXAMPLE],
-    ['production', OPS_PROD_EXAMPLE],
+    ['environment', OPS_ENVIRONMENT_EXAMPLE],
   ] as const;
 
   // Union of validator secrets + Tier5/6 testnet creds + runtime keys duplicated
@@ -245,19 +241,13 @@ describe('.env.ops.*.example files are in lockstep with each other and their doc
   // Non-secret vars (URLs, chain id, NODE_ENV, LOG_FORMAT, amounts, bps) MAY have defaults.
   const SECRET_VAR_RE = /(_PRIVATE_KEY|_SECRET|_API_KEY|_SIGNING_SECRET|_ENCRYPTION_KEY)$/;
 
-  it('documents the same key set across all three ops examples', () => {
-    const baseline = [...envExampleKeys(OPS_DEV_EXAMPLE)].sort();
-    for (const [label, file] of OPS_EXAMPLES) {
-      if (label === 'dev') continue; // skip self-comparison of the baseline
-      const keys = [...envExampleKeys(file)].sort();
-      const missing = baseline.filter((k) => !keys.includes(k));
-      const extra = keys.filter((k) => !baseline.includes(k));
-      expect(
-        { missing, extra },
-        `.env.ops.${label}.example diverges from .env.ops.dev.example ` +
-          `(missing: ${missing.join(', ') || 'none'}; extra: ${extra.join(', ') || 'none'})`,
-      ).toEqual({ missing: [], extra: [] });
-    }
+  it('the ops example twin is present and parseable', () => {
+    // A single `.env.ops.environment.example` twin now covers every
+    // operator/test/validator deployment (dev/staging/production). Confirm it
+    // exists and documents a non-empty key set; the expected-key and
+    // secret-blank assertions below guard its contents.
+    const keys = envExampleKeys(OPS_ENVIRONMENT_EXAMPLE);
+    expect(keys.size, '.env.ops.environment.example documents no env vars').toBeGreaterThan(0);
   });
 
   it('documents every expected ops var in every example', () => {
