@@ -20,6 +20,8 @@ import {
   ToolInvocationDispatcher,
   type DispatcherDeps,
 } from './dispatcher.js';
+import { registerMcpRoute } from './mcp/route.js';
+import type { McpSurfaceConfig } from './mcp/surface-config.js';
 
 /** The one execution route (005 §Endpoints). */
 const INVOKE_PATH = '/internal/v1/tools:invoke';
@@ -32,6 +34,13 @@ export interface BoundaryAppDeps extends DispatcherDeps {
   config: BoundaryConfig;
   /** Injectable clock — tests pin it; production defaults to `Date.now`. */
   now?: () => number;
+  /**
+   * The MCP surface (Phase 3 T2.2). When present, `POST /internal/v1/mcp` is
+   * mounted over the SAME dispatcher the REST route uses; when absent, no MCP
+   * route is registered. Off by default — `bin.ts` only supplies it when the
+   * operator sets `BOUNDARY_MCP_ENABLED=true`.
+   */
+  mcp?: McpSurfaceConfig;
 }
 
 export function createBoundaryApp(deps: BoundaryAppDeps): FastifyInstance {
@@ -151,6 +160,13 @@ export function createBoundaryApp(deps: BoundaryAppDeps): FastifyInstance {
     const status = await dispatcher.status(requestId);
     return reply.code(200).send(status);
   });
+
+  // The additive MCP binding (Phase 3 T2.2), mounted only when configured. It
+  // reuses the SAME dispatcher instance — the one core, two thin seams rule: the
+  // MCP route authors no execution semantics, only parse/authenticate/encode edges.
+  if (deps.mcp) {
+    registerMcpRoute(app, { config: deps.config, now, dispatcher, surface: deps.mcp });
+  }
 
   return app;
 }

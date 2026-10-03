@@ -528,3 +528,34 @@ Integration is not complete until automated tests prove:
 5. a different payload with the same key is rejected
 6. readiness failure blocks new traffic without triggering hidden fallback
 7. compose or staging startup reaches a healthy `/health/ready` state
+
+## MCP binding (additive, Phase 3)
+
+An additive MCP transport binding exposes the SAME dispatcher over a second
+listener-local route. It is **off by default** and changes no REST byte or
+behaviour.
+
+- **Endpoint:** `POST /internal/v1/mcp` on the existing boundary listener
+  (legacy Streamable HTTP, stateless JSON). `GET`/`DELETE` → `405`; there is no
+  status route — reconcile a lost MCP response by re-issuing the same
+  `idempotencyKey`.
+- **Enablement (operator env, read only in `bin.ts`):**
+  `BOUNDARY_MCP_ENABLED=true` mounts the route; `BOUNDARY_MCP_DESCRIPTOR_PATH`
+  (optional, requires enabled) points at the signed External Backend Descriptor
+  wrapper served verbatim by `tools/list` (unset = empty list; D16 — traderton
+  serves, never invents, and does not verify the signature — herobids is the
+  verifier). A bad value or unreadable/invalid descriptor fails the boundary at
+  startup.
+- **Normative mapping:** the `tools/call` ↔ invocation-envelope field mapping,
+  result encoding (`structuredContent` = the 005 result, `isError` iff failure),
+  pre-dispatch failure encoding, the dispatcher-exception → sanitized
+  `-32603`, and `tools/list` cross-check rule are **normative in herobids Step 10
+  §2.5 / §3** — not restated here, to avoid drift (n35).
+- **One execution path:** every MCP frame de-frames to the identical
+  `TradertonToolInvocationV1` envelope and reaches execution only through
+  `ToolInvocationDispatcher.dispatch` (Fixed Decision 3). HMAC authentication
+  uses the UNMODIFIED canonical string over the raw request bytes.
+- **Tests that pin it (traderton):** `packages/boundary/src/mcp/route.test.ts`,
+  `mcp/mcp.sdk.test.ts`, `mcp/descriptor-tools.test.ts`, `mcp/surface-config.test.ts`,
+  and `packages/boundary/src/boundary.mcp.verification.integration.test.ts`
+  (idempotency against real Postgres).

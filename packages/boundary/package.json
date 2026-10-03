@@ -17,6 +17,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "2.3.0",
     "@traderton/db": "workspace:*",
     "@traderton/domain": "workspace:*",
     "@traderton/market-data": "workspace:*",
@@ -27,6 +28,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.0",
     "@types/node": "^25.9.1"
   }
 }
