@@ -5,6 +5,7 @@ import { AGENT_MESSAGE_TYPES, BotConfigSchema, checkModeEscalation, deriveStrate
 import type { Database } from '@traderton/db';
 import { fills, journalEvents, positions, bots, venueAccounts, FillRepository, PositionRepository, PgJournal, ReconciliationEventRepository, DecisionRepository, DecisionFailureRepository } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
+import { markOpenPositions, POSITION_MARK_BUDGET_MS } from './position-marks.js';
 import { createLogger } from '../logger.js';
 
 const logger = createLogger('tools:bots');
@@ -1295,6 +1296,7 @@ const GetAgentPositionsParamsSchema = z.object({
   from: z.string().optional().describe('ISO date — only include positions at or after this time'),
   to: z.string().optional().describe('ISO date — only include positions at or before this time'),
   at: z.string().optional().describe('ISO date — snapshot: only positions open at this instant (openedAt <= at AND (closedAt is null OR closedAt > at))'),
+  includeMarks: z.boolean().optional().describe('When true, enrich OPEN positions with current mark price and unrealized P&L (markPrice, unrealizedPnl, markedAt). Closed rows and unmarkable rows get nulls; marking is best-effort and never fails the read. Default false.'),
 });
 
 const getAgentPositionsTool: AgentTool<TradingToolContext> = {
@@ -1304,7 +1306,7 @@ const getAgentPositionsTool: AgentTool<TradingToolContext> = {
   parameters: convertZodToJsonSchema(GetAgentPositionsParamsSchema),
   category: 'read-database',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
-    const { from, to, at } = params as z.infer<typeof GetAgentPositionsParamsSchema>;
+    const { from, to, at, includeMarks } = params as z.infer<typeof GetAgentPositionsParamsSchema>;
 
     if (!ctx.db) {
       return { success: false, error: 'direct db access not available', fault: false };
@@ -1316,13 +1318,27 @@ const getAgentPositionsTool: AgentTool<TradingToolContext> = {
     const db = ctx.db as Database;
     // Scope invariant: NEVER pass `botIds` — agent-owned bot resolution stays
     // context-derived so a caller cannot widen scope. Only time filters cross.
+    // `includeMarks` is NOT forwarded: the loader opts are exactly {from,to,at}.
     const positionRows = await new PositionRepository(db).loadAgentPositions(ctx.agentId, {
       from: from ? new Date(from) : undefined,
       to: to ? new Date(to) : undefined,
       at: at ? new Date(at) : undefined,
     });
 
-    return { success: true, data: { ok: true, positions: positionRows } };
+    if (!includeMarks) {
+      return { success: true, data: { ok: true, positions: positionRows } };
+    }
+
+    // Opt-in valuation: enrich open rows with mark price + unrealized P&L.
+    // Best-effort — per-position failure yields nulls, never a failed read.
+    const marked = await markOpenPositions(positionRows, {
+      priceService: ctx.priceService,
+      oneInchConfig: ctx.oneInchPriceChainConfig,
+      budgetMs: POSITION_MARK_BUDGET_MS,
+      now: new Date(),
+    });
+
+    return { success: true, data: { ok: true, positions: marked } };
   },
 };
 

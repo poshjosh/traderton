@@ -1058,6 +1058,66 @@ describe('get_agent_positions — agent-scoped positions read', () => {
     expect(optsArg).not.toHaveProperty('botIds');
   });
 
+  it('returns rows untouched and keeps optsArg {from,to,at} when includeMarks is false', async () => {
+    const positionRows = [{ id: 'p-1', venue: 'hyperliquid', symbol: 'BTC', side: 'long', size: '1', entryPrice: '100', closedAt: null }];
+    const spy = vi.spyOn(PositionRepository.prototype, 'loadAgentPositions').mockResolvedValue(positionRows as never);
+    const priceService = { getPrice: vi.fn(async () => ({ ok: true, data: { priceUsd: 110, source: 'oracle', fetchedAt: '2024-01-01T00:00:00.000Z', stale: false } })) };
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb, priceService } as Partial<ToolContext>);
+
+    const result = await getAgentPositionsTool.execute({ includeMarks: false }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, positions: positionRows });
+    expect(priceService.getPrice).not.toHaveBeenCalled();
+    const [, optsArg] = spy.mock.calls[0];
+    expect(optsArg).toEqual({ from: undefined, to: undefined, at: undefined });
+    expect(optsArg).not.toHaveProperty('includeMarks');
+  });
+
+  it('adds markPrice/unrealizedPnl/markedAt to every row when includeMarks is true (closed → nulls)', async () => {
+    const positionRows = [
+      { id: 'p-open', venue: 'hyperliquid', symbol: 'BTC', side: 'long', size: '2', entryPrice: '100', closedAt: null },
+      { id: 'p-closed', venue: 'hyperliquid', symbol: 'ETH', side: 'flat', size: '0', entryPrice: '50', closedAt: new Date('2024-01-02T00:00:00.000Z') },
+    ];
+    vi.spyOn(PositionRepository.prototype, 'loadAgentPositions').mockResolvedValue(positionRows as never);
+    const priceService = { getPrice: vi.fn(async () => ({ ok: true, data: { priceUsd: 150, source: 'oracle', fetchedAt: '2024-01-03T00:00:00.000Z', stale: false } })) };
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb, priceService } as Partial<ToolContext>);
+
+    const result = await getAgentPositionsTool.execute({ includeMarks: true }, ctx);
+
+    expect(result.success).toBe(true);
+    const positions = (result.data as { positions: Array<Record<string, unknown>> }).positions;
+    // Open row marked: (150 - 100) * 2 = 100.
+    expect(positions[0]).toMatchObject({ id: 'p-open', markPrice: '150', unrealizedPnl: '100', markedAt: '2024-01-03T00:00:00.000Z' });
+    // Closed/flat row → nulls, but the fields are present.
+    expect(positions[1]).toMatchObject({ id: 'p-closed', markPrice: null, unrealizedPnl: null, markedAt: null });
+  });
+
+  it('yields null marks on a price lookup failure while still succeeding', async () => {
+    const positionRows = [{ id: 'p-open', venue: 'hyperliquid', symbol: 'BTC', side: 'long', size: '1', entryPrice: '100', closedAt: null }];
+    vi.spyOn(PositionRepository.prototype, 'loadAgentPositions').mockResolvedValue(positionRows as never);
+    const priceService = { getPrice: vi.fn(async () => ({ ok: false, error: { code: 'price.source_failed', message: 'down' } })) };
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb, priceService } as Partial<ToolContext>);
+
+    const result = await getAgentPositionsTool.execute({ includeMarks: true }, ctx);
+
+    expect(result.success).toBe(true);
+    const positions = (result.data as { positions: Array<Record<string, unknown>> }).positions;
+    expect(positions[0]).toMatchObject({ markPrice: null, unrealizedPnl: null, markedAt: null });
+  });
+
+  it('yields null marks for every row when no priceService is present', async () => {
+    const positionRows = [{ id: 'p-open', venue: 'hyperliquid', symbol: 'BTC', side: 'long', size: '1', entryPrice: '100', closedAt: null }];
+    vi.spyOn(PositionRepository.prototype, 'loadAgentPositions').mockResolvedValue(positionRows as never);
+    const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });
+
+    const result = await getAgentPositionsTool.execute({ includeMarks: true }, ctx);
+
+    expect(result.success).toBe(true);
+    const positions = (result.data as { positions: Array<Record<string, unknown>> }).positions;
+    expect(positions[0]).toMatchObject({ markPrice: null, unrealizedPnl: null, markedAt: null });
+  });
+
   it('parses ISO from/to/at into Date and passes them to the loader', async () => {
     const spy = vi.spyOn(PositionRepository.prototype, 'loadAgentPositions').mockResolvedValue([] as never);
     const ctx = makeCtx({ agentId: 'agent-1', db: stubDb });

@@ -8,6 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Opt-in position marks on `get_agent_positions`.** New `includeMarks?: boolean` param (default `false`). When `true`, every returned row carries `markPrice`, `unrealizedPnl` (full precision) and `markedAt` (ISO); only open, non-flat rows are marked, and closed/flat/unmarkable rows get nulls. Marking is best-effort (bounded by a short internal deadline, deduped per asset) and never fails the read — base rows stay byte-identical when the param is absent or `false`. See `packages/worker/src/tools/position-marks.ts` and `docs/features/initial/005-consumer-boundary-contract.md`.
 - **Canonical trading reference docs (herobids Phase 2, Step 6).** `docs/reference/*` now owns the trading venue guides (Hyperliquid/Bybit/Jupiter/1inch + funding-wallets), the crypto-ecosystem reference, and a trading glossary — moved from the herobids host platform so Traderton owns the trading product's reference material.
 - **Minimal public site (Step 7).** Static `staging.traderton.com` site under `site/` (product identity, docs/venue guides, service status) with a local-only serving stack (`infra/hetzner/compose.site-local.yaml`) and an execution-boundary isolation test (`infra/hetzner/tests/site-isolation.sh`). Publishing (DNS/TLS/deploy) is prepared but not executed — see `docs/features/2026/10/01/001-minimal-public-site/002-publish-prep.md`.
 - infrastructure code to infra/hetzner

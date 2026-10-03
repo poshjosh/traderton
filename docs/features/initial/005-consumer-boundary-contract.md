@@ -409,9 +409,17 @@ caller-supplied id can widen scope.
   result `{ ok: true, fills: FillRow[] }` (full rows; time-filtered on `filledAt`).
 - **`get_agent_journal_events`** — payload `{ from?, to? }`; result
   `{ ok: true, events: JournalRow[] }` (time-filtered on `createdAt`).
-- **`get_agent_positions`** — payload `{ from?, to?, at?: string(ISO) }`; result
-  `{ ok: true, positions: PositionRow[] }`. `at` is a point-in-time snapshot
-  (openedAt ≤ at AND (closedAt null OR closedAt > at)).
+- **`get_agent_positions`** — payload `{ from?, to?, at?: string(ISO), includeMarks?: boolean }`;
+  result `{ ok: true, positions: PositionRow[] }`. `at` is a point-in-time snapshot
+  (openedAt ≤ at AND (closedAt null OR closedAt > at)). `includeMarks` (default
+  `false`) is opt-in valuation: when `true`, EVERY returned row additionally
+  carries `markPrice: string | null`, `unrealizedPnl: string | null` and
+  `markedAt: string | null` (ISO). Only OPEN, non-flat rows are marked — closed,
+  flat, or unmarkable rows (unroutable venue, non-USD quote, failed/slow price
+  lookup) get all three fields as `null`. `unrealizedPnl` is full-precision
+  (unrounded); the consumer rounds for display. Marking is best-effort and
+  bounded by a short internal deadline — it NEVER fails the read, and the base
+  rows are byte-identical when `includeMarks` is absent or `false`.
 - **Full rows, verbatim** — evaluation analyses raw rows (redaction, per-fill
   timing, security-scan); no derivation suffices. Rows carry trading STATE only,
   NEVER credentials/secrets (those live in `user_credentials`/`venue_accounts`).

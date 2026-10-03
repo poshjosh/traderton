@@ -253,6 +253,15 @@ export interface TradingToolContext {
       error?: { code: string; message: string };
     }>;
   };
+  /**
+   * Operator 1inch chain mapping used to resolve a 1inch position's price-lookup
+   * chain (there is no per-position binding on the read path). Sourced from the
+   * operator `venues.1inch` config (`tokenSafetyNetwork` / `chainId`) and fed to
+   * `resolveSwapNetwork('1inch', undefined, oneInchPriceChainConfig)` when marking
+   * open positions in `get_agent_positions`. Undefined → 1inch rows cannot be
+   * marked (mark fields are null), never an error.
+   */
+  oneInchPriceChainConfig?: { tokenSafetyNetwork?: string; chainId?: number };
   /** Agent risk contract operations for reading and adjusting runtime risk limits. */
   riskContractOps?: {
     getContract(): Promise<import('../agent-risk-contract.js').ResolvedAgentRiskContract>;

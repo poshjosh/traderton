@@ -360,6 +360,16 @@ async function main(): Promise<void> {
       marketDataRegistry: marketDataRegistry as unknown as TradingToolContext['marketDataRegistry'],
       marketDataConfig: marketDataConfig as unknown as TradingToolContext['marketDataConfig'],
       priceService: priceService as unknown as TradingToolContext['priceService'],
+      // Operator 1inch chain mapping for marking 1inch positions in
+      // get_agent_positions (includeMarks). There is no per-position binding on
+      // the read path, so the operator `venues.1inch` chainId/tokenSafetyNetwork
+      // is the resolution source. Undefined → 1inch rows are left unmarked.
+      oneInchPriceChainConfig: appConfig.venues?.['1inch']
+        ? {
+            tokenSafetyNetwork: appConfig.venues['1inch'].tokenSafetyNetwork,
+            chainId: appConfig.venues['1inch'].chainId,
+          }
+        : undefined,
       // Economic-calendar read provider for get_economic_calendar. The SAME
       // single instance is threaded into every invocation — it is a cache reader
       // (cacheOnly on the tick path); the background loop above owns the fetch.
