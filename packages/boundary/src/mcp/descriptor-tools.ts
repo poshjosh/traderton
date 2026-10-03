@@ -85,7 +85,10 @@ export function projectDescriptorTools(
       };
       const existing = byName.get(tool.name);
       if (existing) {
-        if (JSON.stringify(existing) !== JSON.stringify(definition)) {
+        // Compare under a canonical (sorted-key) form: the normative D16
+        // cross-check (Step 10 §3) treats definitions as JCS-equal, so a mere
+        // key-order difference between two source skills is NOT a conflict.
+        if (canonicalJson(existing) !== canonicalJson(definition)) {
           return err({
             code: 'mcp.descriptor_tool_conflict',
             message: `tool ${tool.name} is declared more than once with differing definitions`,
@@ -98,4 +101,21 @@ export function projectDescriptorTools(
   }
 
   return ok([...byName.values()]);
+}
+
+/** Stable stringify with recursively sorted object keys (array order preserved). */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortKeys(value));
+}
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, sortKeys((value as Record<string, unknown>)[key])]),
+    );
+  }
+  return value;
 }

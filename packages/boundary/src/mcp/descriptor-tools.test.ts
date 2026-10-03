@@ -78,6 +78,34 @@ describe('projectDescriptorTools', () => {
     expect(result.data).toHaveLength(1);
   });
 
+  it('treats a duplicate tool name whose inputSchema differs only by key order as identical', () => {
+    const wrapper = {
+      descriptor: {
+        backendId: 'b',
+        sourceSkills: [
+          {
+            ref: 'a',
+            tools: [
+              { name: 'dup', description: 'same', inputSchema: { type: 'object', a: 1, b: 2 }, category: 'read-config' },
+            ],
+          },
+          {
+            ref: 'b',
+            tools: [
+              { name: 'dup', description: 'same', inputSchema: { b: 2, type: 'object', a: 1 }, category: 'read-config' },
+            ],
+          },
+        ],
+      },
+      signature: 's',
+      keyId: 'k',
+    };
+    const result = projectDescriptorTools(wrapper);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toHaveLength(1);
+  });
+
   it('rejects a tool whose inputSchema root is not an object schema', () => {
     const wrapper = {
       descriptor: {

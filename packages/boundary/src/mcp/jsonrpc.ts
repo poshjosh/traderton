@@ -23,14 +23,9 @@ export function requestIdOf(frame: unknown): JsonRpcId | undefined {
   return typeof id === 'string' || typeof id === 'number' ? id : undefined;
 }
 
-/**
- * A JSON-RPC notification: a frame with a `method` but no `id`. The route treats
- * a notification that fails authentication as unreplyable (401, id:null) — it
- * carries no request id to answer under.
- */
-export function isNotificationFrame(frame: unknown): boolean {
-  return isRecord(frame) && typeof frame['method'] === 'string' && requestIdOf(frame) === undefined;
-}
+// Note: a JSON-RPC notification is a frame with a `method` but no `id`. The
+// route derives that case directly from `requestIdOf(frame) === undefined` (an
+// unreplyable frame → 401, id:null), so no separate predicate is needed.
 
 export function jsonRpcErrorBody(
   id: JsonRpcId | null,
