@@ -63,7 +63,14 @@ echo "==> applying migrations (pnpm --filter @traderton/db db:migrate)"
 pnpm --filter @traderton/db db:migrate
 
 echo "==> running the gated integration tests"
-# Scope to the verification suite by default; pass extra args through.
-pnpm exec vitest run packages/boundary/src/boundary.verification.integration.test.ts "$@"
+# Scope to the verification suites by default (REST + the Phase 3 MCP sibling);
+# pass extra args through. `--no-file-parallelism`: both suites truncate the SAME
+# shared tables (bots/venue_accounts/boundary_invocations) in beforeEach, so they
+# must run sequentially — concurrent file workers would wipe each other's seeded
+# state mid-test.
+pnpm exec vitest run --no-file-parallelism \
+  packages/boundary/src/boundary.verification.integration.test.ts \
+  packages/boundary/src/boundary.mcp.verification.integration.test.ts \
+  "$@"
 
 echo "==> integration run complete"
