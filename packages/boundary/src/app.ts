@@ -8,7 +8,13 @@
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { BoundaryConfig } from './config.js';
-import { authenticateRequest, type SignedRequest, type BodyAssertions } from './auth.js';
+import { authenticateRequest } from './auth.js';
+import {
+  extractBodyAssertions,
+  identityFor,
+  toSignedRequest,
+  type ParsedJsonBody,
+} from './request-material.js';
 import { BoundaryFailure, failureResult } from './result.js';
 import {
   ToolInvocationDispatcher,
@@ -26,39 +32,6 @@ export interface BoundaryAppDeps extends DispatcherDeps {
   config: BoundaryConfig;
   /** Injectable clock — tests pin it; production defaults to `Date.now`. */
   now?: () => number;
-}
-
-/** The parsed body + retained raw bytes for a JSON request. */
-interface ParsedJsonBody {
-  parsed: unknown;
-  raw: Buffer;
-}
-
-function headerString(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[0];
-  return value;
-}
-
-/** Extract the signed-request material from a Fastify request. */
-function toSignedRequest(request: FastifyRequest, rawBody: Buffer): SignedRequest {
-  const headers = request.headers;
-  return {
-    method: request.method,
-    // The 005 canonical string signs the PATH only — never the query string.
-    // F1's routes take no query, but the F2 status endpoint
-    // (`GET /internal/v1/invocations/:requestId`) may; strip any query here so
-    // signature verification stays correct as routes grow.
-    path: request.url.split('?')[0] ?? request.url,
-    rawBody,
-    headers: {
-      consumerId: headerString(headers['x-traderton-consumer-id']),
-      keyId: headerString(headers['x-traderton-key-id']),
-      timestamp: headerString(headers['x-traderton-timestamp']),
-      signature: headerString(headers['x-traderton-signature']),
-      contentType: headerString(headers['content-type']),
-      deadlineAt: headerString(headers['x-request-deadline-at']),
-    },
-  };
 }
 
 export function createBoundaryApp(deps: BoundaryAppDeps): FastifyInstance {
@@ -180,44 +153,4 @@ export function createBoundaryApp(deps: BoundaryAppDeps): FastifyInstance {
   });
 
   return app;
-}
-
-/**
- * Extract the body values the headers must match exactly (005 §Authentication):
- * the `caller` object and `deadlineAt`. Returns undefined unless all three are
- * present as strings — a partial body cannot be matched, so the header presence
- * checks in `authenticateRequest` remain the gate.
- */
-function extractBodyAssertions(body: unknown): BodyAssertions | undefined {
-  if (body && typeof body === 'object') {
-    const record = body as Record<string, unknown>;
-    const caller = record['caller'];
-    const deadlineAt = record['deadlineAt'];
-    if (caller && typeof caller === 'object' && typeof deadlineAt === 'string') {
-      const callerRecord = caller as Record<string, unknown>;
-      if (
-        typeof callerRecord['consumerId'] === 'string' &&
-        typeof callerRecord['keyId'] === 'string'
-      ) {
-        return {
-          consumerId: callerRecord['consumerId'],
-          keyId: callerRecord['keyId'],
-          deadlineAt,
-        };
-      }
-    }
-  }
-  return undefined;
-}
-
-function identityFor(body: unknown): { requestId: string; correlationId: string } {
-  if (body && typeof body === 'object') {
-    const record = body as Record<string, unknown>;
-    return {
-      requestId: typeof record['requestId'] === 'string' ? record['requestId'] : '',
-      correlationId:
-        typeof record['correlationId'] === 'string' ? record['correlationId'] : '',
-    };
-  }
-  return { requestId: '', correlationId: '' };
 }
