@@ -53,16 +53,33 @@ This doc does not include:
 
 ## Fixed Decisions
 
-1. Tool invocation uses synchronous HTTPS JSON.
-2. Every consumer uses the same versioned invocation and status endpoints,
-   plus the same standard health endpoints.
-3. The invocation endpoint is the only execution entry point.
+1. Tool invocation is a synchronous HTTPS JSON request/response. A transport may
+   carry it on its own HTTP framing — e.g. the MCP binding (Phase 3) uses legacy
+   Streamable HTTP in JSON mode — provided the exchange stays synchronous HTTPS
+   JSON; its non-executing lifecycle frames (`initialize`, notifications, the
+   client's SSE `GET` answered `405`) are transport mechanics, not executions.
+2. Every consumer uses the same versioned invocation and status **semantics**,
+   plus the same standard health endpoints. A transport binds those semantics to
+   its own wire route: REST exposes `POST /internal/v1/tools:invoke` and
+   `GET /internal/v1/invocations/:requestId`; the MCP binding exposes
+   `POST /internal/v1/mcp` and intentionally has **no** status route — a running
+   invocation is reconciled by re-issuing with the same idempotency key.
+3. There is a single execution entry point: the invocation dispatcher. Every
+   transport (REST, MCP) de-frames its wire format into the identical invocation
+   envelope and reaches execution ONLY through that dispatcher; no transport
+   authors execution semantics. Adding a transport is adding a wire, not an
+   execution path.
 4. Traderton accepts authenticated `ownerId` + `actor` context at the
    boundary; it does not resolve user identity itself.
 5. Tool payload schemas remain Traderton-owned. Consumers submit payloads; they
    do not become the schema authority.
 6. Consumers may wrap this direct API later with skills, MCP, or their own
-   route surface without changing the underlying contract.
+   route surface without changing the underlying contract. Such a wrapper MAY be
+   hosted by Traderton itself as an additive, off-by-default surface (Phase 3's
+   MCP binding); doing so creates no second execution path because it funnels
+   through the same dispatcher (Fixed Decision 3). The MCP binding's field
+   mapping and result encoding are specified normatively in the herobids Step 10
+   contract (§2.5); this doc does not restate them, to avoid drift.
 
 ## Endpoints
 
