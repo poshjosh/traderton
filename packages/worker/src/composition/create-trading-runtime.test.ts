@@ -287,6 +287,19 @@ describe('createTradingRuntime (AUTHORED smoke test — Phase 9b item B)', () =>
     expect(trading.runtime).toBeDefined();
   });
 
+  it('exposes the runtime\'s worker id', () => {
+    const trading = createTradingRuntime({
+      config: paperConfig(),
+      redis: fakeRedis(),
+      instanceLoader: async () => [],
+    });
+
+    // 001 S1: workerId is the lease holder value a remote container reads to
+    // decide agent-actor ownership. The agent lease shares the same workerId.
+    expect(trading.workerId).toMatch(/^worker-[0-9a-f]{8}$/);
+    expect(trading.agentLease).toBeDefined();
+  });
+
   it('start() then shutdown() run clean with an empty running-bot loader', async () => {
     const trading = createTradingRuntime({
       config: paperConfig(),

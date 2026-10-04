@@ -54,12 +54,12 @@ agent, and decisions landing on either copy.
 
 ## Steps
 
-### S1. Expose identity + lease on the runtime
+### S1. Expose identity + lease on the runtime — DONE
 - `TradingRuntime` gains `workerId` and `agentLease` (an `InstanceLease` sharing the
   runtime's Redis connection and `workerId`).
 - Test: "exposes the runtime's worker id".
 
-### S2. Lease-aware ensure
+### S2. Lease-aware ensure — PENDING
 - `agent-direct-actor-ensure.ts`:
   - Acquire `agent:{agentId}` before constructing.
   - If held elsewhere, return `{ owner: 'remote', workerId }`; otherwise
@@ -71,7 +71,7 @@ agent, and decisions landing on either copy.
   - "does not construct when another worker holds the lease"
   - "releases the lease when construction fails"
 
-### S3. Command forwarding
+### S3. Command forwarding — PENDING
 - `packages/boundary/src/agent-command-router.ts`:
   - **Sender:** wraps the drive target. For `DECISION_SUBMIT`, if the ensure said
     `remote`, `RPUSH agent-actor:cmd:{workerId}` with the envelope.
@@ -88,12 +88,12 @@ agent, and decisions landing on either copy.
   - "refuses a forwarded decision after losing the lease"
   - "stops a remotely owned agent actor on the stop signal"
 
-### S4. Rehydrate + sweep respect the lease
+### S4. Rehydrate + sweep respect the lease — PENDING
 - E1 boot rehydrate and orphan sweep call the lease-aware ensure; `remote` is a no-op
   success.
 - Test: "two runtimes rehydrating the same agent start exactly one actor".
 
-### S5. Multi-replica integration proof (real Redis + Postgres)
+### S5. Multi-replica integration proof (real Redis + Postgres) — PENDING
 1. Two boundary app instances in one test process share Redis and Postgres.
 2. Activate an agent through instance A, then submit a decision through instance B. It
    executes once, on A, and B's caller gets the reply.
@@ -102,7 +102,7 @@ agent, and decisions landing on either copy.
 
 Append to `scripts/shell/tests/run-integration.sh`.
 
-### S6. Ops docs
+### S6. Ops docs — PENDING
 - 007 operational readiness: remove the "one replica only" note once S5 passes. Document
   the takeover window (≤ lease TTL + sweep interval) and that decisions in that window
   return the existing retryable timeout.
@@ -128,3 +128,17 @@ ticked.
 - **Ordering:** two decisions for one agent through different containers serialize on
   the owner's command list, but not relative to the owner's own direct calls. That's the
   same guarantee as two concurrent calls on one container today.
+
+## Outstanding Issues
+
+Non-critical review findings carried forward (grouped by step). None are blocking.
+
+### S1 — Expose identity + lease on the runtime
+- [MEDIUM, ADDRESSED] `agentLease` is the same `InstanceLease` instance as the bot lease
+  (shared `renewTimers`). A later whole-handle teardown would tear down bot-lease
+  renewal timers. Mitigated by a doc note on the interface field instructing S2/S3 to
+  acquire/release only `agent:{agentId}` ids on this handle. S2/S3 must honour it.
+- [LOW] Interface field ordering: `workerId`/`agentLease` sit between `shutdown()` and
+  `runtime`. Cosmetic only.
+- [LOW] Optional test tightening: assert `agentLease instanceof InstanceLease` rather
+  than only `toBeDefined()`.

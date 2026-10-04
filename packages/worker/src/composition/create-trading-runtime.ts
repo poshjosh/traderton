@@ -130,6 +130,28 @@ export interface TradingRuntime {
   start(): Promise<void>;
   /** Graceful shutdown. */
   shutdown(): Promise<void>;
+  /**
+   * This container's worker identity (`createTradingRuntime` generates it once
+   * per process). It is the holder value written into every lease this runtime
+   * acquires — including the agent-actor lease (001 S1) — so a remote container
+   * can read `agentLease.holder(...)` and compare it against its own `workerId`
+   * to decide ownership + routing.
+   */
+  workerId: string;
+  /**
+   * The agent-actor ownership lease (001 S1). Shares this runtime's Redis
+   * connection and `workerId`, so a lease held under id `agent:{agentId}` names
+   * this container as the single owner of that agent actor. The lease-aware
+   * ensure (S2) and command forwarding (S3) build on this.
+   *
+   * NOTE: this is the SAME `InstanceLease` instance the runtime uses for bot
+   * leases — they share one `renewTimers` map. Callers (S2/S3) must acquire and
+   * release ONLY `agent:{agentId}`-namespaced ids on this handle; never call a
+   * whole-handle teardown (e.g. a `releaseAll`) here, or bot-lease renewal timers
+   * would be torn down with it. Bot ids are UUIDs, so the two id spaces never
+   * collide on the `lease:instance:*` keyspace.
+   */
+  agentLease: InstanceLease;
   /** The BullMQ-backed lifecycle control — exposed so item D / M2 can enqueue jobs. */
   runtime: WorkerRuntime;
   /**
@@ -1089,6 +1111,11 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
       instrumentCache.stop();
       await runtime.shutdown();
     },
+    workerId,
+    // Shares the runtime's Redis connection + workerId (001 S1). Bot leases use
+    // UUID instance ids; agent leases use the `agent:{agentId}` namespace, so the
+    // two never collide on `lease:instance:*` even though they ride one lease.
+    agentLease: lease,
     runtime,
     actorRegistry,
     registerActor,
