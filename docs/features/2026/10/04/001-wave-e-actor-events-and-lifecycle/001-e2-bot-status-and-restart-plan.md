@@ -1,6 +1,7 @@
 # 001 — E2: bot status truth + restart survival (Traderton only)
 
-**Status:** planned. **Depends on:** nothing (E0 done). **Repos:** traderton only.
+**Status:** PENDING (steps: 1 DONE, 2 PENDING, 3 PENDING, 4 PENDING, 5 PENDING).
+**Depends on:** nothing (E0 done). **Repos:** traderton only.
 **Source behaviour:** `git -C ../herobids show 45271d28^:apps/worker/src/index.ts`:
 `WorkerRuntime` callbacks ~L1785–1880, bot actor `onCrashed`/`onHalted` ~L2160–2240,
 `instanceLoader` ~L2262–2268.
@@ -99,3 +100,13 @@ cascade/sweep part is tracked in E1.
   accepted by the ruling; operators can stop bots before a risky deploy.
 - The halt path cleans up the runtime outside `stopInstance`. Keep it to the same steps
   `handleActorCrash` takes, to avoid a lease leak.
+
+## Outstanding Issues (non-blocking, from code review)
+
+### [Step 1] drive-target `stopBot` explicit-stop marking
+- LOW: `restoreBotRuntimeState` takes `status: string` (not a bot-status union), so a
+  future caller typo wouldn't be caught at compile time. Pre-existing repo signature
+  shared with `startBot`/`stop_bot`; optional tightening in a separate change
+  (`packages/db/src/repositories.ts`).
+- LOW: log field ordering differs cosmetically from the `stop_bot` sibling
+  (`{ botId, err }` vs `{ err, botId }`). No action needed.

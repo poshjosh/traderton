@@ -1,6 +1,8 @@
 # 002 — E3: Traderton → consumer event channel
 
-**Status:** planned. **Depends on:** E2 step 2 (loader stamps `creatorType`/`creatorId`
+**Status:** E3-T PENDING (T1 PENDING, T2 PENDING, T3 PENDING, T4 PENDING, T5 PENDING);
+E3-H GATED (herobids, awaiting human go).
+**Depends on:** E2 step 2 (loader stamps `creatorType`/`creatorId`
 on bot configs). **Repos:** traderton (E3-T), then herobids (E3-H, gated on human go).
 **Source behaviour:** `git -C ../herobids show 45271d28^:apps/worker/src/index.ts`. Agent
 actor callbacks ~L1320–1345: `emitTechnicalScanCompleted`, `emitAgentWake`,

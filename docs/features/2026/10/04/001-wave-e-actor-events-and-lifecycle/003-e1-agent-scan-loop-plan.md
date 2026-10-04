@@ -1,6 +1,8 @@
 # 003 — E1: agent technical scan loop + agent-actor lifecycle
 
-**Status:** planned. **Depends on:** E3-T (scan results reach agents only through
+**Status:** E1-T PENDING (T1 PENDING, T2 PENDING, T3 PENDING, T4 PENDING, T5 PENDING);
+E1-H GATED (herobids, awaiting human go).
+**Depends on:** E3-T (scan results reach agents only through
 the E3 `consumer_notifications` channel), and E2 (loader + status callbacks). **Repos:** traderton (E1-T), then
 herobids (E1-H, gated on human go).
 **Source behaviour:** `git -C ../herobids show 45271d28^:apps/worker/src/index.ts`:

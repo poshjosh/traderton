@@ -532,10 +532,29 @@ async function startBot(deps: DriveTargetDeps, payload: ManageBotPayload): Promi
 
 async function stopBot(deps: DriveTargetDeps, payload: ManageBotPayload): Promise<void> {
   if (!payload.botId) throw new Error('botId is required for stop');
-  await requireOwnedBot(deps, payload.botId);
+  const bot = await requireOwnedBot(deps, payload.botId);
   // herobids' `botStop` marks stopped + enqueues a stop lifecycle job (broker
   // :881–882 → the botStop closure → lifecycleQueue.add('stop-instance', …)).
-  await deps.runtime.enqueueLifecycle('stop', payload.botId);
+  // Mark the row stopped FIRST, so a running-bot reclaim sweep cannot resurrect
+  // an explicitly stopped bot. Roll back to the previous runtime state if the
+  // enqueue throws (mirrors `stop_bot`'s restore-on-failure).
+  await deps.botRepo.markBotStopped(payload.botId);
+  try {
+    await deps.runtime.enqueueLifecycle('stop', payload.botId);
+  } catch (err) {
+    logger.error({ botId: payload.botId, err }, 'Failed to enqueue stop job during stop action');
+    try {
+      await deps.botRepo.restoreBotRuntimeState({
+        botId: payload.botId,
+        status: bot.status,
+        startedAt: bot.startedAt,
+        stoppedAt: bot.stoppedAt,
+      });
+    } catch (rollbackErr) {
+      logger.error({ botId: payload.botId, rollbackErr }, 'CRITICAL: rollback after stop enqueue failure also failed');
+    }
+    throw new Error('Bot stop failed: unable to enqueue lifecycle stop. Please try again.');
+  }
 }
 
 async function restartBot(deps: DriveTargetDeps, payload: ManageBotPayload): Promise<void> {

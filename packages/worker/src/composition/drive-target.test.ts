@@ -457,6 +457,50 @@ describe('drive target — MANAGE_BOT stop', () => {
     expect(stubs.enqueueLifecycle.mock.calls[0][2]).toBeUndefined();
   });
 
+  it('marks a bot stopped before enqueuing its stop job', async () => {
+    const { deps, stubs } = makeDeps();
+    stubs.botRepo.getBotById.mockResolvedValueOnce(makeBotRecord({ status: 'running' }));
+
+    // Record call order across the two stubs: the row must be marked stopped
+    // FIRST so a running-bot reclaim sweep cannot resurrect an explicit stop.
+    const order: string[] = [];
+    stubs.botRepo.markBotStopped.mockImplementationOnce(async () => {
+      order.push('markBotStopped');
+    });
+    stubs.enqueueLifecycle.mockImplementationOnce(async () => {
+      order.push('enqueueLifecycle');
+    });
+
+    const publishToInbound = createDriveTarget(deps);
+    await publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, { action: 'stop', botId: 'bot-1' });
+
+    expect(stubs.botRepo.markBotStopped).toHaveBeenCalledWith('bot-1');
+    expect(order).toEqual(['markBotStopped', 'enqueueLifecycle']);
+    expect(stubs.botRepo.restoreBotRuntimeState).not.toHaveBeenCalled();
+  });
+
+  it('restores the previous status when the stop enqueue fails', async () => {
+    const { deps, stubs } = makeDeps();
+    stubs.botRepo.getBotById.mockResolvedValueOnce(
+      makeBotRecord({ status: 'running', startedAt: new Date('2026-01-01T00:00:00Z'), stoppedAt: null }),
+    );
+    stubs.enqueueLifecycle.mockRejectedValueOnce(new Error('queue down'));
+
+    const publishToInbound = createDriveTarget(deps);
+    await expect(
+      publishToInbound(AGENT_MESSAGE_TYPES.MANAGE_BOT, { action: 'stop', botId: 'bot-1' }),
+    ).rejects.toThrow(/Bot stop failed/);
+
+    // The row was marked stopped, then rolled back to its previous runtime state.
+    expect(stubs.botRepo.markBotStopped).toHaveBeenCalledWith('bot-1');
+    expect(stubs.botRepo.restoreBotRuntimeState).toHaveBeenCalledWith({
+      botId: 'bot-1',
+      status: 'running',
+      startedAt: new Date('2026-01-01T00:00:00Z'),
+      stoppedAt: null,
+    });
+  });
+
   it('rejects a foreign-owner bot on stop', async () => {
     const { deps, stubs } = makeDeps();
     stubs.botRepo.getBotById.mockResolvedValueOnce(makeBotRecord({ ownerId: 'other-owner' }));
