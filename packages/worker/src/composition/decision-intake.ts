@@ -26,8 +26,28 @@ import { AgentTradingActor, type AgentTradingActorDeps } from '../agent-trading-
 import type { VenueInstrumentCache } from '../venue-instrument-cache.js';
 import { buildAgentRiskLimits } from '../agent-risk-limits.js';
 import { POSITION_GROWING_INTENTS, formatLevelValidationMessage } from '../shared/decision-validation.js';
+import type { ConsumerNotifier } from './consumer-notifier.js';
+import type { TechnicalScanState } from '../scan-types.js';
 
 const logger = createLogger('decision-intake');
+
+/**
+ * Apply the E3-T scan payload cap (plan T3). If the scan carries more than
+ * `maxSignals` signals, return a copy whose `signals` is truncated to the cap and
+ * whose additive `signalsTruncated` flag is set; otherwise return the scan as-is
+ * (no `signalsTruncated` when nothing was dropped). The parity-locked
+ * `TechnicalScanState` is not modified — the flag rides as an intersection and
+ * lands in the notification `payload` jsonb verbatim.
+ */
+function capScanSignals(
+  scan: TechnicalScanState,
+  maxSignals: number,
+): TechnicalScanState & { signalsTruncated?: boolean } {
+  if (scan.signals.length <= maxSignals) {
+    return scan;
+  }
+  return { ...scan, signals: scan.signals.slice(0, maxSignals), signalsTruncated: true };
+}
 
 /**
  * The value a consumer submits for execution (Phase 9b item C — AUTHORED).
@@ -324,6 +344,13 @@ function buildAcceptedMessage(decision: Decision): string | undefined {
  */
 export interface AgentActorSpec {
   agentId: string;
+  /**
+   * The herobids soft-owner (consumer user id) the agent belongs to. INJECTED by
+   * the ensure from `injection.ownerId` (ports-carry-values). Used to ROUTE the
+   * E3 consumer notifications (scan / wake / journal / status) to the right owner
+   * without a lookup — the notifier stamps it on every row.
+   */
+  ownerId: string;
   executionMode: 'paper' | 'shadow' | 'live';
   /** INJECTED resolved venue-account (decisions 11–13). Validated non-empty. */
   venueAccountId: string;
@@ -396,6 +423,21 @@ export interface AgentActorRuntimeDeps {
    * Absent → the actor falls back to its hardcoded 5000ms default.
    */
   perTradeLevelMonitorIntervalMs?: number;
+  /**
+   * The E3-T consumer notifier (constructed once per process over the
+   * `consumer_notifications` outbox). The agent actor's status/event callbacks
+   * route through it (scan / wake / journal / crash). Best-effort: its methods
+   * never throw into an actor's cycle.
+   */
+  consumerNotifier: ConsumerNotifier;
+  /**
+   * Signal cap for `scan_completed` notifications — the resolved VALUE of
+   * `config.notifications.scanCompleted.maxSignals` (read in create-trading-runtime
+   * where config is in scope; decision-intake takes runtimeDeps, not config).
+   * Scans with more signals are truncated to this length and flagged
+   * `signalsTruncated: true`.
+   */
+  scanMaxSignals: number;
 }
 
 /**
@@ -417,8 +459,10 @@ export interface ActorRegistryHooks {
  *  - riskLimits via buildAgentRiskLimits fed from INJECTED values (spec.capital
  *    / spec.riskPosture / spec.riskOverrides), NEVER an `agents` row.
  *  - status/event callbacks (onJournalEvent, emitAgentWake,
- *    onTechnicalScanComplete, …) → M1 no-op stubs (→ item C2).
- *  - onCrashed → deregister from the registry (trading lifecycle — kept).
+ *    onTechnicalScanComplete) → route to the E3-T consumer notifier (Wave E / T3),
+ *    which writes the `consumer_notifications` outbox (was M1 no-op → item C2).
+ *  - onCrashed → deregister from the registry (trading lifecycle — kept) AND
+ *    notify `agent_status: crashed` through the notifier (T3).
  *  - the technical-scan / scanner-dedup / discover-candidates / fetch-candles
  *    machinery is agent-container drive concern (item D / consumer) — omitted
  *    here (optional deps; the actor runs without a scan loop).
@@ -509,15 +553,46 @@ export function constructAndRegisterAgentActor(
     slippageAlertBps: runtimeDeps.slippageAlertBps,
     crashPolicy: runtimeDeps.crashPolicy,
     liveOrderTimeoutPolicy: runtimeDeps.liveOrderTimeoutPolicy,
-    // Status/event callbacks — M1 no-op stubs (→ item C2). onCrashed keeps the
-    // trading lifecycle: deregister from the registry on crash.
-    onCrashed: async () => {
+    // Status/event callbacks — Wave E / E3-T T3: route to the consumer notifier
+    // (outbox). The notifier is best-effort (its methods never throw into the
+    // actor's cycle), so onJournalEvent (declared sync `=> void`) can let the
+    // write float without risking an unhandled rejection.
+    onCrashed: async (err: Error) => {
+      // Keep the trading-lifecycle teardown FIRST so a crashed actor is always
+      // removed from the registry even if the (best-effort) notify is delayed.
       registry.deregister(spec.agentId);
-      logger.error({ agentId: spec.agentId }, 'Agent actor crashed — deregistered from registry');
+      logger.error({ agentId: spec.agentId, err }, 'Agent actor crashed — deregistered from registry');
+      await runtimeDeps.consumerNotifier.agentStatus({
+        ownerId: spec.ownerId,
+        agentId: spec.agentId,
+        status: 'crashed',
+        error: err.message,
+      });
     },
-    onTechnicalScanComplete: () => {},
-    emitAgentWake: async () => {},
-    onJournalEvent: () => {},
+    onTechnicalScanComplete: (agentId, scan) =>
+      runtimeDeps.consumerNotifier.scanCompleted({
+        ownerId: spec.ownerId,
+        agentId,
+        scan: capScanSignals(scan, runtimeDeps.scanMaxSignals),
+      }),
+    emitAgentWake: (agentId, payload) =>
+      runtimeDeps.consumerNotifier.agentWake({
+        ownerId: spec.ownerId,
+        agentId,
+        wake: payload,
+      }),
+    onJournalEvent: (event) => {
+      // Best-effort float (notifier never rejects); map the actor's
+      // { type, payload? } to the outbox's { journalType, detail (JSON string) }.
+      // botId is null — this is the AGENT actor (bot journal routing is T4).
+      void runtimeDeps.consumerNotifier.journalEvent({
+        ownerId: spec.ownerId,
+        agentId: spec.agentId,
+        botId: null,
+        journalType: event.type,
+        detail: JSON.stringify(event.payload ?? {}),
+      });
+    },
   };
 
   const actor = new AgentTradingActor(deps);

@@ -59,6 +59,46 @@ import type { AgentTradingActorDeps } from '../agent-trading-actor.js';
 import { VenueInstrumentCache } from '../venue-instrument-cache.js';
 import type { ExecutionActor, IntakeResult } from '../execution-actor.js';
 import type { DecisionContext, PositionState, DecisionIntakeDeps } from '@traderton/engine';
+import type { ConsumerNotifier } from './consumer-notifier.js';
+import type { TechnicalScanState } from '../scan-types.js';
+import type { AgentWakePayload } from '@traderton/domain';
+
+/** A fake ConsumerNotifier recording every call — the E3-T wiring assertion seam. */
+function makeFakeNotifier(): ConsumerNotifier & {
+  scanCompleted: ReturnType<typeof vi.fn>;
+  agentWake: ReturnType<typeof vi.fn>;
+  journalEvent: ReturnType<typeof vi.fn>;
+  botStatus: ReturnType<typeof vi.fn>;
+  agentStatus: ReturnType<typeof vi.fn>;
+} {
+  return {
+    scanCompleted: vi.fn(async () => {}),
+    agentWake: vi.fn(async () => {}),
+    journalEvent: vi.fn(async () => {}),
+    botStatus: vi.fn(async () => {}),
+    agentStatus: vi.fn(async () => {}),
+  };
+}
+
+/** A minimal TechnicalScanState with `count` placeholder signals for cap tests. */
+function makeScanWithSignals(count: number): TechnicalScanState {
+  return {
+    timestamp: new Date().toISOString(),
+    scanIntervalMs: 60_000,
+    regimeResult: null,
+    signals: Array.from({ length: count }, (_unused, i) => ({ symbol: `SYM-${i}` })) as TechnicalScanState['signals'],
+    positionIndicators: [],
+    summary: { scanned: count, rejected: 0, passed: count },
+    symbolOutcomes: [],
+    discovered: count,
+    symbolsSelected: count,
+    eligible: count,
+    fetched: count,
+    unsupported: 0,
+    fetchFailures: 0,
+    signalsGenerated: count,
+  };
+}
 
 /** Minimal intake deps the handler reads pre-submit (actorType/symbol/venueAccountId). */
 function stubIntakeDeps(overrides?: Partial<DecisionIntakeDeps>): DecisionIntakeDeps {
@@ -273,7 +313,10 @@ describe('constructAndRegisterAgentActor — instrumentCache wiring (AUTHORED �
    * instrument-validation deps). The repos/singletons the stubbed actor never
    * touches are cast — this test asserts wiring, not actor internals.
    */
-  function buildRuntimeDeps(cache: VenueInstrumentCache): AgentActorRuntimeDeps {
+  function buildRuntimeDeps(
+    cache: VenueInstrumentCache,
+    opts?: { notifier?: ConsumerNotifier; scanMaxSignals?: number },
+  ): AgentActorRuntimeDeps {
     return {
       fillRepo: { getLatestFillByInstrument: async () => null },
       fallbackMarkSource: { fetchMark: async () => ({ ok: false, error: { code: 'unavailable', message: 'stub' } }) },
@@ -283,11 +326,14 @@ describe('constructAndRegisterAgentActor — instrumentCache wiring (AUTHORED �
       oneInchConfig: { tokenSafetyNetwork: 'ethereum', chainId: 1 },
       canonicalTokens: {},
       perTradeLevelMonitorIntervalMs: 7_000,
+      consumerNotifier: opts?.notifier ?? makeFakeNotifier(),
+      scanMaxSignals: opts?.scanMaxSignals ?? 20,
     } as unknown as AgentActorRuntimeDeps;
   }
 
   const spec: AgentActorSpec = {
     agentId: 'agent-cache-1',
+    ownerId: 'owner-1',
     executionMode: 'paper',
     venueAccountId: 'va-1',
     venue: 'hyperliquid',
@@ -315,5 +361,151 @@ describe('constructAndRegisterAgentActor — instrumentCache wiring (AUTHORED �
     expect(deps.perTradeLevelMonitorIntervalMs).toBe(7_000);
     // bindingProfile is intentionally NOT wired (agent-binding value, not config).
     expect(deps.bindingProfile).toBeUndefined();
+  });
+});
+
+describe('constructAndRegisterAgentActor — consumer-notifier wiring (AUTHORED — E3-T T3)', () => {
+  beforeEach(() => {
+    agentActorCtorSpy.mockReset();
+  });
+
+  /** Local runtime-deps builder (only the fields the wiring reads matter). */
+  function buildRuntimeDeps(
+    cache: VenueInstrumentCache,
+    opts?: { notifier?: ConsumerNotifier; scanMaxSignals?: number },
+  ): AgentActorRuntimeDeps {
+    return {
+      fillRepo: { getLatestFillByInstrument: async () => null },
+      fallbackMarkSource: { fetchMark: async () => ({ ok: false, error: { code: 'unavailable', message: 'stub' } }) },
+      markStalenessThresholdMs: 30_000,
+      agentRiskDefaults: AgentRiskDefaultsSchema.parse({}),
+      instrumentCache: cache,
+      consumerNotifier: opts?.notifier ?? makeFakeNotifier(),
+      scanMaxSignals: opts?.scanMaxSignals ?? 20,
+    } as unknown as AgentActorRuntimeDeps;
+  }
+
+  const spec: AgentActorSpec = {
+    agentId: 'agent-notify-1',
+    ownerId: 'owner-42',
+    executionMode: 'paper',
+    venueAccountId: 'va-1',
+    venue: 'hyperliquid',
+    venueType: 'orderbook',
+  };
+
+  /**
+   * Construct the (stubbed) actor and hand back the deps the constructor
+   * captured, so each test can invoke a callback directly. These callbacks only
+   * fire once E1 wires the scan loop; driving them here proves the wiring in
+   * isolation (plan T3).
+   */
+  function constructAndCaptureDeps(
+    runtimeDeps: AgentActorRuntimeDeps,
+    registry = { register: vi.fn(), deregister: vi.fn() },
+  ): { deps: AgentTradingActorDeps; registry: { register: ReturnType<typeof vi.fn>; deregister: ReturnType<typeof vi.fn> } } {
+    const cache = new VenueInstrumentCache({ info: () => {}, warn: () => {}, error: () => {} } as never);
+    constructAndRegisterAgentActor(registry, { ...runtimeDeps, instrumentCache: cache }, spec);
+    const deps = agentActorCtorSpy.mock.calls[0]![0] as AgentTradingActorDeps;
+    return { deps, registry };
+  }
+
+  it('forwards a completed technical scan to the agent through the notifier', async () => {
+    const notifier = makeFakeNotifier();
+    const cache = new VenueInstrumentCache({ info: () => {}, warn: () => {}, error: () => {} } as never);
+    const { deps } = constructAndCaptureDeps(buildRuntimeDeps(cache, { notifier }));
+    const scan = makeScanWithSignals(3);
+
+    await deps.onTechnicalScanComplete!('agent-notify-1', scan);
+
+    expect(notifier.scanCompleted).toHaveBeenCalledOnce();
+    expect(notifier.scanCompleted).toHaveBeenCalledWith({
+      ownerId: 'owner-42',
+      agentId: 'agent-notify-1',
+      scan,
+    });
+  });
+
+  it('caps scan signals at the configured maximum and flags truncation', async () => {
+    const notifier = makeFakeNotifier();
+    const cache = new VenueInstrumentCache({ info: () => {}, warn: () => {}, error: () => {} } as never);
+    const { deps } = constructAndCaptureDeps(buildRuntimeDeps(cache, { notifier, scanMaxSignals: 5 }));
+
+    await deps.onTechnicalScanComplete!('agent-notify-1', makeScanWithSignals(12));
+
+    expect(notifier.scanCompleted).toHaveBeenCalledOnce();
+    const forwarded = notifier.scanCompleted.mock.calls[0]![0] as {
+      scan: TechnicalScanState & { signalsTruncated?: boolean };
+    };
+    expect(forwarded.scan.signals).toHaveLength(5);
+    expect(forwarded.scan.signalsTruncated).toBe(true);
+  });
+
+  it('does not flag truncation when the scan fits under the cap', async () => {
+    const notifier = makeFakeNotifier();
+    const cache = new VenueInstrumentCache({ info: () => {}, warn: () => {}, error: () => {} } as never);
+    const { deps } = constructAndCaptureDeps(buildRuntimeDeps(cache, { notifier, scanMaxSignals: 20 }));
+
+    await deps.onTechnicalScanComplete!('agent-notify-1', makeScanWithSignals(3));
+
+    const forwarded = notifier.scanCompleted.mock.calls[0]![0] as {
+      scan: TechnicalScanState & { signalsTruncated?: boolean };
+    };
+    expect(forwarded.scan.signals).toHaveLength(3);
+    expect(forwarded.scan.signalsTruncated).toBeUndefined();
+  });
+
+  it('routes an agent wake through the notifier', async () => {
+    const notifier = makeFakeNotifier();
+    const cache = new VenueInstrumentCache({ info: () => {}, warn: () => {}, error: () => {} } as never);
+    const { deps } = constructAndCaptureDeps(buildRuntimeDeps(cache, { notifier }));
+    const wake: AgentWakePayload = {
+      wakeId: 'wake-1',
+      reason: 'scanner signals',
+      source: 'scanner',
+      context: { signalCount: 2 },
+    } as AgentWakePayload;
+
+    await deps.emitAgentWake!('agent-notify-1', wake);
+
+    expect(notifier.agentWake).toHaveBeenCalledWith({
+      ownerId: 'owner-42',
+      agentId: 'agent-notify-1',
+      wake,
+    });
+  });
+
+  it('routes a journal event through the notifier with a JSON detail and null botId', async () => {
+    const notifier = makeFakeNotifier();
+    const cache = new VenueInstrumentCache({ info: () => {}, warn: () => {}, error: () => {} } as never);
+    const { deps } = constructAndCaptureDeps(buildRuntimeDeps(cache, { notifier }));
+
+    deps.onJournalEvent!({ type: 'reconciliation.drift', payload: { symbol: 'BTC/USD:USD' } });
+    // Let the floated best-effort write settle.
+    await Promise.resolve();
+
+    expect(notifier.journalEvent).toHaveBeenCalledWith({
+      ownerId: 'owner-42',
+      agentId: 'agent-notify-1',
+      botId: null,
+      journalType: 'reconciliation.drift',
+      detail: JSON.stringify({ symbol: 'BTC/USD:USD' }),
+    });
+  });
+
+  it('deregisters and notifies agent_status crashed when the actor crashes', async () => {
+    const notifier = makeFakeNotifier();
+    const cache = new VenueInstrumentCache({ info: () => {}, warn: () => {}, error: () => {} } as never);
+    const { deps, registry } = constructAndCaptureDeps(buildRuntimeDeps(cache, { notifier }));
+
+    await deps.onCrashed!(new Error('venue stream died'));
+
+    expect(registry.deregister).toHaveBeenCalledWith('agent-notify-1');
+    expect(notifier.agentStatus).toHaveBeenCalledWith({
+      ownerId: 'owner-42',
+      agentId: 'agent-notify-1',
+      status: 'crashed',
+      error: 'venue stream died',
+    });
   });
 });

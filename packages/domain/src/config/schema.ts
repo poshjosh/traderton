@@ -977,6 +977,19 @@ export const AppConfigSchema = z.object({
   marketDataRecording: MarketDataRecordingConfigSchema.default({}),
   marketData: MarketDataConfigSchema.optional(),
   liveRollout: LiveRolloutConfigSchema.default({}),
+  // Wave E / E3 consumer-notification channel (outbox table). T3 adds only the
+  // scan payload cap; T5 extends `notifications.*` with retention/prune keys.
+  // Both the object and its nested `scanCompleted` default to `{}` so existing
+  // operator configs without the block still parse, and T5 can add siblings
+  // without breaking anything.
+  notifications: z.object({
+    scanCompleted: z.object({
+      /** Max `signals` forwarded per scan_completed notification (mirrors the
+       *  source scannerCandidateLimit). Scans with more signals are truncated
+       *  and flagged `signalsTruncated: true`. */
+      maxSignals: z.number().int().min(1).default(20),
+    }).default({}),
+  }).default({}),
 }).superRefine((data, ctx) => {
   const oneInchConfig = data.venues['1inch'];
   if (

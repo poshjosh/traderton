@@ -45,8 +45,14 @@ export interface NotifierLogger {
 export interface ScanCompletedArgs {
   ownerId: string;
   agentId: string;
-  /** Signal-cap truncation is T3's responsibility; the notifier stores as-given. */
-  scan: TechnicalScanState;
+  /**
+   * The completed scan. Signal-cap truncation is T3's responsibility (done at the
+   * actor-wiring call site); the notifier stores it as-given. The optional
+   * `signalsTruncated` flag is an additive field the capped-copy carries — the
+   * parity-locked `TechnicalScanState` is not modified, so it rides alongside as
+   * an intersection and lands in the `payload` jsonb verbatim.
+   */
+  scan: TechnicalScanState & { signalsTruncated?: boolean };
 }
 
 /** `agent_wake` — the agent was woken (reminder / watch / discovery / regime / scanner). */

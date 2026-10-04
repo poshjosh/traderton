@@ -179,6 +179,13 @@ marketDataRecording:
   captureTopOfBook: true
   captureCandles: true
 
+# Wave E / E3 Traderton→consumer event channel (consumer_notifications outbox).
+# A herobids relay polls the outbox and republishes the existing message types.
+# T3 adds only the scan payload cap below; T5 will add retention/prune keys here.
+notifications:
+  scanCompleted:
+    maxSignals: 20             # max signals forwarded per scan_completed row; extra signals are truncated and the row is flagged signalsTruncated
+
 marketData:
   dexscreener:
     baseUrl: "https://api.dexscreener.com"

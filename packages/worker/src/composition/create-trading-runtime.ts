@@ -23,6 +23,7 @@ import {
   BotRepository,
   TokenSafetyOverrideRepository,
   InstrumentRepository,
+  ConsumerNotificationRepository,
 } from '@traderton/db';
 import { MarkSelector, createFillFirstMarkSource } from '@traderton/engine';
 import {
@@ -75,6 +76,7 @@ import {
   type AgentActorRuntimeDeps,
 } from './decision-intake.js';
 import type { AgentTradingActor } from '../agent-trading-actor.js';
+import { createConsumerNotifier } from './consumer-notifier.js';
 import {
   createDriveTarget,
   type PublishToInbound,
@@ -823,6 +825,12 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
     actorRegistry.delete(actorId);
   };
 
+  // Wave E / E3-T: the consumer-notification outbox sink, constructed ONCE per
+  // process (over the shared `db`) and threaded into every agent actor's deps so
+  // the status/event callbacks (scan / wake / journal / crash) write to the same
+  // outbox. Best-effort by contract — a write failure never throws into an actor.
+  const consumerNotifier = createConsumerNotifier(new ConsumerNotificationRepository(db), logger);
+
   // The item-B singletons the agent-direct actor shares with bots (013 §6 / 019
   // §6). Assembled once; threaded into each agent actor's deps so B and C
   // compose over the same infrastructure.
@@ -866,6 +874,10 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
     oneInchConfig: config.venues['1inch'],
     canonicalTokens: config.marketData?.tokenSafety?.canonicalTokens,
     perTradeLevelMonitorIntervalMs: config.agentRiskDefaults.perTradeLevelMonitorIntervalMs,
+    // E3-T: consumer notifier + the resolved scan payload cap (read here where
+    // config is in scope; decision-intake takes runtimeDeps, not config).
+    consumerNotifier,
+    scanMaxSignals: config.notifications.scanCompleted.maxSignals,
   };
 
   return {

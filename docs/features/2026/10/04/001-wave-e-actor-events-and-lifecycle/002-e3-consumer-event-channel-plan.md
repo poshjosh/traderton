@@ -1,6 +1,6 @@
 # 002 — E3: Traderton → consumer event channel
 
-**Status:** E3-T PENDING (T1 DONE, T2 DONE, T3 PENDING, T4 PENDING, T5 PENDING);
+**Status:** E3-T PENDING (T1 DONE, T2 DONE, T3 DONE, T4 PENDING, T5 PENDING);
 E3-H GATED (herobids, awaiting human go).
 **Depends on:** E2 step 2 (loader stamps `creatorType`/`creatorId`
 on bot configs). **Repos:** traderton (E3-T), then herobids (E3-H, gated on human go).
@@ -177,3 +177,11 @@ channel" → settled (outbox table, polled; push remains 010 B10). 005 updated. 
   lost at the actor). Optional: add `botId: entry.botId ?? null` to the log object.
 - LOW: doc-comment source line references (`~L1320–1345`, `~L2192–2244`) are drift-prone but
   match the plan's own provenance citations. No action.
+
+### [T3] agent actor wiring
+- LOW: `onJournalEvent` maps `detail = JSON.stringify(event.payload ?? {})`, which could throw
+  synchronously on a circular/BigInt payload (would escape the sync `onJournalEvent` rather
+  than the best-effort notifier catch). Not a realistic path given the forwarded journal
+  payload shapes. No action for T3.
+- NOTE: pre-existing `packages/domain/src/config/presets.test.ts` failures (premium.yaml
+  fixture) are unrelated to this change — confirmed they also fail on the base branch.

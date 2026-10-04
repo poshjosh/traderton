@@ -173,6 +173,7 @@ function paperConfig(): AppConfig {
       timeoutCheckIntervalMs: 10_000,
       crashPolicy: 'alert_manual_intervention',
     },
+    notifications: { scanCompleted: { maxSignals: 20 } },
   } as AppConfig;
 }
 

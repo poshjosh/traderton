@@ -152,6 +152,7 @@ export function buildAgentDirectActorEnsure(
 
       const spec: AgentActorSpec = {
         agentId: injection.actorId,
+        ownerId: injection.ownerId,
         executionMode: mode,
         venueAccountId: injection.venueAccountId,
         venue: injection.venue,
