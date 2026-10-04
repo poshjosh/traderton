@@ -166,7 +166,7 @@ partitions + all indexes, and both new integration tests passed (run with
 they share the `journal_events` table so parallel file execution clobbers state,
 which is exactly why the runner uses `--no-file-parallelism`).
 
-### S3. Partition maintenance module — PENDING
+### S3. Partition maintenance module — DONE
 - `packages/db/src/journal-partition-maintenance.ts`:
   - `ensureFuturePartitions(months)`
   - `listExpiredPartitions(cutoff)`
@@ -178,6 +178,76 @@ which is exactly why the runner uses `--no-file-parallelism`).
   - "lists only partitions entirely older than the cutoff"
   - "does not drop a partition containing backtest rows when backtest retention is unset"
   - "archives then drops an expired partition"
+
+#### S3 implementation notes (2026-10-04)
+
+**Files changed**
+- `packages/db/src/journal-partition-maintenance.ts` — new module (see shape below).
+- `packages/db/src/index.ts` — exports `JournalPartitionMaintenance`,
+  `monthPartitionName`, `monthPartitionBounds`, and the `MonthPartitionBounds` type.
+- `packages/db/src/journal-partition-maintenance.test.ts` — pure unit tests
+  (naming/bounds + name-validation rejection; no DB, runs under `pnpm test`).
+- `packages/db/src/journal-partition-maintenance.integration.test.ts` — new
+  `DATABASE_URL`-gated integration tests (the four plan scenarios).
+- `scripts/shell/tests/run-integration.sh` — appended the new integration file to
+  the `--no-file-parallelism` vitest list with a descriptive comment.
+
+**Module shape** — a `JournalPartitionMaintenance` class holding the raw
+postgres-js client (DDL/COPY are not modelled by drizzle's query builder). It is
+constructed either directly from the raw client (tests) or via
+`JournalPartitionMaintenance.fromDatabase(db)`, which reaches `$client` with the
+same sanctioned cast `closeDatabase` uses in `index.ts` — no new `any`/`@ts-ignore`.
+A class (not a function module) was chosen to match the repo's repository style and
+to carry the client once. Two pure helpers (`monthPartitionName`,
+`monthPartitionBounds`) are exported standalone so the naming/bounds logic has
+DB-free unit tests. Public methods: `ensureFuturePartitions(months)`,
+`listExpiredPartitions(cutoff)`, `partitionHasBacktestRows(name)`,
+`archivePartition(name, dir)`, `dropPartition(name)`. These are infra DDL ops and
+throw on failure (matching `journal-pg.ts`/repositories); every async op is awaited
+so errors propagate to the S4 loop rather than being swallowed.
+
+**COPY/archive approach chosen + why** — `archivePartition` uses
+`COPY (SELECT * FROM <partition>) TO STDOUT WITH CSV` obtained as a Node `Readable`
+via postgres-js `.unsafe(sql).readable()`, piped through `node:zlib` `createGzip()`
+into `path.join(dir, name + '.csv.gz')` with `stream/promises.pipeline`. `COPY … TO
+PROGRAM 'gzip > …'` was rejected because `TO PROGRAM` requires a server-side
+superuser (and runs on the DB host, not where `archiveDir` is mounted); streaming
+`TO STDOUT` through the client needs no elevated role and writes the file on the
+process that owns the archive directory. `dir` is created with `fs.mkdir recursive`.
+
+**Name-validation guard** — a single `^journal_events_\d{4}_\d{2}$` regex
+(`assertMonthlyPartitionName`) runs before any partition NAME is interpolated into
+SQL (names can't be bind parameters for relations/DDL). It throws on anything that
+is not exactly a monthly partition, so the parent `journal_events` and
+`journal_events_default` can never be archived/dropped through these helpers, and a
+crafted name (e.g. a `; DROP TABLE …` suffix) is rejected synchronously before SQL
+is built. Row-value SQL (`backtest_run_id IS NOT NULL`, catalog lookups) uses the
+parameterised tagged-template form or needs no bound values.
+
+**How partition bounds are derived** — names and bounds come from UTC date
+arithmetic only. `ensureFuturePartitions` computes the current UTC month + the next
+`months` months, formatting explicit `'YYYY-MM-01 00:00:00+00'` literals, and uses
+`CREATE TABLE IF NOT EXISTS … PARTITION OF …` for idempotency.
+`listExpiredPartitions` enumerates the parent's children via
+`pg_inherits`/`pg_class` + `pg_get_expr(relpartbound, …)`, derives each monthly
+partition's exclusive upper bound deterministically from its name (S2 fixed the
+scheme), cross-checks that the catalog bound is a concrete `FOR VALUES FROM …` range
+(so the `DEFAULT` partition is doubly excluded), and lists a partition only when its
+upper bound `<=` cutoff (whole month strictly older). Partitions whose names don't
+match the monthly pattern are skipped — never the default.
+
+**Verification** — `pnpm --filter @traderton/db build`, `pnpm lint`, and
+`pnpm --filter @traderton/db test` all pass; the 10 pure unit tests pass and the 4
+new integration tests skip without `DATABASE_URL`. Proven **live** against a
+throwaway `postgres:16` (migrations 0000→0008 applied, then the two journal
+partition integration files run with `--no-file-parallelism`): all 6 green (4 new
+S3 + 2 existing S2). The idempotency test's second `ensureFuturePartitions` call
+emits a harmless `relation already exists, skipping` NOTICE — exactly the
+`IF NOT EXISTS` path, and partitions survive `TRUNCATE` (only rows are wiped).
+
+**Deviations** — none material. The guard mechanism (`partitionHasBacktestRows`) is
+implemented per S1's exempt-via-guard decision; the config keys that drive it
+(`backtestRetentionMonths`, retention cutoff) remain S4.
 
 ### S4. Config + wiring — PENDING
 - Schema + `default.yaml` keys (design §2), with comments. `archiveDir` is operator
@@ -221,3 +291,15 @@ backtest-row choice. 007 updated.
   the default partition when that month is not yet provisioned (pre-S3), so it does not rot
   into a false failure as real time passes the migration bounds.
 - [LOW] Integration test uses `db as unknown as Database` (explained, test-confined).
+
+### S3 — Outstanding Issues
+- [MEDIUM, ADDRESSED] `listExpiredPartitions` catalog cross-check was weak (only checked
+  "is a range"). Now parses the catalog `FROM/TO` and compares INSTANTS (not strings, to be
+  TZ-render agnostic) against the name-derived bounds; a name/bound mismatch is refused (not
+  treated as expired) so a mis-labelled partition can never be dropped.
+- [MEDIUM, ADDRESSED] `archivePartition` now unlinks a partial `.csv.gz` on a mid-stream COPY
+  failure (best-effort), so `archiveDir` never holds a misleading truncated archive before the
+  S4 drop guard.
+- [LOW, ADDRESSED] `dropPartition` comment corrected (plain `DROP TABLE` takes ACCESS
+  EXCLUSIVE on the child + brief parent catalog lock; not a concurrent detach) + a note that
+  the archive COPY occupies a pool connection until it drains.

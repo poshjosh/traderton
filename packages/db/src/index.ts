@@ -19,6 +19,12 @@ export async function closeDatabase(db: Database): Promise<void> {
 
 export * from './schema/index.js';
 export { PgJournal } from './journal-pg.js';
+export {
+  JournalPartitionMaintenance,
+  monthPartitionName,
+  monthPartitionBounds,
+} from './journal-partition-maintenance.js';
+export type { MonthPartitionBounds } from './journal-partition-maintenance.js';
 export { FillRepository, PositionRepository, ExecutionPlanRepository, OrderRepository, BalanceSnapshotRepository, DecisionRepository, BotRepository } from './repositories.js';
 export type { InsertFill, UpsertPosition, InsertExecutionPlan, UpsertOrder, InsertBalanceSnapshot, InsertDecision } from './repositories.js';
 export { ReconciliationEventRepository } from './reconciliation-repository.js';

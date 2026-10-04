@@ -89,6 +89,12 @@ echo "==> running the gated integration tests"
 # (asserted via tableoid::regclass), and getById/scanAfter span partitions in
 # (created_at, id) order. Truncates journal_events (cascades to partitions) in
 # beforeEach.
+# journal-partition-maintenance: 003 S3 — proves the maintenance module against
+# real Postgres: ensureFuturePartitions is idempotent, listExpiredPartitions
+# returns only months entirely older than the cutoff (never the default), the
+# backtest-row guard reports true for a partition holding a backtest_run_id row,
+# and archivePartition (COPY TO STDOUT → gzip file) then dropPartition round-trips.
+# Shares journal_events, so it truncates it (cascades to partitions) in beforeEach.
 # agent-actor-multi-replica: 001 S5 — builds TWO real createTradingRuntime
 # replicas (A + B) in one process sharing one Postgres + one Redis to prove the
 # agent-actor lease + owner routing (001 S1-S4) across replicas. CASE 1: a
@@ -108,6 +114,7 @@ pnpm exec vitest run --no-file-parallelism \
   packages/db/src/agent-scan-repository.integration.test.ts \
   packages/db/src/agent-actor-run-repository.integration.test.ts \
   packages/db/src/journal-partitioning.integration.test.ts \
+  packages/db/src/journal-partition-maintenance.integration.test.ts \
   "$@"
 
 echo "==> integration run complete"
