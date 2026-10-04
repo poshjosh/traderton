@@ -1,6 +1,6 @@
 # 001 — `journal_events` retention + partitioning (audit-log growth)
 
-**Status:** planned. **Date:** 2026-10-04. **Repos:** traderton only.
+**Status:** done (S1–S5 complete, 2026-10-04). **Date:** 2026-10-04. **Repos:** traderton only.
 **Depends on:** nothing. Best done **before real data exists** (greenfield cutover, per
 CANONICAL-STATE §2.0), when converting the table is a cheap drop-and-recreate.
 **Not cutover-blocking.** Replaces 010 B13's "better later" with a plan.
@@ -348,10 +348,35 @@ twins were touched (nothing to document).
 unit-tested with fakes; it drives the S3 `JournalPartitionMaintenance` whose
 DB-touching behaviour was proven live in S3.
 
-### S5. Ops docs — PENDING
+### S5. Ops docs — DONE
 007: the retention knobs, how archives relate to the existing Hetzner backup jobs
 (`infra/hetzner/backup*.sh`), and how to restore an archived month (`COPY FROM` into a
 re-attached partition).
+
+#### S5 implementation notes (2026-10-04)
+Docs only — no code/config/tests touched. Verified every fact against source before writing:
+backup mechanism (`infra/hetzner/backup.sh` → `backup-job.sh`: `pg_dump -Fc` of the whole
+`traderton` DB + Redis RDB → restic keep-daily 7 / keep-weekly 4 / keep-monthly 6, staged under
+`/srv/traderton`), the REAL lease key `lease:instance:journal-maintenance`
+(`InstanceLease` prefix; `packages/boundary/src/bin.ts` + `instance-lease.ts`), the config
+keys + defaults (`config/default.yaml` + `packages/domain/src/config/schema.ts`), the archive
+path `<archiveDir>/journal_events_YYYY_MM.csv.gz` via `COPY … TO STDOUT WITH CSV`
+(`packages/db/src/journal-partition-maintenance.ts`), and the partition naming/bounds
+(`journal_events_YYYY_MM`, `FROM 'YYYY-MM-01 00:00:00+00'` TO next-month;
+`packages/db/drizzle/0008_journal_partitioning.sql`).
+
+- **007** (`docs/features/initial/007-operational-readiness.md`): new "## Journal Retention &
+  Partitioning" section placed after "Multi-Replica Boundary" (both operational Redis-lease
+  knobs) — knob table, maintenance-loop behaviour + lease key, archive-vs-Hetzner-backup
+  relationship (recommend mounting `archiveDir` on `/srv/traderton`), and the archived-month
+  restore procedure (`CREATE … PARTITION OF` with UTC bounds, then `COPY FROM PROGRAM 'gunzip
+  -c …'` or client-side `\copy … FROM STDIN WITH CSV`).
+- **010** (`docs/features/initial/010-improvement-backlog.md`): B13 marked **DONE 2026-10-04**
+  with the plan link + the S1–S5 implementing surfaces (per the "when done, strike it … with
+  the commit" convention; commit hash to be filled by the coordinator).
+- **004**: the retention-mechanism + backtest-row decision is already recorded by S1; NOT
+  duplicated. No pointer added — the decision log is a running decision record, not a
+  per-plan completion ledger, so a completion pointer does not fit its convention.
 
 ## Verification
 `pnpm build && pnpm lint && pnpm test`; `scripts/shell/tests/run-integration.sh`;
@@ -409,3 +434,9 @@ backtest-row choice. 007 updated.
   `config/strategy-presets/*.yaml` — a cwd/path-resolution artifact of the direct run).
   Confirmed PRE-EXISTING on clean HEAD (da783e5), unrelated to S4; the proper test harness
   (`scripts/shell/tests/run-all-tests.sh`) resolves the preset path correctly.
+
+### S5 — Outstanding Issues
+None. Docs-only: 007 gained a "Journal Retention & Partitioning" section (knobs table,
+loop behaviour, the real lease key `lease:instance:journal-maintenance`, archive-vs-restic
+relation, and the archived-month restore procedure); 010 B13 marked Done with links to the
+S1–S5 surfaces. The retention/backtest decision stays recorded in 004 (S1), not duplicated.

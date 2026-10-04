@@ -212,6 +212,134 @@ and the integration proof
 `packages/boundary/src/agent-actor-multi-replica.integration.test.ts`. This lifts
 the former "one boundary replica only" constraint tracked in 011 Wave E E4.
 
+## Journal Retention & Partitioning
+
+`journal_events` (Traderton's own Postgres) is an append-only trading audit log —
+decisions, risk rejections, orders, fills, reconciliation, strategy errors, stream
+disconnects, and backtest-run events. Growth is proportional to trading activity.
+Migration `packages/db/drizzle/0008_journal_partitioning.sql` converts it into a
+table RANGE-partitioned by month on `created_at` (PK `(id, created_at)`), so a whole
+month can be dropped instantly and lock-light instead of a large `DELETE`. A
+`journal_events_default` partition catches any out-of-range insert, so a write never
+fails if the maintenance loop lags.
+
+Design + decisions:
+[003-journal-retention plan](../2026/10/04/003-journal-retention/001-plan.md) and
+the "exempt-via-guard" rationale in
+[004-decision-log.md](./004-decision-log.md#why-backtest-journal-rows-are-exempt-via-guard-not-a-separate-table).
+
+### Retention knobs
+
+Operator config under `journal.retention.*` in `config/default.yaml`, validated at
+startup by the domain schema (`packages/domain/src/config/schema.ts`). The schema
+rejects startup on an invalid combination, so a misconfiguration fails fast rather
+than at the first maintenance tick.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `auditRetentionMonths` | `null` | Months of audit history to keep. `null` = keep forever (drop nothing) — the shipped default. When set, partitions whose whole month precedes the cutoff are dropped. |
+| `backtestRetentionMonths` | `null` | `null` = never drop a partition that holds backtest rows (`backtest_run_id IS NOT NULL`). Backtest rows live in the same partitions as live events, so they are exempt from the `auditRetentionMonths` cutoff unless this is set — a backtest-bearing partition is dropped only when this is set and its month precedes the backtest cutoff. This is the S1 "exempt-via-guard" protection. |
+| `archiveBeforeDrop` | `false` | Export a partition to `archiveDir` before dropping it. |
+| `archiveDir` | `null` | Local directory for gzip archives. REQUIRED when `archiveBeforeDrop` is `true` — the schema rejects startup otherwise. |
+| `premakeMonths` | `3` | Monthly partitions provisioned ahead of the current month on each tick. |
+| `maintenanceIntervalMs` | `86400000` (24h) | Maintenance loop cadence. |
+
+With the shipped defaults (`auditRetentionMonths: null`) nothing is ever dropped; the
+loop only provisions future partitions. Enabling retention is a separate
+product/compliance decision — the mechanism ships without waiting on it.
+
+### How the maintenance loop runs
+
+The loop runs in the `boundary` process (`packages/boundary/src/journal-maintenance.ts`,
+wired in `bin.ts`). It is self-rescheduling (a `setTimeout` chain, not `setInterval`)
+and reschedules on failure, so a slow or failed tick never overlaps the next or kills
+the loop. It fires once per `maintenanceIntervalMs` (daily by default).
+
+Each tick is single-flight across replicas via a dedicated Redis lease. The lease id
+is `journal-maintenance`, and because `InstanceLease` prefixes ids with
+`lease:instance:`, the REAL Redis key is **`lease:instance:journal-maintenance`** (not
+`lease:journal-maintenance`). A replica that loses the acquire race is a no-op for that
+tick; the owner releases the lease in a `finally`.
+
+Per tick, in order:
+
+1. Provision the next `premakeMonths` monthly partitions — ALWAYS, even when retention
+   is `null`.
+2. Only when `auditRetentionMonths` is set: list partitions whose whole month precedes
+   the audit cutoff and drop each one, skipping any partition that holds backtest rows
+   unless `backtestRetentionMonths` is set and that partition's month precedes the
+   backtest cutoff. If `archiveBeforeDrop` is `true`, the partition is archived to
+   `archiveDir` first. Per-partition failures are logged and skipped so one bad
+   partition cannot stall the rest of the tick.
+
+### How archives relate to the Hetzner backup jobs
+
+These are two SEPARATE, complementary artifacts:
+
+- **Full-DB backup** (`infra/hetzner/backup.sh` → `infra/hetzner/backup-job.sh`): a
+  `pg_dump -Fc` of the entire `traderton` database plus a Redis RDB snapshot, pushed to
+  a restic repository and pruned with `--keep-daily 7 --keep-weekly 4 --keep-monthly 6`.
+  The temp staging dir is created under `/srv/traderton` (the restic-backed volume).
+- **Journal partition archive**: when `archiveBeforeDrop` is on, the maintenance loop
+  writes a per-partition CSV gzip at `<archiveDir>/journal_events_YYYY_MM.csv.gz`
+  (streamed via `COPY (SELECT * FROM <partition>) TO STDOUT WITH CSV` through gzip)
+  immediately before dropping that month's partition.
+
+The partition archive is a finer-grained artifact that preserves a dropped month's
+audit rows as CSV independently of the restic snapshots. This matters because
+restic's `--keep-monthly 6` would otherwise be the only copy of a dropped month, and
+only for six months — once a month ages past the audit cutoff AND past restic's
+monthly retention, it is gone unless it was archived.
+
+**Recommended operator setup:** mount `archiveDir` on `/srv/traderton` (the
+restic-backed volume). The `*.csv.gz` archives are then themselves captured by the
+restic backup, giving the dropped months the same off-host durability as the full-DB
+dumps while remaining individually restorable.
+
+### How to restore an archived month
+
+Given `<archiveDir>/journal_events_YYYY_MM.csv.gz` for the UTC month `YYYY-MM`:
+
+1. Ensure the target monthly partition exists. Either let the maintenance loop
+   re-create it (it only provisions current-and-future months, so a long-past month
+   must be created by hand), or create it directly with the fixed naming + UTC bounds
+   scheme — partition `journal_events_YYYY_MM`, `FROM 'YYYY-MM-01 00:00:00+00'` TO the
+   first instant of the next month:
+
+   ```sql
+   -- Example for 2026-10:
+   CREATE TABLE IF NOT EXISTS journal_events_2026_10
+     PARTITION OF journal_events
+     FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00');
+   ```
+
+   (Alternatively create a standalone table with the same columns, `COPY` into it, then
+   `ALTER TABLE journal_events ATTACH PARTITION ... FOR VALUES FROM ... TO ...`.)
+
+2. Load the archived rows straight into the partition. `COPY FROM` targets the
+   partition directly; the rows route correctly because they are already within that
+   month's range:
+
+   ```sql
+   COPY journal_events_2026_10
+     FROM PROGRAM 'gunzip -c /srv/traderton/journal-archive/journal_events_2026_10.csv.gz'
+     WITH CSV;
+   ```
+
+   `COPY FROM PROGRAM` runs the decompression on the DB server and needs a superuser.
+   Where that is not available, stream the gunzipped CSV from the client instead with
+   psql's `\copy`:
+
+   ```sh
+   gunzip -c /srv/traderton/journal-archive/journal_events_2026_10.csv.gz \
+     | psql "$DATABASE_URL" -c "\copy journal_events_2026_10 FROM STDIN WITH CSV"
+   ```
+
+Monthly partitions are always named `journal_events_YYYY_MM` for the UTC month, with
+bounds `FROM 'YYYY-MM-01 00:00:00+00'` (inclusive) TO the first instant of the next
+month (exclusive). Keep that scheme exact — the maintenance loop derives names and
+bounds from it, and a mismatched bound is refused rather than dropped.
+
 ## Load-Test Expectations
 
 ### Scope
