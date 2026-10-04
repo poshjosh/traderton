@@ -66,12 +66,22 @@ removal of old data.
 
 ## Steps
 
-### S1. Confirm the backtest-row handling
+### S1. Confirm the backtest-row handling — DONE
 Read the backtest writers/readers (`_deferred-authoring/api-routes/backtests.ts`, the
 backtesting package) and decide between "exempt via guard" (design §3) and "separate
 table". Record the choice in 004. No code.
 
-### S2. Migration (custom SQL; drizzle doesn't model partitions)
+**Decision (2026-10-04): exempt-via-guard** (design §3), NOT a separate table. Backtest
+rows stay in `journal_events` keyed by the nullable `backtest_run_id`; the S3 maintenance
+job guards against dropping a partition containing backtest rows unless
+`backtestRetentionMonths` (default `null`) allows it. Verified in source: the only
+backtest reader is `PgJournal.query({ backtestRunId })` via `GET /backtests/:runId/journal`
+(in `packages/worker/src/_deferred-authoring/api-routes/backtests.ts`); `getById` /
+`getByIds` / `scanAfter` are id/cursor reads spanning all rows. Reasoning recorded in
+[004-decision-log.md](../../../../initial/004-decision-log.md) ("Why backtest journal rows
+are exempt-via-guard, not a separate table").
+
+### S2. Migration (custom SQL; drizzle doesn't model partitions) — PENDING
 - `drizzle-kit generate --custom` → `000N_journal_partitioning.sql`:
   - rename the old table
   - create a partitioned `journal_events` (same columns, PK `(id, created_at)`)
@@ -87,7 +97,7 @@ table". Record the choice in 004. No code.
   - "journal writes land in the current month's partition"
   - "getById and scanAfter return rows across partitions in order"
 
-### S3. Partition maintenance module
+### S3. Partition maintenance module — PENDING
 - `packages/db/src/journal-partition-maintenance.ts`:
   - `ensureFuturePartitions(months)`
   - `listExpiredPartitions(cutoff)`
@@ -100,7 +110,7 @@ table". Record the choice in 004. No code.
   - "does not drop a partition containing backtest rows when backtest retention is unset"
   - "archives then drops an expired partition"
 
-### S4. Config + wiring
+### S4. Config + wiring — PENDING
 - Schema + `default.yaml` keys (design §2), with comments. `archiveDir` is operator
   config, not a secret; if an env override is added, add it to `.env.example` and
   `infra/hetzner/.env.environment.example` with comments.
@@ -109,7 +119,7 @@ table". Record the choice in 004. No code.
 - Test: "maintenance loop runs once per interval under a lease and reschedules after a
   failure".
 
-### S5. Ops docs
+### S5. Ops docs — PENDING
 007: the retention knobs, how archives relate to the existing Hetzner backup jobs
 (`infra/hetzner/backup*.sh`), and how to restore an archived month (`COPY FROM` into a
 re-attached partition).

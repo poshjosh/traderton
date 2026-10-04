@@ -1462,3 +1462,49 @@ The D1-tables ruling enumerated THREE readers (evidence-assembler/assessment-ide
 **What cannot be shared (lives per-seam, per the ruling):** parse/de-frame; where the header↔body caller/deadline assertion reads body-side values (top-level body vs `params._meta`); result encoding; pre-dispatch failure encoding (REST = HTTP 200 + typed envelope; MCP = frame-dependent four-way + dispatcher-exception → sanitized `-32603`); the no-execution protocol/lifecycle frames (`initialize`, notifications, GET→405, batch→-32600); the status capability (REST has it, MCP omits it). Everything else — canonical-string construction, signature verification, assertion logic, the dispatcher, idempotency, the closed failure union — stays shared. The operator's "swap most API tests at will" holds for the dispatch-core majority; the above minority stays per-seam by design.
 
 **Gate result (008 §9.1): settled within the rules** — additive, off-by-default transport binding; no second execution path; no parity or isolation breach. The sole human-facing item is ratifying the FD1–FD3 rewording (doc honesty, not an architecture divergence); the operator ratified it 2026-10-03. Recorded in 001 as a clarifying note (nothing lost).
+
+## Why backtest journal rows are exempt-via-guard, not a separate table (2026-10-04, 003 journal-retention S1)
+
+**Decision.** When `journal_events` gains monthly range partitioning + a retention
+maintenance job (003 plan), backtest rows (`backtest_run_id IS NOT NULL`) stay in the
+SAME `journal_events` table and are protected by a guard in the maintenance job, as
+design §3 leans. A separate backtest-journal table is REJECTED. This is the S1 call; no
+code is written here (S2+ build it).
+
+**Grounded facts (verified in code 2026-10-04).**
+- Backtest journal rows already live in `journal_events`, keyed by the nullable
+  `backtest_run_id` column (`packages/db/src/schema/journal-events.ts` — `backtestRunId:
+  text('backtest_run_id')`, "null for live events", with its own index
+  `idx_journal_events_backtest_run_id`). There is no separate backtest journal table today.
+- The ONLY backtest-scoped reader is `PgJournal.query({ backtestRunId })`
+  (`packages/db/src/journal-pg.ts`), reached by `GET /backtests/:runId/journal` in
+  `packages/worker/src/_deferred-authoring/api-routes/backtests.ts` (it calls
+  `journal.query({ backtestRunId: request.params.runId, type, limit, offset })` after an
+  owner-scoped run lookup). (Note: the plan cites the file at
+  `_deferred-authoring/api-routes/backtests.ts`; it actually lives under
+  `packages/worker/src/`.)
+- `getById` / `getByIds` / `scanAfter` are id/cursor reads that span ALL rows regardless of
+  `backtest_run_id` (`journal-pg.ts`): `getById`/`getByIds` filter on `id` only; `scanAfter`
+  filters on the `(createdAt, id)` cursor + optional type prefixes. None of them filter on,
+  or depend on, the backtest column — so partitioning the single table does not change their
+  contract.
+
+**Why exempt-via-guard.** It keeps the single-table reader contract unchanged. Monthly
+partitioning (S2) plus the maintenance job (S3) that, when retention is enabled, REFUSES to
+drop a partition containing backtest rows unless a separate `backtestRetentionMonths` key
+(default `null`) also allows it, is sufficient to protect backtest results. The default audit
+retention is `null` (keep everything), so nothing is dropped until an operator sets a policy —
+shipping the mechanism does not wait on the policy decision, and backtest rows are safe by
+default.
+
+**Why not a separate table.** It would force re-pointing every backtest writer
+(`PgJournal.append`/`appendBatch` carry `backtestRunId` for all callers) and the single
+backtest reader (`journal.query({ backtestRunId })` → `GET /backtests/:runId/journal`) for
+ZERO benefit while retention defaults to keep-everything, and it adds a second schema +
+migration surface to maintain. Exempt-via-guard is the minimal, reversible choice and matches
+the plan's own lean (design §3; the separate-table alternative was flagged there as a residual
+to decide here).
+
+**Residual.** If/when audit retention is enabled AND operators want backtest rows pruned on a
+different schedule, `backtestRetentionMonths` (default `null`) is the knob. Until then backtest
+rows are never dropped.
