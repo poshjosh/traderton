@@ -56,6 +56,7 @@ import { buildResolverPorts } from './resolver-ports.js';
 import { buildAgentDirectActorEnsure } from './agent-direct-actor-ensure.js';
 import { subscribeBotStopSignals } from './bot-stop-subscriber.js';
 import { buildBoundaryTradingRuntime } from './build-boundary-runtime.js';
+import { registerBoundaryShutdown } from './boundary-shutdown.js';
 
 function loadBoundaryConfig(): BoundaryConfig {
   const consumerId = process.env['BOUNDARY_CONSUMER_ID'];
@@ -428,6 +429,21 @@ async function main(): Promise<void> {
     computeRequestFingerprint,
     retentionMs,
     ...(mcp ? { mcp } : {}),
+  });
+
+  // Graceful shutdown (E2 F3): on SIGTERM/SIGINT close the listener, shut the
+  // runtime down (actors stop, leases release, bot rows stay `running` per the
+  // resume ruling), quit BOTH Redis connections (main + bot-stop subscriber),
+  // then exit 0. Registered BEFORE `listen` so a signal during start-up is still
+  // handled (`app.close()` is a no-op on an un-listened app). Double signals are
+  // guarded inside the returned shutdown function.
+  registerBoundaryShutdown({
+    app,
+    runtime,
+    redis,
+    botStopSubscriber,
+    logger: createLogger('boundary-shutdown'),
+    exit: (code) => process.exit(code),
   });
 
   const port = Number(process.env['BOUNDARY_PORT'] ?? 8080);

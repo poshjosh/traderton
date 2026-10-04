@@ -1,6 +1,6 @@
 # 001 — E2: bot status truth + restart survival (Traderton only)
 
-**Status:** PENDING (steps: 1 DONE, 2 DONE, 3 DONE, 4 PENDING, 5 PENDING).
+**Status:** PENDING (steps: 1 DONE, 2 DONE, 3 DONE, 4 DONE, 5 PENDING).
 **Depends on:** nothing (E0 done). **Repos:** traderton only.
 **Source behaviour:** `git -C ../herobids show 45271d28^:apps/worker/src/index.ts`:
 `WorkerRuntime` callbacks ~L1785–1880, bot actor `onCrashed`/`onHalted` ~L2160–2240,
@@ -124,3 +124,13 @@ cascade/sweep part is tracked in E1.
   round-trip is Step 5's integration proof. Acceptable.
 - LOW: onCrashed/onHalted duplicate the `actorRegistry.delete` + `handleActorCrash`
   sequence. Only two call sites; abstraction would be premature.
+
+### [Step 4] graceful shutdown in the boundary process
+- MEDIUM: no per-step timeout — a stuck `app.close()`/`runtime.shutdown()` can consume the
+  whole SIGTERM→SIGKILL grace window (the M1 worker entry has the same gap). Out of scope
+  for Step 4 (plan specifies only the sequence + double-signal guard); relying on the
+  orchestrator SIGKILL is acceptable here. Candidate follow-up: `Promise.race` timeout per
+  step, then still `exit(0)`.
+- LOW: shutdown docstring lumps the two Redis quits; the test is stricter than the comment.
+- LOW: an optional final summary log would help operators distinguish a clean vs degraded
+  teardown.
