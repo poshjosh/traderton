@@ -7,13 +7,26 @@ import {
   venueAccounts,
 } from '@traderton/db';
 import {
+  CreatorStrategySchema,
   ExecutionDefaultsSchema,
   RiskPostureSchema,
+  ScanModeSchema,
+  StrictTechnicalConfigSchema,
+  SWAP_VENUES,
+  StrategyResolutionError,
+  TechnicalConfigSchema,
+  TokenSafetyConfigSchema,
+  resolveActiveStrategy,
   type AgentRiskDefaultsConfig,
   type AgentTool,
+  type CreatorStrategy,
+  type ScanMode,
+  type SupportedTokenSafetyNetwork,
+  type TechnicalConfig,
   type ToolResult,
   type TradingToolContext,
 } from '@traderton/domain';
+import { validateSwapScannerConfig } from '../swap-startup-validation.js';
 import { convertZodToJsonSchema } from './registry.js';
 
 const OperationSchema = z.object({ operationId: z.string().min(1) });
@@ -34,6 +47,9 @@ const ForwardSetActionSchema = z.object({
   capital: z.string().regex(/^\d+(\.\d+)?$/).nullable(),
   riskPosture: RiskPostureSchema.nullable(),
   executionDefaults: ExecutionDefaultsSchema.nullable(),
+  // Creator inputs (004 ownership rule). null = unchanged for old callers.
+  scanMode: ScanModeSchema.nullable().default(null),
+  creatorStrategy: CreatorStrategySchema.nullable().default(null),
 });
 const ForwardClearActionSchema = z.object({
   actionId: z.string().min(1),
@@ -42,11 +58,20 @@ const ForwardClearActionSchema = z.object({
   capital: z.null(),
   riskPosture: z.null(),
   executionDefaults: z.null(),
+  scanMode: z.null().default(null),
+  creatorStrategy: z.null().default(null),
 });
 const ForwardActionSchema = z.discriminatedUnion('kind', [ForwardSetActionSchema, ForwardClearActionSchema]);
 const ManifestSchema = z.object({ actions: z.array(ForwardActionSchema).min(1) });
 const SetProfileSchema = ProfileConfigurationSchema.merge(OperationSchema).extend({
   actionId: z.string().min(1),
+  // Optional creator inputs; absent = unchanged (old callers keep working).
+  scanMode: ScanModeSchema.nullish().describe(
+    "The creator-chosen scan mode: 'scanner_gated' or 'mixed', or null for no scan loop.",
+  ),
+  creatorStrategy: CreatorStrategySchema.nullish().describe(
+    'The creator-chosen strategy: exactly one of { presetKey, styleTier } or { customTechnical }.',
+  ),
   actions: ManifestSchema.shape.actions.optional(),
 });
 const ExactProfileOperationSchema = ProfileIdentitySchema.merge(OperationSchema).extend({
@@ -89,6 +114,97 @@ function ceilingViolation(
     const value = riskPosture[field];
     if (value == null) continue;
     if (value > defaults[field]) return { field, ceiling: defaults[field] };
+  }
+  return undefined;
+}
+
+function venueTypeFor(venue: string): 'orderbook' | 'swap' {
+  return (SWAP_VENUES as readonly string[]).includes(venue) ? 'swap' : 'orderbook';
+}
+
+function scanValidationError(message: string, errorCode: string): ToolResult {
+  return { success: false, fault: false, error: message, errorCode };
+}
+
+/**
+ * Read the operator canonical-token map from the resolved market-data config,
+ * if present. Returns undefined when absent — `validateSwapScannerConfig` then
+ * fails closed with a `swap.no_canonical_tokens` error.
+ */
+function canonicalTokensFrom(
+  marketDataConfig: Record<string, unknown> | undefined,
+): Partial<Record<SupportedTokenSafetyNetwork, Record<string, { address: string; name: string; aliases: string[] }>>> | undefined {
+  const tokenSafety = (marketDataConfig as { tokenSafety?: unknown } | undefined)?.tokenSafety;
+  if (tokenSafety == null) return undefined;
+  const parsed = TokenSafetyConfigSchema.safeParse(tokenSafety);
+  return parsed.success ? parsed.data.canonicalTokens : undefined;
+}
+
+/**
+ * Validate the scan configuration at the boundary, applied to the RESOLVED
+ * technical config (004 ownership rule + source parse rules). Runs BEFORE any
+ * DB write. Returns a typed `validation.*`/`swap.*` ToolResult on failure, or
+ * undefined on success.
+ *
+ * - `scanner_gated`: reject when no strategy is given (neither a new
+ *   `creatorStrategy` nor a stored `activeStrategy`); otherwise parse the
+ *   resolved technical config strictly then leniently; a swap venue additionally
+ *   runs `validateSwapScannerConfig`.
+ * - `mixed`: lenient parse only.
+ * - absent `scanMode` with no scan loop: nothing to validate.
+ */
+function validateScanConfiguration(params: {
+  scanMode: ScanMode | null;
+  creatorStrategy: CreatorStrategy | null;
+  existingActive: TechnicalConfig | null;
+  venue: string;
+  marketDataConfig: Record<string, unknown> | undefined;
+}): ToolResult | undefined {
+  const { scanMode, creatorStrategy, existingActive, venue } = params;
+  if (scanMode == null) return undefined;
+
+  const venueType = venueTypeFor(venue);
+
+  // Resolve the technical config the actor would run: a fresh creator input
+  // resolves now; otherwise fall back to the stored active config.
+  let resolved: TechnicalConfig | null = existingActive;
+  if (creatorStrategy != null) {
+    try {
+      resolved = resolveActiveStrategy(creatorStrategy, { venue, venueType }, new Date().toISOString()).technical;
+    } catch (error) {
+      if (error instanceof StrategyResolutionError) return scanValidationError(error.message, error.code);
+      throw error;
+    }
+  }
+
+  if (scanMode === 'mixed') {
+    if (resolved == null) return undefined; // mixed mode may run without a technical config
+    const lenient = TechnicalConfigSchema.safeParse(resolved);
+    if (!lenient.success) {
+      return scanValidationError(lenient.error.issues[0]?.message ?? 'Invalid technical config', 'validation.technical_config');
+    }
+    return undefined;
+  }
+
+  // scanner_gated
+  if (resolved == null) {
+    return scanValidationError(
+      'A scanner-gated profile requires a creator strategy (preset or custom technical config).',
+      'validation.strategy_required',
+    );
+  }
+  const strict = StrictTechnicalConfigSchema.safeParse(resolved);
+  if (!strict.success) {
+    return scanValidationError(strict.error.issues[0]?.message ?? 'Incomplete technical config', 'validation.technical_config');
+  }
+  const lenient = TechnicalConfigSchema.safeParse(resolved);
+  if (!lenient.success) {
+    return scanValidationError(lenient.error.issues[0]?.message ?? 'Invalid technical config', 'validation.technical_config');
+  }
+  if (venueType === 'swap') {
+    const network = resolved.filters.networks?.[0] as SupportedTokenSafetyNetwork | undefined;
+    const swap = validateSwapScannerConfig(network, venue, lenient.data, canonicalTokensFrom(params.marketDataConfig));
+    if (!swap.ok) return scanValidationError(swap.error.message, swap.error.code);
   }
   return undefined;
 }
@@ -137,6 +253,8 @@ function setActions(params: z.infer<typeof SetProfileSchema>): z.infer<typeof Fo
     capital: params.capital,
     riskPosture: params.riskPosture,
     executionDefaults: params.executionDefaults,
+    scanMode: params.scanMode ?? null,
+    creatorStrategy: params.creatorStrategy ?? null,
   };
   return validateCurrentAction(params.actions ?? [current], current);
 }
@@ -149,6 +267,8 @@ function clearActions(params: z.infer<typeof ExactProfileOperationSchema>): z.in
     capital: null,
     riskPosture: null,
     executionDefaults: null,
+    scanMode: null,
+    creatorStrategy: null,
   };
   return validateCurrentAction(params.actions ?? [current], current);
 }
@@ -195,6 +315,32 @@ const setAgentTradingProfileTool: AgentTool<TradingToolContext> = {
     const actions = setActions(params);
     const denied = await authorizeActions(ctx, params.actorId, actions);
     if (denied) return denied;
+
+    // Scan-config boundary validation on the RESOLVED technical config, applied
+    // per set action BEFORE any DB write. The resolved config and the repo's
+    // active_strategy derivation share `resolveActiveStrategy`, so a config
+    // accepted here is the one the actor runs.
+    const db = ctx.db as Database;
+    for (const action of actions) {
+      if (action.kind !== 'set' || action.scanMode == null) continue;
+      const [venueAccount] = await db.select({ venue: venueAccounts.venue }).from(venueAccounts).where(and(
+        eq(venueAccounts.id, action.venueAccountId),
+        eq(venueAccounts.ownerId, ctx.ownerId!),
+      )).limit(1);
+      if (!venueAccount) {
+        return { success: false, fault: false, error: 'Venue account not owned by signed owner', errorCode: 'authorization.denied' };
+      }
+      const existing = await repo.getByOwnerActorVenueAccount(ctx.ownerId!, params.actorId, action.venueAccountId);
+      const invalid = validateScanConfiguration({
+        scanMode: action.scanMode,
+        creatorStrategy: action.creatorStrategy,
+        existingActive: existing?.activeStrategy?.technical ?? null,
+        venue: venueAccount.venue,
+        marketDataConfig: ctx.marketDataConfig,
+      });
+      if (invalid) return invalid;
+    }
+
     try {
       const revisions = await repo.applyOperation({ ownerId: ctx.ownerId!, actorId: params.actorId, operationId: params.operationId, actions });
       return { success: true, data: { operationId: params.operationId, revision: revisions.get(params.actionId)?.toString() ?? null } };

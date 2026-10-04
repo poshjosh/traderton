@@ -1,13 +1,27 @@
 import crypto from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
-import type { AgentRiskOverrides, ExecutionDefaults, RiskPosture } from '@traderton/domain';
+import {
+  resolveActiveStrategy,
+  SWAP_VENUES,
+  type ActiveStrategy,
+  type AgentRiskOverrides,
+  type CreatorStrategy,
+  type ExecutionDefaults,
+  type RiskPosture,
+  type ScanMode,
+} from '@traderton/domain';
 import type { Database } from './index.js';
 import {
   agentTradingProfileChanges,
   type AgentTradingProfileForwardAction,
   agentTradingProfiles,
   type AgentTradingProfilePreimage,
+  venueAccounts,
 } from './schema/index.js';
+
+function venueTypeFor(venue: string): 'orderbook' | 'swap' {
+  return (SWAP_VENUES as readonly string[]).includes(venue) ? 'swap' : 'orderbook';
+}
 
 export type AgentTradingProfile = typeof agentTradingProfiles.$inferSelect;
 
@@ -18,6 +32,8 @@ export interface TradingProfileConfiguration {
   capital: string | null;
   riskPosture: RiskPosture | null;
   executionDefaults: ExecutionDefaults | null;
+  scanMode?: ScanMode | null;
+  creatorStrategy?: CreatorStrategy | null;
 }
 
 export interface ApplyTradingProfileChange extends TradingProfileConfiguration {
@@ -69,6 +85,8 @@ export class AgentTradingProfileRepository {
         capital: input.capital,
         riskPosture: input.riskPosture,
         executionDefaults: input.executionDefaults,
+        scanMode: input.scanMode ?? null,
+        creatorStrategy: input.creatorStrategy ?? null,
       }],
     });
     return { operationId: input.operationId, actionId: input.actionId, revision: results.get(input.actionId) ?? null };
@@ -150,11 +168,20 @@ export class AgentTradingProfileRepository {
 
     const revision = (profile?.revision ?? 0n) + 1n;
     const now = new Date();
+    // `scanMode`/`creatorStrategy` null on a set action means "unchanged"
+    // (absent for old callers): preserve the stored creator inputs rather than
+    // wiping them. Only a `clear` action removes the profile entirely.
+    const scanMode = action.scanMode ?? profile?.scanMode ?? null;
+    const creatorStrategy = action.creatorStrategy ?? profile?.creatorStrategy ?? null;
+    const activeStrategy = await this.deriveActiveStrategy(tx, ownerId, action, profile, now);
     if (profile) {
       await tx.update(agentTradingProfiles).set({
         capital: action.capital,
         riskPosture: action.riskPosture,
         executionDefaults: action.executionDefaults,
+        scanMode,
+        creatorStrategy,
+        activeStrategy,
         revision,
         updatedAt: now,
       }).where(eq(agentTradingProfiles.id, profile.id));
@@ -168,12 +195,52 @@ export class AgentTradingProfileRepository {
         riskPosture: action.riskPosture,
         riskOverrides: {},
         executionDefaults: action.executionDefaults,
+        scanMode,
+        creatorStrategy,
+        activeStrategy,
         revision,
         createdAt: now,
         updatedAt: now,
       });
     }
     return revision;
+  }
+
+  /**
+   * Derive `activeStrategy` per the 004 ownership rule. First set, or a changed
+   * `creatorStrategy` (compared by canonical JSON to the stored value), resolves
+   * a fresh active strategy with `source:'creator'`. An unchanged
+   * `creatorStrategy` (a resend while saving capital, or an old caller that
+   * omits it → null) leaves the stored active strategy untouched. There is no
+   * explicit "clear creatorStrategy" set action in T1 — the `clear` action
+   * removes the whole profile row.
+   */
+  private async deriveActiveStrategy(
+    tx: Pick<Database, 'select'>,
+    ownerId: string,
+    action: AgentTradingProfileForwardAction,
+    profile: AgentTradingProfile | null,
+    now: Date,
+  ): Promise<ActiveStrategy | null> {
+    // Absent creator input → unchanged: keep whatever the actor already runs.
+    if (action.creatorStrategy === null) return profile?.activeStrategy ?? null;
+
+    const unchanged = profile != null
+      && canonicalJson(profile.creatorStrategy ?? null) === canonicalJson(action.creatorStrategy);
+    if (unchanged) return profile.activeStrategy ?? null;
+
+    const [venueAccount] = await tx.select({ venue: venueAccounts.venue }).from(venueAccounts).where(and(
+      eq(venueAccounts.id, action.venueAccountId),
+      eq(venueAccounts.ownerId, ownerId),
+    )).limit(1);
+    if (!venueAccount) {
+      throw new Error(`Venue account ${action.venueAccountId} not found for owner ${ownerId} while resolving active strategy`);
+    }
+    return resolveActiveStrategy(
+      action.creatorStrategy,
+      { venue: venueAccount.venue, venueType: venueTypeFor(venueAccount.venue) },
+      now.toISOString(),
+    );
   }
 
   async replaceRiskOverrides(params: {

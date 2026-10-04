@@ -1,5 +1,12 @@
 import { bigint, index, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
-import type { AgentRiskOverrides, ExecutionDefaults, RiskPosture } from '@traderton/domain';
+import type {
+  ActiveStrategy,
+  AgentRiskOverrides,
+  CreatorStrategy,
+  ExecutionDefaults,
+  RiskPosture,
+  ScanMode,
+} from '@traderton/domain';
 
 /** Traderton-owned enforcement configuration for one agent and venue account. */
 export const agentTradingProfiles = pgTable('agent_trading_profiles', {
@@ -11,6 +18,21 @@ export const agentTradingProfiles = pgTable('agent_trading_profiles', {
   riskPosture: jsonb('risk_posture').$type<RiskPosture>(),
   riskOverrides: jsonb('risk_overrides').$type<AgentRiskOverrides>().notNull().default({}),
   executionDefaults: jsonb('execution_defaults').$type<ExecutionDefaults>(),
+  /**
+   * Scan loop mode (004 ownership rule — creator input, written by herobids).
+   * null = no scan loop.
+   */
+  scanMode: text('scan_mode').$type<ScanMode>(),
+  /**
+   * Creator-authored strategy input (004 ownership rule — written by herobids):
+   * a preset reference or a custom technical config.
+   */
+  creatorStrategy: jsonb('creator_strategy').$type<CreatorStrategy>(),
+  /**
+   * Resolved active strategy the actor runs (004 ownership rule — Traderton-only;
+   * derived from `creatorStrategy` on write, never a forward input).
+   */
+  activeStrategy: jsonb('active_strategy').$type<ActiveStrategy>(),
   revision: bigint('revision', { mode: 'bigint' }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -28,11 +50,19 @@ export interface AgentTradingProfilePreimage {
   riskPosture: RiskPosture | null;
   riskOverrides: AgentRiskOverrides;
   executionDefaults: ExecutionDefaults | null;
+  scanMode: ScanMode | null;
+  creatorStrategy: CreatorStrategy | null;
+  activeStrategy: ActiveStrategy | null;
   revision: string;
   createdAt: string;
   updatedAt: string;
 }
 
+/**
+ * Forward action carries only creator inputs (`scanMode`, `creatorStrategy`).
+ * `activeStrategy` is Traderton-derived on write and never a forward input
+ * (004 ownership rule).
+ */
 export interface AgentTradingProfileForwardAction {
   actionId: string;
   kind: 'set' | 'clear';
@@ -40,6 +70,8 @@ export interface AgentTradingProfileForwardAction {
   capital: string | null;
   riskPosture: RiskPosture | null;
   executionDefaults: ExecutionDefaults | null;
+  scanMode: ScanMode | null;
+  creatorStrategy: CreatorStrategy | null;
 }
 
 /** Durable preimages for reversible cross-service profile changes. */

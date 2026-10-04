@@ -1,6 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-const { applyOperation } = vi.hoisted(() => ({ applyOperation: vi.fn() }));
+const { applyOperation, getByOwnerActorVenueAccount } = vi.hoisted(() => ({
+  applyOperation: vi.fn(),
+  getByOwnerActorVenueAccount: vi.fn(),
+}));
 
 vi.mock('@traderton/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@traderton/db')>();
@@ -8,6 +11,7 @@ vi.mock('@traderton/db', async (importOriginal) => {
     ...actual,
     AgentTradingProfileRepository: class {
       applyOperation = applyOperation;
+      getByOwnerActorVenueAccount = getByOwnerActorVenueAccount;
     },
   };
 });
@@ -16,6 +20,8 @@ import { tradingProfileTools } from './trading-profiles.js';
 
 beforeEach(() => {
   applyOperation.mockReset();
+  getByOwnerActorVenueAccount.mockReset();
+  getByOwnerActorVenueAccount.mockResolvedValue(null);
 });
 
 const setProfile = tradingProfileTools.find((tool) => tool.name === 'set_agent_trading_profile')!;
@@ -41,15 +47,16 @@ const operatorRiskDefaults = {
   maxBots: 5,
 };
 
-function context(ownerId = 'owner-1', agentId = 'agent-1') {
+function context(ownerId = 'owner-1', agentId = 'agent-1', venue = 'hyperliquid', marketDataConfig?: Record<string, unknown>) {
   return {
     ownerId,
     agentId,
     operatorRiskDefaults,
+    marketDataConfig,
     db: {
       select: () => ({
         from: () => ({
-          where: () => ({ limit: async () => [{ id: 'venue-1' }] }),
+          where: () => ({ limit: async () => [{ id: 'venue-1', venue }] }),
         }),
       }),
     },
@@ -119,6 +126,107 @@ describe('set_agent_trading_profile tool identity boundary', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(applyOperation).toHaveBeenCalled();
+  });
+});
+
+// A minimal custom technical config. filters.venue/venueType are overwritten by
+// the resolver with the venue binding, so leave them as placeholders here.
+function customTechnical(overrides: Record<string, unknown> = {}) {
+  return {
+    filters: { venue: 'placeholder', venueType: 'orderbook' },
+    indicators: {},
+    candles: { interval: '15m', limit: 100 },
+    signalBias: 'trend-following',
+    scanIntervalMs: 60_000,
+    scanBatchSize: 5,
+    autonomousExit: false,
+    ...overrides,
+  };
+}
+
+describe('set_agent_trading_profile scan configuration', () => {
+  beforeEach(() => applyOperation.mockResolvedValue(new Map([['action-1', 1n]])));
+
+  it('rejects a scanner-gated profile without a creator strategy', async () => {
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated' },
+      context(),
+    );
+
+    expect(result).toMatchObject({ success: false, fault: false, errorCode: 'validation.strategy_required' });
+    expect(applyOperation).not.toHaveBeenCalled();
+  });
+
+  it('resolves a creator preset to the same technical config herobids produced', async () => {
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated', creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' } },
+      context(),
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(applyOperation).toHaveBeenCalledWith(expect.objectContaining({
+      actions: [expect.objectContaining({
+        scanMode: 'scanner_gated',
+        creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' },
+      })],
+    }));
+  });
+
+  it('repairs a mixed-mode technical config with defaults', async () => {
+    // Omit scanBatchSize/autonomousExit — lenient TechnicalConfigSchema fills
+    // defaults rather than rejecting, so a mixed-mode set succeeds.
+    const technical = customTechnical();
+    delete (technical as Record<string, unknown>)['scanBatchSize'];
+    delete (technical as Record<string, unknown>)['autonomousExit'];
+
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'mixed', creatorStrategy: { customTechnical: technical } },
+      context(),
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(applyOperation).toHaveBeenCalled();
+  });
+
+  it('rejects an incoherent swap scanner config', async () => {
+    // scanner_gated on a swap venue with no canonical tokens configured →
+    // validateSwapScannerConfig fails closed.
+    const technical = customTechnical({ filters: { venue: 'placeholder', venueType: 'swap', networks: ['solana'] } });
+
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated', creatorStrategy: { customTechnical: technical } },
+      context('owner-1', 'agent-1', 'jupiter', { tokenSafety: { canonicalTokens: {} } }),
+    );
+
+    expect(result).toMatchObject({ success: false, fault: false });
+    expect(String(result.errorCode)).toMatch(/^swap\./);
+    expect(applyOperation).not.toHaveBeenCalled();
+  });
+
+  it('keeps existing profiles valid when scan fields are absent', async () => {
+    // Old caller: no scanMode/creatorStrategy. No scan validation runs; the
+    // forward action carries nulls so the repo preserves any stored strategy.
+    const result = await setProfile.execute(params, context());
+
+    expect(result).toMatchObject({ success: true });
+    expect(applyOperation).toHaveBeenCalledWith(expect.objectContaining({
+      actions: [expect.objectContaining({ scanMode: null, creatorStrategy: null })],
+    }));
+  });
+
+  it('accepts a scanner-gated resend that relies on the stored active strategy', async () => {
+    // No new creatorStrategy, but a stored active config exists → scanner_gated
+    // passes validation against the existing resolved technical config.
+    getByOwnerActorVenueAccount.mockResolvedValue({
+      activeStrategy: { technical: customTechnical() },
+    });
+
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated' },
+      context(),
+    );
+
+    expect(result).toMatchObject({ success: true });
   });
 });
 

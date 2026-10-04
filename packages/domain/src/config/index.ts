@@ -114,3 +114,16 @@ export type {
   AppConfig,
   MechanicalStrategy,
 } from './schema.js';
+
+export {
+  SCAN_MODES,
+  ScanModeSchema,
+  CreatorStrategySchema,
+  ActiveStrategySchema,
+  resolveActiveStrategy,
+  StrategyResolutionError,
+  type ScanMode,
+  type CreatorStrategy,
+  type ActiveStrategy,
+  type ResolveStrategyContext,
+} from './agent-strategy.js';

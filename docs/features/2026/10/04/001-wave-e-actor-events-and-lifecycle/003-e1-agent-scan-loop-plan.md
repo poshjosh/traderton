@@ -1,6 +1,6 @@
 # 003 — E1: agent technical scan loop + agent-actor lifecycle
 
-**Status:** E1-T PENDING (T1 PENDING, T2 PENDING, T3 PENDING, T4 PENDING, T5 PENDING);
+**Status:** E1-T PENDING (T1 DONE, T2 PENDING, T3 PENDING, T4 PENDING, T5 PENDING);
 E1-H GATED (herobids, awaiting human go).
 **Depends on:** E3-T (scan results reach agents only through
 the E3 `consumer_notifications` channel), and E2 (loader + status callbacks). **Repos:** traderton (E1-T), then
@@ -211,3 +211,20 @@ updated.
 - The ensure rebuilds the actor on every profile revision, which resets the equity peak
   (existing behaviour). It becomes more frequent if technical config changes often. Track
   the hot-apply optimisation in 010.
+
+## Outstanding Issues (non-blocking, from code review)
+
+### [T1] profile scan config columns + ownership split + resolution + parity
+- RESOLVED (MEDIUM, folded in): the duplicate `stableCanonicalJson` helper in the profile
+  repo was removed; the active_strategy comparison now reuses the existing `canonicalJson`.
+- RESOLVED (LOW, folded in): added `.describe()` to the new `scanMode`/`creatorStrategy`
+  tool params; added a sentinel comment on the custom-technical `styleTier: 'standard'`.
+- LOW: a changed/first set resolves the creator strategy twice — once in the tool
+  (validation) and once in the repo (derivation), each with its own `changedAt` timestamp.
+  The repo value is authoritative; the double resolution is correct and cheap. No action.
+- NOTE: `run-integration.sh` was extended to wire in the pre-existing
+  `agent-trading-profile-repository.integration.test.ts` (it was not previously in the
+  allowlist); additive, keeps `--no-file-parallelism`.
+- NOTE: parity fixture `__fixtures__/herobids-preset-resolution.json` was independently
+  verified by the reviewer to be genuine herobids output (not circular); preset YAMLs +
+  presets.ts are byte-identical across repos, so no drift.

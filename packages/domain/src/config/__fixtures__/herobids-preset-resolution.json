@@ -1,0 +1,1207 @@
+{
+  "momentum:economy": {
+    "presetKey": "momentum",
+    "presetStyle": "economy",
+    "presetBehaviorVersion": "4f1cf9dc3824",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "healthyMin": 45,
+          "healthyMax": 65
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.8
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 24,
+          "breakoutThreshold": 0.008
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 3,
+          "maxChange24hPct": 40
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.25,
+          "macdCrossoverWeight": 0.3,
+          "macdIncreasingWeight": 0.15,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.1,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.15,
+          "chochBearishPenalty": 0.1,
+          "minConfidence": 0.55,
+          "minReasons": 3
+        }
+      },
+      "candles": {
+        "interval": "15m",
+        "limit": 48
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 2,
+      "maxPositionSizePct": 10
+    },
+    "execution": {
+      "fixedPositionSize": "2",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "momentum-position:economy": {
+    "presetKey": "momentum-position",
+    "presetStyle": "economy",
+    "presetBehaviorVersion": "6d0e95af08a3",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "healthyMin": 48,
+          "healthyMax": 72
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 2
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 24,
+          "breakoutThreshold": 0.01
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 8,
+          "maxChange24hPct": 50
+        },
+        "choch": {
+          "enabled": true,
+          "swingLookback": 3,
+          "minSwingPct": 0.015,
+          "rejectOnBearish": true
+        },
+        "confidence": {
+          "rsiWeight": 0.2,
+          "macdCrossoverWeight": 0.25,
+          "macdIncreasingWeight": 0.2,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.15,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.15,
+          "chochBearishPenalty": 0.1,
+          "minConfidence": 0.55,
+          "minReasons": 3
+        }
+      },
+      "candles": {
+        "interval": "4h",
+        "limit": 72
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 5,
+      "maxPositionSizePct": 10
+    },
+    "execution": {
+      "fixedPositionSize": "2",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "range:economy": {
+    "presetKey": "range",
+    "presetStyle": "economy",
+    "presetBehaviorVersion": "94445d564efd",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "overbought": 80,
+          "weakBelow": 20
+        },
+        "macd": {
+          "enabled": false
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.5
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 30,
+          "breakoutThreshold": 0.005
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": false
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.4,
+          "macdCrossoverWeight": 0,
+          "macdIncreasingWeight": 0,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.4,
+          "vwapWeight": 0,
+          "priceActionWeight": 0,
+          "chochBullishWeight": 0,
+          "chochBearishPenalty": 0,
+          "minConfidence": 0.5,
+          "minReasons": 3
+        }
+      },
+      "candles": {
+        "interval": "1h",
+        "limit": 48
+      },
+      "signalBias": "mean-reverting"
+    },
+    "risk": {
+      "stopLossPct": 3,
+      "maxPositionSizePct": 10
+    },
+    "execution": {
+      "fixedPositionSize": "2",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "swing:economy": {
+    "presetKey": "swing",
+    "presetStyle": "economy",
+    "presetBehaviorVersion": "a60c302c0c22",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "healthyMin": 50,
+          "healthyMax": 65
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.8,
+          "weakRatio": 0.8
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 24,
+          "breakoutThreshold": 0.01
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 5,
+          "maxChange24hPct": 40
+        },
+        "choch": {
+          "enabled": true,
+          "swingLookback": 3,
+          "minSwingPct": 0.015,
+          "rejectOnBearish": true
+        },
+        "confidence": {
+          "rsiWeight": 0.2,
+          "macdCrossoverWeight": 0.25,
+          "macdIncreasingWeight": 0.15,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.25,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.2,
+          "chochBearishPenalty": 0.15,
+          "minConfidence": 0.55,
+          "minReasons": 3
+        }
+      },
+      "candles": {
+        "interval": "4h",
+        "limit": 48
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 4,
+      "maxPositionSizePct": 10
+    },
+    "execution": {
+      "fixedPositionSize": "2",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "scalper:economy": {
+    "presetKey": "scalper",
+    "presetStyle": "economy",
+    "presetBehaviorVersion": "5206ee0424fe",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 7,
+          "healthyMin": 48,
+          "healthyMax": 62
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 6,
+          "slow": 13,
+          "signal": 5
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 2,
+          "recentBars": 3,
+          "avgBars": 10
+        },
+        "supportResistance": {
+          "enabled": false
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": false
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.3,
+          "macdCrossoverWeight": 0.35,
+          "macdIncreasingWeight": 0.15,
+          "volumeWeight": 0.25,
+          "breakoutWeight": 0.05,
+          "vwapWeight": 0,
+          "priceActionWeight": 0,
+          "chochBullishWeight": 0.1,
+          "chochBearishPenalty": 0.05,
+          "minConfidence": 0.55,
+          "minReasons": 3
+        }
+      },
+      "candles": {
+        "interval": "5m",
+        "limit": 30
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 1.5,
+      "maxPositionSizePct": 10
+    },
+    "execution": {
+      "fixedPositionSize": "2",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "contrarian:economy": {
+    "presetKey": "contrarian",
+    "presetStyle": "economy",
+    "presetBehaviorVersion": "86b0b9b3e06b",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "overbought": 75,
+          "weakBelow": 25
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.8
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 24,
+          "breakoutThreshold": 0.008
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 12,
+          "maxChange24hPct": 35
+        },
+        "choch": {
+          "enabled": true,
+          "swingLookback": 3,
+          "minSwingPct": 0.01,
+          "rejectOnBearish": false
+        },
+        "confidence": {
+          "rsiWeight": 0.35,
+          "macdCrossoverWeight": 0.15,
+          "macdIncreasingWeight": 0.1,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.2,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.1,
+          "chochBearishPenalty": 0.05,
+          "minConfidence": 0.55,
+          "minReasons": 3
+        }
+      },
+      "candles": {
+        "interval": "1h",
+        "limit": 48
+      },
+      "signalBias": "mean-reverting"
+    },
+    "risk": {
+      "stopLossPct": 4,
+      "maxPositionSizePct": 10
+    },
+    "execution": {
+      "fixedPositionSize": "2",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "momentum:standard": {
+    "presetKey": "momentum",
+    "presetStyle": "standard",
+    "presetBehaviorVersion": "6db615515949",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "healthyMin": 40,
+          "healthyMax": 70
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.5
+        },
+        "supportResistance": {
+          "enabled": false
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 3,
+          "maxChange24hPct": 50
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.25,
+          "macdCrossoverWeight": 0.3,
+          "macdIncreasingWeight": 0.15,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.1,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.15,
+          "chochBearishPenalty": 0.1,
+          "minConfidence": 0.4,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "15m",
+        "limit": 48
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 3,
+      "maxPositionSizePct": 20
+    },
+    "execution": {
+      "fixedPositionSize": "5",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "momentum-position:standard": {
+    "presetKey": "momentum-position",
+    "presetStyle": "standard",
+    "presetBehaviorVersion": "bbdac6a9005a",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "healthyMin": 45,
+          "healthyMax": 75
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.8
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 24,
+          "breakoutThreshold": 0.01
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 8,
+          "maxChange24hPct": 60
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.2,
+          "macdCrossoverWeight": 0.25,
+          "macdIncreasingWeight": 0.2,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.15,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.15,
+          "chochBearishPenalty": 0.1,
+          "minConfidence": 0.45,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "4h",
+        "limit": 72
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 8,
+      "maxPositionSizePct": 20
+    },
+    "execution": {
+      "fixedPositionSize": "5",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "range:standard": {
+    "presetKey": "range",
+    "presetStyle": "standard",
+    "presetBehaviorVersion": "07184037f648",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "overbought": 75,
+          "weakBelow": 25
+        },
+        "macd": {
+          "enabled": false
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.3
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 30,
+          "breakoutThreshold": 0.005
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": false
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.4,
+          "macdCrossoverWeight": 0,
+          "macdIncreasingWeight": 0,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.4,
+          "vwapWeight": 0,
+          "priceActionWeight": 0,
+          "chochBullishWeight": 0,
+          "chochBearishPenalty": 0,
+          "minConfidence": 0.35,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "1h",
+        "limit": 48
+      },
+      "signalBias": "mean-reverting"
+    },
+    "risk": {
+      "stopLossPct": 4,
+      "maxPositionSizePct": 20
+    },
+    "execution": {
+      "fixedPositionSize": "5",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "swing:standard": {
+    "presetKey": "swing",
+    "presetStyle": "standard",
+    "presetBehaviorVersion": "a78d9d54645b",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "healthyMin": 48,
+          "healthyMax": 68
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.5,
+          "weakRatio": 0.8
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 24,
+          "breakoutThreshold": 0.01
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 5,
+          "maxChange24hPct": 50
+        },
+        "choch": {
+          "enabled": true,
+          "swingLookback": 3,
+          "minSwingPct": 0.015,
+          "rejectOnBearish": true
+        },
+        "confidence": {
+          "rsiWeight": 0.2,
+          "macdCrossoverWeight": 0.25,
+          "macdIncreasingWeight": 0.15,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.25,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.2,
+          "chochBearishPenalty": 0.15,
+          "minConfidence": 0.4,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "4h",
+        "limit": 48
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 5,
+      "maxPositionSizePct": 20
+    },
+    "execution": {
+      "fixedPositionSize": "5",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "scalper:standard": {
+    "presetKey": "scalper",
+    "presetStyle": "standard",
+    "presetBehaviorVersion": "c8ee6e508004",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 7,
+          "healthyMin": 45,
+          "healthyMax": 65
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 6,
+          "slow": 13,
+          "signal": 5
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.8,
+          "recentBars": 3,
+          "avgBars": 10
+        },
+        "supportResistance": {
+          "enabled": false
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": false
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.3,
+          "macdCrossoverWeight": 0.35,
+          "macdIncreasingWeight": 0.15,
+          "volumeWeight": 0.25,
+          "breakoutWeight": 0.05,
+          "vwapWeight": 0,
+          "priceActionWeight": 0,
+          "chochBullishWeight": 0.1,
+          "chochBearishPenalty": 0.05,
+          "minConfidence": 0.35,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "5m",
+        "limit": 30
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 2,
+      "maxPositionSizePct": 20
+    },
+    "execution": {
+      "fixedPositionSize": "5",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "contrarian:standard": {
+    "presetKey": "contrarian",
+    "presetStyle": "standard",
+    "presetBehaviorVersion": "757d9e12f402",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "overbought": 70,
+          "weakBelow": 30
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.5
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 24,
+          "breakoutThreshold": 0.008
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 10,
+          "maxChange24hPct": 40
+        },
+        "choch": {
+          "enabled": true,
+          "swingLookback": 3,
+          "minSwingPct": 0.01,
+          "rejectOnBearish": false
+        },
+        "confidence": {
+          "rsiWeight": 0.35,
+          "macdCrossoverWeight": 0.15,
+          "macdIncreasingWeight": 0.1,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.2,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.1,
+          "chochBearishPenalty": 0.05,
+          "minConfidence": 0.4,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "1h",
+        "limit": 48
+      },
+      "signalBias": "mean-reverting"
+    },
+    "risk": {
+      "stopLossPct": 5,
+      "maxPositionSizePct": 20
+    },
+    "execution": {
+      "fixedPositionSize": "5",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "momentum:premium": {
+    "presetKey": "momentum",
+    "presetStyle": "premium",
+    "presetBehaviorVersion": "4a5fce6e73cb",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "healthyMin": 35,
+          "healthyMax": 75
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.3
+        },
+        "supportResistance": {
+          "enabled": false
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 2,
+          "maxChange24hPct": 60
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.25,
+          "macdCrossoverWeight": 0.3,
+          "macdIncreasingWeight": 0.15,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.1,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.15,
+          "chochBearishPenalty": 0.1,
+          "minConfidence": 0.3,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "15m",
+        "limit": 48
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 5,
+      "maxPositionSizePct": 35
+    },
+    "execution": {
+      "fixedPositionSize": "10",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "momentum-position:premium": {
+    "presetKey": "momentum-position",
+    "presetStyle": "premium",
+    "presetBehaviorVersion": "19d6a0fabefb",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "healthyMin": 40,
+          "healthyMax": 80
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.5
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 24,
+          "breakoutThreshold": 0.01
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 5,
+          "maxChange24hPct": 70
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.2,
+          "macdCrossoverWeight": 0.25,
+          "macdIncreasingWeight": 0.2,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.15,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.15,
+          "chochBearishPenalty": 0.1,
+          "minConfidence": 0.35,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "4h",
+        "limit": 72
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 12,
+      "maxPositionSizePct": 35
+    },
+    "execution": {
+      "fixedPositionSize": "10",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "range:premium": {
+    "presetKey": "range",
+    "presetStyle": "premium",
+    "presetBehaviorVersion": "f26d22c52da9",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "overbought": 70,
+          "weakBelow": 30
+        },
+        "macd": {
+          "enabled": false
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.1
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 30,
+          "breakoutThreshold": 0.005
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": false
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.4,
+          "macdCrossoverWeight": 0,
+          "macdIncreasingWeight": 0,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.4,
+          "vwapWeight": 0,
+          "priceActionWeight": 0,
+          "chochBullishWeight": 0,
+          "chochBearishPenalty": 0,
+          "minConfidence": 0.25,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "1h",
+        "limit": 48
+      },
+      "signalBias": "mean-reverting"
+    },
+    "risk": {
+      "stopLossPct": 6,
+      "maxPositionSizePct": 35
+    },
+    "execution": {
+      "fixedPositionSize": "10",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "swing:premium": {
+    "presetKey": "swing",
+    "presetStyle": "premium",
+    "presetBehaviorVersion": "65795daf78de",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "healthyMin": 42,
+          "healthyMax": 72
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.3,
+          "weakRatio": 0.8
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 24,
+          "breakoutThreshold": 0.01
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 3,
+          "maxChange24hPct": 60
+        },
+        "choch": {
+          "enabled": true,
+          "swingLookback": 3,
+          "minSwingPct": 0.015,
+          "rejectOnBearish": false
+        },
+        "confidence": {
+          "rsiWeight": 0.2,
+          "macdCrossoverWeight": 0.25,
+          "macdIncreasingWeight": 0.15,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.25,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.2,
+          "chochBearishPenalty": 0.15,
+          "minConfidence": 0.3,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "4h",
+        "limit": 48
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 7,
+      "maxPositionSizePct": 35
+    },
+    "execution": {
+      "fixedPositionSize": "10",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "scalper:premium": {
+    "presetKey": "scalper",
+    "presetStyle": "premium",
+    "presetBehaviorVersion": "c4c8301a7a0c",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 7,
+          "healthyMin": 40,
+          "healthyMax": 70
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 6,
+          "slow": 13,
+          "signal": 5
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.5,
+          "recentBars": 3,
+          "avgBars": 10
+        },
+        "supportResistance": {
+          "enabled": false
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": false
+        },
+        "choch": {
+          "enabled": false
+        },
+        "confidence": {
+          "rsiWeight": 0.3,
+          "macdCrossoverWeight": 0.35,
+          "macdIncreasingWeight": 0.15,
+          "volumeWeight": 0.25,
+          "breakoutWeight": 0.05,
+          "vwapWeight": 0,
+          "priceActionWeight": 0,
+          "chochBullishWeight": 0.1,
+          "chochBearishPenalty": 0.05,
+          "minConfidence": 0.3,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "5m",
+        "limit": 30
+      },
+      "signalBias": "trend-following"
+    },
+    "risk": {
+      "stopLossPct": 3,
+      "maxPositionSizePct": 35
+    },
+    "execution": {
+      "fixedPositionSize": "10",
+      "positionSizeMode": "percent_equity"
+    }
+  },
+  "contrarian:premium": {
+    "presetKey": "contrarian",
+    "presetStyle": "premium",
+    "presetBehaviorVersion": "d3175f246a0b",
+    "technical": {
+      "indicators": {
+        "rsi": {
+          "enabled": true,
+          "period": 14,
+          "overbought": 65,
+          "weakBelow": 35
+        },
+        "macd": {
+          "enabled": true,
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        },
+        "volume": {
+          "enabled": true,
+          "strongRatio": 1.3
+        },
+        "supportResistance": {
+          "enabled": true,
+          "lookback": 24,
+          "breakoutThreshold": 0.008
+        },
+        "vwap": {
+          "enabled": false
+        },
+        "priceAction": {
+          "enabled": true,
+          "minChange24hPct": 7,
+          "maxChange24hPct": 50
+        },
+        "choch": {
+          "enabled": true,
+          "swingLookback": 3,
+          "minSwingPct": 0.01,
+          "rejectOnBearish": false
+        },
+        "confidence": {
+          "rsiWeight": 0.35,
+          "macdCrossoverWeight": 0.15,
+          "macdIncreasingWeight": 0.1,
+          "volumeWeight": 0.2,
+          "breakoutWeight": 0.2,
+          "vwapWeight": 0,
+          "priceActionWeight": 0.1,
+          "chochBullishWeight": 0.1,
+          "chochBearishPenalty": 0.05,
+          "minConfidence": 0.3,
+          "minReasons": 2
+        }
+      },
+      "candles": {
+        "interval": "1h",
+        "limit": 48
+      },
+      "signalBias": "mean-reverting"
+    },
+    "risk": {
+      "stopLossPct": 7,
+      "maxPositionSizePct": 35
+    },
+    "execution": {
+      "fixedPositionSize": "10",
+      "positionSizeMode": "percent_equity"
+    }
+  }
+}

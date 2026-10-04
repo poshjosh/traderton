@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type postgres from 'postgres';
+import type { CreatorStrategy } from '@traderton/domain';
 import type { Database } from './index.js';
 import {
   AgentTradingProfileRepository,
   TradingProfileOperationConflictError,
 } from './agent-trading-profile-repository.js';
+import { venueAccounts } from './schema/index.js';
 import { openTestDb, truncate, type TestDb } from './test-helpers/integration-db.js';
 
 const SKIP = !process.env['DATABASE_URL'];
@@ -14,14 +16,25 @@ describe.skipIf(SKIP)('AgentTradingProfileRepository (integration)', () => {
   let db: TestDb;
   let repo: AgentTradingProfileRepository;
 
-  const action = (actionId: string, venueAccountId: string, capital: string | null, kind: 'set' | 'clear' = 'set') => ({
+  const action = (
+    actionId: string,
+    venueAccountId: string,
+    capital: string | null,
+    kind: 'set' | 'clear' = 'set',
+    extra: { scanMode?: 'scanner_gated' | 'mixed' | null; creatorStrategy?: CreatorStrategy | null } = {},
+  ) => ({
     actionId,
     kind,
     venueAccountId,
     capital,
     riskPosture: null,
     executionDefaults: kind === 'set' ? { mode: 'paper' as const } : null,
+    scanMode: kind === 'set' ? (extra.scanMode ?? null) : null,
+    creatorStrategy: kind === 'set' ? (extra.creatorStrategy ?? null) : null,
   });
+
+  const seedVenueAccount = async (id: string, ownerId: string, venue = 'hyperliquid') =>
+    db.insert(venueAccounts).values({ id, ownerId, venue, label: `${venue} test` }).onConflictDoNothing();
 
   beforeAll(() => {
     const handle = openTestDb();
@@ -32,7 +45,7 @@ describe.skipIf(SKIP)('AgentTradingProfileRepository (integration)', () => {
 
   afterAll(async () => client.end());
 
-  beforeEach(async () => truncate(client, 'agent_trading_profile_changes', 'agent_trading_profiles'));
+  beforeEach(async () => truncate(client, 'agent_trading_profile_changes', 'agent_trading_profiles', 'venue_accounts'));
 
   it('isolates profiles by both signed owner and actor when they share a venue account', async () => {
     await repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'op-a', actions: [action('a', 'venue-1', '100')] });
@@ -68,5 +81,77 @@ describe.skipIf(SKIP)('AgentTradingProfileRepository (integration)', () => {
       capital: '250',
       riskOverrides: { maxOpenPositions: 3 },
     });
+  });
+
+  it('keeps the active strategy when an unchanged creator strategy is resent', async () => {
+    await seedVenueAccount('venue-s', 'owner-a');
+    const creatorStrategy: CreatorStrategy = { presetKey: 'momentum', styleTier: 'standard' };
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'first',
+      actions: [action('first', 'venue-s', '100', 'set', { scanMode: 'scanner_gated', creatorStrategy })],
+    });
+    const afterFirst = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-s');
+    const firstActive = afterFirst?.activeStrategy;
+    expect(firstActive).toBeTruthy();
+    expect(firstActive?.presetKey).toBe('momentum');
+
+    // Resend the SAME creator strategy while only capital changes.
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'resend',
+      actions: [action('resend', 'venue-s', '250', 'set', { scanMode: 'scanner_gated', creatorStrategy })],
+    });
+    const afterResend = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-s');
+
+    expect(afterResend?.capital).toBe('250');
+    // active_strategy is byte-identical — not re-resolved, so changedAt is unchanged.
+    expect(afterResend?.activeStrategy).toEqual(firstActive);
+  });
+
+  it('resets the active strategy when the creator changes their strategy', async () => {
+    await seedVenueAccount('venue-c', 'owner-a');
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'first',
+      actions: [action('first', 'venue-c', '100', 'set', {
+        scanMode: 'scanner_gated', creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' },
+      })],
+    });
+    const afterFirst = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-c');
+    expect(afterFirst?.activeStrategy?.presetKey).toBe('momentum');
+
+    // Creator switches to a different preset → active strategy is re-resolved.
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'change',
+      actions: [action('change', 'venue-c', '100', 'set', {
+        scanMode: 'scanner_gated', creatorStrategy: { presetKey: 'range', styleTier: 'standard' },
+      })],
+    });
+    const afterChange = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-c');
+
+    expect(afterChange?.activeStrategy?.presetKey).toBe('range');
+    expect(afterChange?.activeStrategy?.source).toBe('creator');
+    expect(afterChange?.creatorStrategy).toEqual({ presetKey: 'range', styleTier: 'standard' });
+  });
+
+  it('leaves the active strategy untouched when scan fields are absent on resend', async () => {
+    await seedVenueAccount('venue-abs', 'owner-a');
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'first',
+      actions: [action('first', 'venue-abs', '100', 'set', {
+        scanMode: 'scanner_gated', creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' },
+      })],
+    });
+    const afterFirst = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-abs');
+
+    // Old caller: no scanMode/creatorStrategy. Stored strategy must survive.
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'bare',
+      actions: [action('bare', 'venue-abs', '300')],
+    });
+    const afterBare = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-abs');
+
+    expect(afterBare?.capital).toBe('300');
+    expect(afterBare?.scanMode).toBe('scanner_gated');
+    expect(afterBare?.creatorStrategy).toEqual({ presetKey: 'momentum', styleTier: 'standard' });
+    expect(afterBare?.activeStrategy).toEqual(afterFirst?.activeStrategy);
   });
 });
