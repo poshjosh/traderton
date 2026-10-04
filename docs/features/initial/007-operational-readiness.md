@@ -72,6 +72,14 @@ venue latency.
 
 ### Measurement Protocol
 
+> Consumer-side instrumentation note: the herobids consumer measures end-to-end
+> boundary latency, throughput, and error-rate-by-code via the metrics layer
+> documented in its repo at `docs/tech/observability.md`. Item 2 of that layer —
+> the Traderton-reported internal request duration needed for boundary-overhead
+> separation (step 2 below) — is a Phase 2 additive field on the boundary result
+> contract, stamped by the Traderton dispatcher. Until then the consumer records
+> end-to-end latency only.
+
 1. record timestamps at consumer dispatch and consumer receipt
 2. record Traderton-side request duration for overhead separation
 3. report p50, p95, p99, max, and error-rate by tool category
