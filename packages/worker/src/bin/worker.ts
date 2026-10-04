@@ -1,11 +1,10 @@
 import { Redis } from 'ioredis';
-import { eq } from 'drizzle-orm';
-import { createDatabase, bots } from '@traderton/db';
+import { createDatabase } from '@traderton/db';
 
 import { loadConfig } from '../config.js';
 import { createLogger } from '../logger.js';
 import { createTradingRuntime } from '../composition/create-trading-runtime.js';
-import type { PersistedInstance } from '../runtime.js';
+import { createRunningBotLoader } from '../composition/running-bot-loader.js';
 
 /**
  * Tiny process entry for the trading worker (Phase 9b item B).
@@ -21,15 +20,11 @@ async function main(): Promise<void> {
   const redis = new Redis(config.redis.url, { maxRetriesPerRequest: null });
 
   // Real instance loader: bots WHERE status='running'. Each persisted config
-  // carries the injected venueAccountId + soft ownerId (decisions 11–13).
+  // carries the injected venueAccountId + soft ownerId + creator (decisions
+  // 11–13; creator is additive for E3 routing). Shared with the boundary process
+  // via the single `createRunningBotLoader` (E2 F2).
   const db = createDatabase(config.database.url);
-  const instanceLoader = async (): Promise<PersistedInstance[]> => {
-    const running = await db.select().from(bots).where(eq(bots.status, 'running'));
-    return running.map((row) => ({
-      id: row.id,
-      config: { ...row.config, venueAccountId: row.venueAccountId, ownerId: row.ownerId },
-    }));
-  };
+  const instanceLoader = createRunningBotLoader(db);
 
   const trading = createTradingRuntime({ config, redis, instanceLoader });
   await trading.start();

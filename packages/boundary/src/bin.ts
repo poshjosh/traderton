@@ -21,7 +21,6 @@ import {
   computeRequestFingerprint,
 } from '@traderton/db';
 import {
-  createTradingRuntime,
   loadConfig,
   createScannerCandleFetcherFromConfig,
   createScannerPoolResolverFromConfig,
@@ -56,6 +55,7 @@ import {
 import { buildResolverPorts } from './resolver-ports.js';
 import { buildAgentDirectActorEnsure } from './agent-direct-actor-ensure.js';
 import { subscribeBotStopSignals } from './bot-stop-subscriber.js';
+import { buildBoundaryTradingRuntime } from './build-boundary-runtime.js';
 
 function loadBoundaryConfig(): BoundaryConfig {
   const consumerId = process.env['BOUNDARY_CONSUMER_ID'];
@@ -87,14 +87,9 @@ async function main(): Promise<void> {
   const botRepo = new BotRepository(db);
   const profileRepo = new AgentTradingProfileRepository(db);
   const instrumentRepo = new InstrumentRepository(db);
-  const runtime = createTradingRuntime({
-    config: appConfig,
-    redis,
-    // No bots rehydrate at boundary start — bot lifecycle is driven by tool
-    // calls, not a boot-time reload. The runtime still starts its lifecycle-job
-    // consumer + reclaim loop.
-    instanceLoader: async () => [],
-  });
+  // Running bots rehydrate at boundary start via the shared running-bot loader
+  // (E2 F2) — see `buildBoundaryTradingRuntime` for the wiring + resume rationale.
+  const runtime = buildBoundaryTradingRuntime({ config: appConfig, redis, db });
   await runtime.start();
 
   // E0 hotfix: the copied `stop_bot` tool publishes `bot:stop:{botId}`; stop the

@@ -451,10 +451,15 @@ async function createAndStart(deps: DriveTargetDeps, payload: ManageBotPayload):
   // ownerId. The persisted `bots` row holds them in its columns (via the item-E
   // limit seam); this stamps them onto the config so the factory is self-sufficient
   // — matching how the production `instanceLoader` re-attaches them per item B.
+  // Also stamp creatorType/creatorId (the SAME 'agent'/`deps.actorId` the create
+  // persist used) so this start-path config matches the reclaim-path config the
+  // shared running-bot loader attaches (E2 F2; additive for E3 routing).
   await deps.runtime.enqueueLifecycle('start', botId, {
     ...(validatedConfig as unknown as Record<string, unknown>),
     venueAccountId: deps.venueAccountId,
     ownerId: deps.ownerId,
+    creatorType: 'agent',
+    creatorId: deps.actorId,
   });
   logger.info({ ownerId: deps.ownerId, botId }, 'Bot enqueued for start');
 
@@ -508,11 +513,15 @@ async function startBot(deps: DriveTargetDeps, payload: ManageBotPayload): Promi
     // from the job config DIRECTLY (never re-loads for a `start`). Prefer the
     // persisted row's `venueAccountId`/`ownerId` — the bot's ACTUAL account (a
     // different drive target may inject a different value); fall back to the
-    // injected `deps.venueAccountId`.
+    // injected `deps.venueAccountId`. Also stamp creatorType/creatorId from the
+    // persisted row so this start-path config matches the reclaim-path config the
+    // shared running-bot loader attaches (E2 F2; additive for E3 routing).
     await deps.runtime.enqueueLifecycle('start', payload.botId, {
       ...bot.config,
       venueAccountId: bot.venueAccountId ?? deps.venueAccountId,
       ownerId: bot.ownerId,
+      creatorType: bot.creatorType,
+      creatorId: bot.creatorId,
     });
   } catch (err) {
     logger.error({ botId: payload.botId, err }, 'Failed to enqueue start job during start action');

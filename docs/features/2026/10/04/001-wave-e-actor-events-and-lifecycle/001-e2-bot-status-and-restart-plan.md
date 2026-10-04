@@ -1,6 +1,6 @@
 # 001 — E2: bot status truth + restart survival (Traderton only)
 
-**Status:** PENDING (steps: 1 DONE, 2 PENDING, 3 PENDING, 4 PENDING, 5 PENDING).
+**Status:** PENDING (steps: 1 DONE, 2 DONE, 3 PENDING, 4 PENDING, 5 PENDING).
 **Depends on:** nothing (E0 done). **Repos:** traderton only.
 **Source behaviour:** `git -C ../herobids show 45271d28^:apps/worker/src/index.ts`:
 `WorkerRuntime` callbacks ~L1785–1880, bot actor `onCrashed`/`onHalted` ~L2160–2240,
@@ -110,3 +110,10 @@ cascade/sweep part is tracked in E1.
   (`packages/db/src/repositories.ts`).
 - LOW: log field ordering differs cosmetically from the `stop_bot` sibling
   (`{ botId, err }` vs `{ err, botId }`). No action needed.
+
+### [Step 2] shared running-bot loader + boundary wiring + creator stamping
+- LOW: `running-bot-loader.test.ts` fakes `select().from().where()` and ignores the
+  predicate, so the unit test does not semantically prove the `status='running'` filter;
+  the Step 5 integration round-trip is the real guard. Acceptable.
+- LOW: minor redundancy between `whereCalls` counter and the `select` spy in the loader
+  test. Harmless.

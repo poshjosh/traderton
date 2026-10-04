@@ -27,6 +27,15 @@ export {
   type ActorRegistryHooks,
 } from './composition/decision-intake.js';
 
+// The single shared running-bot InstanceLoader (E2 F2) — re-exported so the
+// shipped M2 REST boundary (@traderton/boundary) rehydrates running bots the
+// SAME way the M1 worker entry does. No behaviour authored by the re-export.
+export { createRunningBotLoader } from './composition/running-bot-loader.js';
+
+// The InstanceLoader / PersistedInstance types the loader satisfies — re-exported
+// so the boundary can type the loader it wires.
+export type { InstanceLoader, PersistedInstance } from './runtime.js';
+
 export type { ExecutionActor, IntakeResult, IntakeRejection, IntakeRejectionCode } from './execution-actor.js';
 
 // The operator-config loader — re-exported so the M2 REST boundary
