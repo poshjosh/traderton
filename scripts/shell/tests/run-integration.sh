@@ -64,13 +64,18 @@ pnpm --filter @traderton/db db:migrate
 
 echo "==> running the gated integration tests"
 # Scope to the verification suites by default (REST + the Phase 3 MCP sibling);
-# pass extra args through. `--no-file-parallelism`: both suites truncate the SAME
+# pass extra args through. `--no-file-parallelism`: all suites truncate the SAME
 # shared tables (bots/venue_accounts/boundary_invocations) in beforeEach, so they
 # must run sequentially — concurrent file workers would wipe each other's seeded
 # state mid-test.
+# restart-round-trip: Wave E E2 step 5 — drives a REAL createTradingRuntime +
+# createRunningBotLoader to prove a running PAPER bot survives a graceful
+# shutdown and is reclaimed by a fresh runtime (resume ruling), while a stopped
+# bot is not.
 pnpm exec vitest run --no-file-parallelism \
   packages/boundary/src/boundary.verification.integration.test.ts \
   packages/boundary/src/boundary.mcp.verification.integration.test.ts \
+  packages/worker/src/restart-round-trip.integration.test.ts \
   "$@"
 
 echo "==> integration run complete"

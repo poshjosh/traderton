@@ -1,6 +1,6 @@
 # 001 — E2: bot status truth + restart survival (Traderton only)
 
-**Status:** PENDING (steps: 1 DONE, 2 DONE, 3 DONE, 4 DONE, 5 PENDING).
+**Status:** DONE (steps: 1 DONE, 2 DONE, 3 DONE, 4 DONE, 5 DONE).
 **Depends on:** nothing (E0 done). **Repos:** traderton only.
 **Source behaviour:** `git -C ../herobids show 45271d28^:apps/worker/src/index.ts`:
 `WorkerRuntime` callbacks ~L1785–1880, bot actor `onCrashed`/`onHalted` ~L2160–2240,
@@ -134,3 +134,17 @@ cascade/sweep part is tracked in E1.
 - LOW: shutdown docstring lumps the two Redis quits; the test is stricter than the comment.
 - LOW: an optional final summary log would help operators distinguish a clean vs degraded
   teardown.
+
+### [Step 5] restart round-trip integration proof
+- MEDIUM: each `createTradingRuntime` opens its own Postgres pool (`createDatabase`) that
+  neither `shutdown()` nor the test's `afterEach` closes — CASE A leaks two pools until
+  process exit. Pre-existing composition trait (prod runs one runtime per process); the
+  throwaway container is torn down at the end, so impact is low. Candidate follow-up:
+  expose a pool-close on the runtime, or share one DB handle.
+- LOW: pre-existing config drift surfaced by the test — `config/default.yaml` keeps
+  birdeye/coinMarketCap `enabled` and jupiter/1inch `walletGeneration.enabled` true despite
+  their inline comments documenting a `false` safe-local default, so `loadConfig()` demands
+  the four `*_API_KEY` vars. The test sets dummy values (saved/restored) as a test-only
+  workaround; a separate fix should realign the YAML with its documented intent.
+- LOW: `run-integration.sh` header lead-in still frames the suite list as REST+MCP only
+  (cosmetic; the added per-test comment covers the new file).
