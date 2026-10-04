@@ -33,7 +33,7 @@ function makeDeps(opts?: {
   const registry = opts?.registry ?? new Map<string, { isRunning: boolean }>();
   const { runtime, stopAndDeregisterAgentActor } = makeRuntime(registry);
 
-  const ensure = Object.assign(vi.fn(async () => undefined), { evict: vi.fn() }) as unknown as AgentDirectActorEnsure;
+  const ensure = Object.assign(vi.fn(async () => ({ owner: 'local' as const })), { evict: vi.fn() }) as unknown as AgentDirectActorEnsure;
 
   const runRepo = {
     upsertRunning: vi.fn(async () => undefined),

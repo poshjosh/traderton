@@ -5,6 +5,12 @@
 // unit-testable without booting the process.
 //
 // Each tick does two best-effort passes (liveness = `agent_actor_runs`):
+//
+// 001 S4: the pass-2 re-ensure is lease-aware. `reEnsureAgent` returns the
+// ensure's ownership outcome so the sweep can log local-vs-remote honestly — a
+// `remote` result means a surviving/other worker already owns the agent lease
+// and runs the actor, so this replica constructed nothing (a no-op success, not
+// a failure, and not a local re-ensure).
 //   1. Stop running bots whose creator agent is NOT running (run state `stopped`
 //      or absent) — the Traderton replacement for the removed source
 //      `listRunningBotsForInactiveAgents` (which joined the dropped platform
@@ -15,6 +21,8 @@
 // A thrown pass is logged (never swallowed) and the loop still reschedules
 // (AGENTS rule: every async loop reschedules itself on failure). setTimeout
 // self-reschedule (not setInterval) so a slow tick can't overlap the next.
+
+import type { AgentDirectActorResult } from './agent-direct-actor-ensure.js';
 
 /** One durable agent-run row the sweep reconciles (the subset it reads). */
 export interface AgentRunRecord {
@@ -33,8 +41,19 @@ export interface AgentOrphanSweepPorts {
   listRunningAgentBots(): Promise<Array<{ id: string; creatorId: string }>>;
   /** True when the agent's actor is alive (registered + running) in this process. */
   isActorAlive(actorId: string): boolean;
-  /** Re-ensure a running agent whose actor is dead — through the single ensure entry point. */
-  reEnsureAgent(run: AgentRunRecord): Promise<void>;
+  /**
+   * Re-ensure a running agent whose actor is dead — through the single ensure
+   * entry point. 001 S4: the ensure is lease-aware. If another worker already
+   * owns the `agent:{agentId}` lease (e.g. it took over after this one's actor
+   * died), the ensure constructs nothing and resolves as a `remote` no-op
+   * success. The sweep treats any non-throwing re-ensure as handled; the lease
+   * acquire inside the ensure is what guarantees exactly one live actor across
+   * replicas, so the sweep never needs to construct a duplicate itself.
+   *
+   * Returns the ownership outcome so the sweep can log local-vs-remote honestly
+   * (a `remote` result is a no-op success — the actor runs on another replica).
+   */
+  reEnsureAgent(run: AgentRunRecord): Promise<AgentDirectActorResult>;
   /** Stop a bot: mark its row stopped + stop the in-process actor. Best-effort. */
   stopBot(botId: string): Promise<void>;
 }
@@ -84,12 +103,23 @@ export async function runAgentOrphanSweep(
     }
   }
 
-  // Pass 2 — re-ensure running agents whose actor is dead in this process.
+  // Pass 2 — re-ensure running agents whose actor is dead in this process. The
+  // re-ensure is lease-aware (001 S4): it reconstructs here only if THIS worker
+  // wins the agent lease; if another worker already owns it, the ensure is a
+  // `remote` no-op success and no duplicate actor is created.
   for (const run of runs) {
     if (ports.isActorAlive(run.actorId)) continue;
     try {
-      await ports.reEnsureAgent(run);
-      logger.info({ ownerId: run.ownerId, actorId: run.actorId }, 'orphan sweep: re-ensured dead running agent actor');
+      const result = await ports.reEnsureAgent(run);
+      if (result.owner === 'local') {
+        logger.info({ ownerId: run.ownerId, actorId: run.actorId }, 'orphan sweep: re-ensured dead running agent actor locally');
+      } else {
+        // 001 S4 no-op success: another replica owns the lease + runs the actor.
+        logger.info(
+          { ownerId: run.ownerId, actorId: run.actorId, ownerWorkerId: result.workerId },
+          'orphan sweep: dead running agent now owned by another worker — skipping local re-ensure',
+        );
+      }
     } catch (err) {
       // Best-effort: log + continue; the next sweep retries this agent.
       logger.warn({ err, ownerId: run.ownerId, actorId: run.actorId }, 'orphan sweep: failed to re-ensure agent actor; will retry next sweep');

@@ -88,7 +88,7 @@ agent, and decisions landing on either copy.
   - "refuses a forwarded decision after losing the lease"
   - "stops a remotely owned agent actor on the stop signal"
 
-### S4. Rehydrate + sweep respect the lease — PENDING
+### S4. Rehydrate + sweep respect the lease — DONE
 - E1 boot rehydrate and orphan sweep call the lease-aware ensure; `remote` is a no-op
   success.
 - Test: "two runtimes rehydrating the same agent start exactly one actor".
@@ -218,6 +218,40 @@ ticked.
   depends on it to unblock the in-flight BLPOP), so `stop()` calls it directly with a
   best-effort `.catch()` rather than through a structural cast.
 
+### S4 implementation notes (how the plan text was realised)
+- **The `remote` no-op success already held after S2** — the lease acquire inside
+  `buildAgentDirectActorEnsure` is the sole single-actor guarantee, and both callers
+  (`rehydrateAgentActors` and `agentActorLifecycleOps.ensureFromRun`) already awaited and
+  discarded the result. S4 makes that contract LEGIBLE and OBSERVABLE without changing the
+  single-actor behavior:
+  - Doc comments on `rehydrateAgentActors`, `ensureFromRun`, and the orphan sweep's
+    `reEnsureAgent` port + pass-2 loop state that a `remote` ensure result is a deliberate
+    no-op success (the owning worker runs the actor; a worker that lost the acquire race
+    must not construct a duplicate).
+  - **Minor, genuinely-S4 observability change (threaded result).** `ensureFromRun` now
+    returns `AgentDirectActorResult` (was `Promise<void>`), and `rehydrateAgentActors`'
+    `ensureAgent` port is now typed to return it too. Rehydrate counts only `local`
+    constructions in its returned total and logs `remote` outcomes as skips
+    (`constructedLocally` / `skippedRemote`). This surfaces "constructed here vs owned
+    elsewhere" for boot observability. No single-actor behavior changed — the lease
+    acquire was and remains the guarantee.
+  - **bin.ts:** the rehydrate `ensureAgent` wrapper passes the result through unchanged;
+    the orphan sweep's `reEnsureAgent` wrapper explicitly `await`s + discards the result
+    (its port stays `Promise<void>` — the sweep only needs the ensure to have run).
+- **Headline test:** `agent-actor-rehydrate-lease.test.ts` wires the REAL S2 ensure + REAL
+  rehydrate over two fake runtimes (two "containers") sharing ONE in-memory lease holder
+  `Map` (mirrors `makeFakeLease` from `agent-direct-actor-ensure.test.ts`). Case
+  "two runtimes rehydrating the same agent start exactly one actor" runs both rehydrates
+  concurrently and asserts exactly one construct across both registries, one alive actor
+  (XOR), and the lease held by exactly the constructing worker. A second case covers the
+  sequential late-boot ordering (A owns → B no-ops `remote`). Also added a rehydrate unit
+  case: a `remote` result counts as a no-op success (0 local, no error log, info skip log).
+- **Honored S1 rule:** the test only ever touches `agent:{agentId}` ids on the shared
+  lease; it never `releaseAll`/`shutdown`s it.
+- **Verification:** `pnpm lint` (repo-wide tsc) clean; `@traderton/boundary` `tsc --build`
+  clean; full boundary vitest suite 196 passed / 32 skipped (integration), including the 2
+  new lease tests. Not git-committed.
+
 ## Outstanding Issues
 
 Non-critical review findings carried forward (grouped by step). None are blocking.
@@ -257,3 +291,15 @@ Non-critical review findings carried forward (grouped by step). None are blockin
   so the stop path is dormant until a publisher exists.
 - [LOW] `getByActorId` has no integration-test coverage yet (its repo integration test is
   in the always-skipped suite). Worth a case when S5's real-Redis/Postgres proof lands.
+
+### S4 — Rehydrate + sweep respect the lease
+- [MEDIUM, ADDRESSED] Sweep pass-2 previously logged "re-ensured … actor" unconditionally
+  even on a non-owner replica. Threaded `AgentDirectActorResult` through the sweep's
+  `reEnsureAgent` port so it logs local-vs-remote honestly (remote = no-op success);
+  added a test asserting the remote-skip log. Rehydrate/sweep observability now symmetric.
+- [MEDIUM] The concurrent `Promise.all` rehydrate test does not exercise TRUE interleaving
+  (the fake `acquire` is synchronous, so the SET-NX race resolves by call order). It still
+  faithfully models Redis SET-NX atomicity and the XOR/single-construct invariants. True
+  cross-replica interleaving over real Redis is proven by S5 (next). Left as-is.
+- [LOW] Test-local `injectionFor` duplicates the production venueType narrowing (mirrors
+  `ensureFromRun`'s `injectionFor`); a future narrowing-rule change must be mirrored.

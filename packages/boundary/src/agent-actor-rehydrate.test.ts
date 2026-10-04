@@ -15,7 +15,7 @@ const run = (actorId: string): RehydrateAgentRun => ({
 
 describe('rehydrateAgentActors', () => {
   it('ensures every running agent actor on boot', async () => {
-    const ensureAgent = vi.fn(async () => undefined);
+    const ensureAgent = vi.fn(async () => ({ owner: 'local' as const }));
     const ensured = await rehydrateAgentActors({
       listRunning: async () => [run('a1'), run('a2')],
       ensureAgent,
@@ -33,7 +33,7 @@ describe('rehydrateAgentActors', () => {
     const ensureAgent = vi
       .fn()
       .mockRejectedValueOnce(new Error('missing credential'))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ owner: 'local' as const });
 
     const ensured = await rehydrateAgentActors({
       listRunning: async () => [run('bad'), run('good')],
@@ -47,9 +47,27 @@ describe('rehydrateAgentActors', () => {
   });
 
   it('ensures nothing when there are no running rows', async () => {
-    const ensureAgent = vi.fn(async () => undefined);
+    const ensureAgent = vi.fn(async () => ({ owner: 'local' as const }));
     const ensured = await rehydrateAgentActors({ listRunning: async () => [], ensureAgent, logger: buildLogger() });
     expect(ensureAgent).not.toHaveBeenCalled();
     expect(ensured).toBe(0);
+  });
+
+  it('counts a remotely-owned agent as a no-op success, not a local construction', async () => {
+    const logger = buildLogger();
+    // The agent's lease is held by another worker: the ensure reports `remote`
+    // and constructs nothing here. 001 S4: this is a success, not a failure.
+    const ensureAgent = vi.fn(async () => ({ owner: 'remote' as const, workerId: 'worker-remote1' }));
+
+    const ensured = await rehydrateAgentActors({
+      listRunning: async () => [run('owned-elsewhere')],
+      ensureAgent,
+      logger,
+    });
+
+    expect(ensureAgent).toHaveBeenCalledTimes(1);
+    expect(ensured).toBe(0); // nothing constructed locally
+    expect(logger.error).not.toHaveBeenCalled(); // remote is NOT an error
+    expect(logger.info).toHaveBeenCalled(); // the skip was logged for observability
   });
 });

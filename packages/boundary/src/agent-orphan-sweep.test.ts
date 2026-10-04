@@ -29,7 +29,7 @@ function makePorts(overrides: Partial<AgentOrphanSweepPorts> = {}): {
   reEnsureAgent: ReturnType<typeof vi.fn>;
 } {
   const stopBot = vi.fn(async () => undefined);
-  const reEnsureAgent = vi.fn(async () => undefined);
+  const reEnsureAgent = vi.fn(async () => ({ owner: 'local' as const }));
   const ports: AgentOrphanSweepPorts = {
     listRunningAgentRuns: async () => [],
     listRunningAgentBots: async () => [],
@@ -72,10 +72,28 @@ describe('runAgentOrphanSweep', () => {
     expect(reEnsureAgent).toHaveBeenCalledWith(runRow('dead'));
   });
 
+  it('logs a remote re-ensure as a no-op success (owned by another worker)', async () => {
+    const logger = buildLogger();
+    const { ports } = makePorts({
+      listRunningAgentRuns: async () => [runRow('dead')],
+      listRunningAgentBots: async () => [],
+      isActorAlive: () => false,
+      // 001 S4: another replica owns the lease and runs the actor.
+      reEnsureAgent: vi.fn(async () => ({ owner: 'remote' as const, workerId: 'worker-other' })),
+    });
+
+    await runAgentOrphanSweep(ports, logger);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ actorId: 'dead', ownerWorkerId: 'worker-other' }),
+      'orphan sweep: dead running agent now owned by another worker — skipping local re-ensure',
+    );
+  });
+
   it('is best-effort: a failing stopBot does not block re-ensuring dead agents', async () => {
     const logger = buildLogger();
     const stopBot = vi.fn(async () => { throw new Error('stop failed'); });
-    const reEnsureAgent = vi.fn(async () => undefined);
+    const reEnsureAgent = vi.fn(async () => ({ owner: 'local' as const }));
     const ports: AgentOrphanSweepPorts = {
       listRunningAgentRuns: async () => [runRow('dead')],
       listRunningAgentBots: async () => [{ id: 'orphan-bot', creatorId: 'gone' }],

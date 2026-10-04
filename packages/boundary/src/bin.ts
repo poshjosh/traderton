@@ -188,6 +188,10 @@ async function main(): Promise<void> {
       listRunningAgentRuns: () => agentActorRunRepo.listRunning(),
       listRunningAgentBots: () => botRepo.listRunningAgentBots(),
       isActorAlive: (actorId) => agentActorLifecycleOps.isActorAlive(actorId),
+      // 001 S4: return the ownership outcome so the sweep logs local-vs-remote
+      // honestly. A `remote` outcome is a no-op success (the actor runs on another
+      // replica); the lease acquire inside the ensure is what guarantees exactly
+      // one live actor across replicas.
       reEnsureAgent: (run) => agentActorLifecycleOps.ensureFromRun(run),
       stopBot: async (botId) => {
         await botRepo.markBotStopped(botId);

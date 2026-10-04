@@ -9,7 +9,11 @@
 
 import type { AgentActorRunRepository } from '@traderton/db';
 import type { TradingRuntime } from '@traderton/worker';
-import type { AgentDirectActorEnsure, AgentDirectActorInjection } from './agent-direct-actor-ensure.js';
+import type {
+  AgentDirectActorEnsure,
+  AgentDirectActorInjection,
+  AgentDirectActorResult,
+} from './agent-direct-actor-ensure.js';
 
 /** Minimal logger surface (matches `createLogger` output used in the boundary). */
 interface OpsLogger {
@@ -63,8 +67,16 @@ function narrowVenueType(venueType: string, logger: OpsLogger, context: { ownerI
 export interface AgentActorLifecycleOps {
   /** Upsert `desired_state='running'` with the given resolved coordinates. */
   recordRunning(coords: StoredRunCoords): Promise<void>;
-  /** Re-ensure an agent actor from stored coordinates (rehydrate + sweep). */
-  ensureFromRun(coords: StoredRunCoords): Promise<void>;
+  /**
+   * Re-ensure an agent actor from stored coordinates (rehydrate + sweep). Returns
+   * the ensure's ownership outcome. 001 S4: a `remote` result is a DELIBERATE
+   * no-op success — another worker holds the `agent:{agentId}` lease and runs the
+   * live actor, so this worker (having lost the acquire race) constructs nothing.
+   * The lease acquire inside the ensure is the sole single-actor-per-agent
+   * guarantee; callers (rehydrate + orphan sweep) must treat `remote` as success,
+   * never as a reason to construct a duplicate.
+   */
+  ensureFromRun(coords: StoredRunCoords): Promise<AgentDirectActorResult>;
   /** Is the agent's actor alive (registered + running) in this process? */
   isActorAlive(actorId: string): boolean;
   /** Stop + deregister the agent's actor (best-effort) and evict the ensure cache. */
@@ -106,7 +118,11 @@ export function buildAgentActorLifecycleOps(deps: AgentActorLifecycleOpsDeps): A
   };
 
   const ensureFromRun: AgentActorLifecycleOps['ensureFromRun'] = async (coords) => {
-    await deps.ensure(injectionFor(coords));
+    // 001 S4: return the ownership outcome unchanged. A `remote` result means the
+    // ensure's lease acquire found another worker owns this agent, so nothing was
+    // constructed here — a no-op success the rehydrate + orphan sweep callers rely
+    // on to avoid duplicate actors across replicas.
+    return deps.ensure(injectionFor(coords));
   };
 
   const isActorAlive: AgentActorLifecycleOps['isActorAlive'] = (actorId) =>
