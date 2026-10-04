@@ -301,6 +301,15 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
   // persist/limit primitives were deleted Phase 2 and are item E's seam).
   const botRepo = new BotRepository(db);
 
+  // Wave E / E3-T: the consumer-notification outbox sink, constructed ONCE per
+  // process (over the shared `db`). Threaded into every agent actor's deps AND
+  // read by the per-bot ActorFactory + the runtime-level onStartFailed callback,
+  // so bot and agent status/event callbacks write to the same outbox. Declared
+  // here (before the ActorFactory + runtimeConfig closures that capture it) so a
+  // single instance is shared process-wide. Best-effort by contract — a write
+  // failure never throws into an actor.
+  const consumerNotifier = createConsumerNotifier(new ConsumerNotificationRepository(db), logger);
+
   const idGen = createIdGen();
 
   // ── The ONE ExecutionActor registry (decision (b), Phase 9b item C) ──
@@ -461,6 +470,32 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
     if (!venueAccountId) {
       throw new Error(`Bot ${botId} has no injected venueAccountId — refusing to start`);
     }
+
+    // E3-T T4: creator routing for the consumer-notification outbox. These are
+    // ADDITIVE config reads (same `rawConfig[x] as string | undefined` idiom used
+    // for venueAccountId): the loader + the drive-target start-path stamp
+    // creatorType/creatorId/ownerId alongside venueAccountId (E2 step 2 + F2). A
+    // bot created by an agent routes its events to that agent (notifyAgentId); a
+    // user-created bot has agentId null (only the owner publish applies downstream).
+    const creatorType = rawConfig['creatorType'] as string | undefined;
+    const creatorId = rawConfig['creatorId'] as string | undefined;
+    const ownerId = rawConfig['ownerId'] as string | undefined;
+    const notifyAgentId = creatorType === 'agent' ? (creatorId ?? null) : null;
+
+    // managedBots (bot_status payload) is the creator's bots at emit time, AGENT-
+    // created only (plan: botRepo.getBotsByCreator('agent', creatorId)). User bots
+    // get []. Best-effort: a read failure must not break the (also best-effort)
+    // status write, so it logs and falls back to an empty list.
+    const loadManagedBots = async (): Promise<Array<{ id: string; status: string }>> => {
+      if (creatorType !== 'agent' || !creatorId) return [];
+      try {
+        const bots = await botRepo.getBotsByCreator('agent', creatorId);
+        return bots.map((b) => ({ id: b.id, status: b.status }));
+      } catch (err) {
+        logger.error({ err, botId, creatorId }, 'Failed to load managed bots for bot_status notification');
+        return [];
+      }
+    };
 
     let testnet = false;
     let resolvedCredentialId: string | undefined;
@@ -755,6 +790,25 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
         } catch (statusErr) {
           logger.error({ err: statusErr, botId: instanceId }, 'Failed to mark bot crashed');
         }
+        // E3-T T4: emit a bot_status 'crashed' notification (vocabulary row
+        // reason 'runtime_crash'). Best-effort: markBotCrashed above is the
+        // primary effect; the notifier never throws. ownerId is stamped by the
+        // loader/start-path (bots.ownerId is notNull) so it is present at runtime,
+        // but skip the notify if it is somehow missing rather than route an empty
+        // owner. Uses the factory-closure creator vars; managedBots is fetched
+        // fresh at emit time.
+        if (ownerId) {
+          await consumerNotifier.botStatus({
+            ownerId,
+            agentId: notifyAgentId,
+            botId: instanceId,
+            status: 'crashed',
+            reason: 'runtime_crash',
+            managedBots: await loadManagedBots(),
+          });
+        } else {
+          logger.warn({ botId: instanceId }, 'Bot crashed with no ownerId on config — skipping bot_status notification');
+        }
         actorRegistry.delete(instanceId);
         await runtime.handleActorCrash(instanceId);
         logger.error({ botId: instanceId }, 'Bot crashed — removed from runtime + registry');
@@ -772,9 +826,46 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
         } catch (statusErr) {
           logger.error({ err: statusErr, botId: instanceId }, 'Failed to mark bot stopped on halt');
         }
+        // E3-T T4: emit a bot_status 'stopped' notification (vocabulary row
+        // reason 'bot_halted_error_limit' — a halt is the error-limit circuit
+        // breaker tripping). Best-effort, same contract as onCrashed above.
+        if (ownerId) {
+          await consumerNotifier.botStatus({
+            ownerId,
+            agentId: notifyAgentId,
+            botId: instanceId,
+            status: 'stopped',
+            reason: 'bot_halted_error_limit',
+            managedBots: await loadManagedBots(),
+          });
+        } else {
+          logger.warn({ botId: instanceId }, 'Bot halted with no ownerId on config — skipping bot_status notification');
+        }
         actorRegistry.delete(instanceId);
         await runtime.handleActorCrash(instanceId);
         logger.warn({ botId: instanceId }, 'Bot halted — removed from runtime + registry');
+      },
+      // E3-T T4: forward the actor's journal events (reconciliation.*, strategy.
+      // error/fatal, stream.disconnect, scanner.*) to the consumer outbox, routed
+      // by the config's creatorType/creatorId — an agent-created bot routes to
+      // that agent (notifyAgentId); a user bot has agentId null (owner publish
+      // only, downstream). Declared sync `=> void`; the notifier is best-effort
+      // (never rejects), so the write floats via `void` with no unhandled
+      // rejection. Mirrors the agent onJournalEvent (decision-intake.ts, T3). Skip
+      // when ownerId is absent (notifier arg requires it) rather than route an
+      // empty owner — the loader always stamps it, so this is a defensive guard.
+      onJournalEvent: (event) => {
+        if (!ownerId) {
+          logger.warn({ botId }, 'Bot journal event with no ownerId on config — skipping journal_event notification');
+          return;
+        }
+        void consumerNotifier.journalEvent({
+          ownerId,
+          agentId: notifyAgentId,
+          botId,
+          journalType: event.type,
+          detail: JSON.stringify(event.payload ?? {}),
+        });
       },
     };
 
@@ -802,6 +893,40 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
       } catch (statusErr) {
         logger.error({ err: statusErr, botId, startErr: error.message }, 'Failed to mark bot crashed after start failure');
       }
+      // E3-T T4: emit a bot_status 'crashed' notification (vocabulary row reason
+      // 'start_failed'). Unlike onHalted/onCrashed, this runtime-level callback is
+      // OUTSIDE the actor-factory closure, so it has no creator/owner vars in
+      // scope — load the row to resolve them. Best-effort throughout: markBotCrashed
+      // above is the primary effect; a missing row or a managedBots read failure
+      // only skips/empties the notify, never throws (this runs inside the runtime's
+      // own error handling).
+      try {
+        const bot = await botRepo.getBotById(botId);
+        if (!bot) {
+          logger.warn({ botId }, 'Start-failed bot row not found — skipping bot_status notification');
+          return;
+        }
+        const notifyAgentId = bot.creatorType === 'agent' ? (bot.creatorId ?? null) : null;
+        let managedBots: Array<{ id: string; status: string }> = [];
+        if (bot.creatorType === 'agent' && bot.creatorId) {
+          try {
+            const creatorBots = await botRepo.getBotsByCreator('agent', bot.creatorId);
+            managedBots = creatorBots.map((b) => ({ id: b.id, status: b.status }));
+          } catch (managedErr) {
+            logger.error({ err: managedErr, botId, creatorId: bot.creatorId }, 'Failed to load managed bots on start failure');
+          }
+        }
+        await consumerNotifier.botStatus({
+          ownerId: bot.ownerId,
+          agentId: notifyAgentId,
+          botId,
+          status: 'crashed',
+          reason: 'start_failed',
+          managedBots,
+        });
+      } catch (notifyErr) {
+        logger.error({ err: notifyErr, botId }, 'Failed to emit bot_status notification on start failure');
+      }
     },
     // DB NO-OP by design (resume ruling, overview 000). onStopped fires for BOTH
     // graceful shutdown/restart AND explicit stops. Writing 'stopped' here would
@@ -824,12 +949,6 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
   const deregisterActor = (actorId: string): void => {
     actorRegistry.delete(actorId);
   };
-
-  // Wave E / E3-T: the consumer-notification outbox sink, constructed ONCE per
-  // process (over the shared `db`) and threaded into every agent actor's deps so
-  // the status/event callbacks (scan / wake / journal / crash) write to the same
-  // outbox. Best-effort by contract — a write failure never throws into an actor.
-  const consumerNotifier = createConsumerNotifier(new ConsumerNotificationRepository(db), logger);
 
   // The item-B singletons the agent-direct actor shares with bots (013 §6 / 019
   // §6). Assembled once; threaded into each agent actor's deps so B and C

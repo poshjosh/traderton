@@ -1,6 +1,6 @@
 # 002 — E3: Traderton → consumer event channel
 
-**Status:** E3-T PENDING (T1 DONE, T2 DONE, T3 DONE, T4 PENDING, T5 PENDING);
+**Status:** E3-T PENDING (T1 DONE, T2 DONE, T3 DONE, T4 DONE, T5 PENDING);
 E3-H GATED (herobids, awaiting human go).
 **Depends on:** E2 step 2 (loader stamps `creatorType`/`creatorId`
 on bot configs). **Repos:** traderton (E3-T), then herobids (E3-H, gated on human go).
@@ -185,3 +185,12 @@ channel" → settled (outbox table, polled; push remains 010 B10). 005 updated. 
   payload shapes. No action for T3.
 - NOTE: pre-existing `packages/domain/src/config/presets.test.ts` failures (premium.yaml
   fixture) are unrelated to this change — confirmed they also fail on the base branch.
+
+### [T4] bot actor wiring
+- LOW: bot `onJournalEvent` forwards `detail: JSON.stringify(event.payload ?? {})`
+  synchronously; a circular/BigInt payload would throw inside the sync callback (escaping
+  the best-effort notifier catch). Not realistic for the forwarded journal shapes. Same as
+  the T3 LOW. No action.
+- NOTE: the E2 step-3 callback tests now also exercise the notifier path (fake DB has no
+  `.insert`), producing harmless best-effort "append failed" log lines; the E2 assertions
+  (status writes, ordering, resume-ruling no-op) remain intact and green.

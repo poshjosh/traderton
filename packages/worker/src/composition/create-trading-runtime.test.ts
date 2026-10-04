@@ -99,7 +99,8 @@ vi.mock('../trading-actor.js', async (importOriginal) => {
 
 import { createTradingRuntime } from './create-trading-runtime.js';
 import { TradingActor } from '../trading-actor.js';
-import { BotRepository } from '@traderton/db';
+import { BotRepository, ConsumerNotificationRepository } from '@traderton/db';
+import type { InsertConsumerNotification } from '@traderton/db';
 import { createSwapTokenSafetyAdapter } from '../token-safety-adapter.js';
 import { VenueAdapterFactory } from '../venue-adapter-factory.js';
 import type { InstanceActor } from '../runtime.js';
@@ -189,6 +190,18 @@ function paperBotConfig() {
     venueAccountId: 'va-test-1',
     ownerId: 'owner-test-1',
   };
+}
+
+/** An AGENT-created paper bot config (E2 step 2 stamps creatorType/creatorId
+ *  alongside venueAccountId/ownerId). E3-T routes its events to the creator agent. */
+function agentBotConfig() {
+  return { ...paperBotConfig(), creatorType: 'agent' as const, creatorId: 'agent-99' };
+}
+
+/** A USER-created paper bot config. agentId routing resolves to null → only the
+ *  owner publish applies downstream, and managedBots is empty. */
+function userBotConfig() {
+  return { ...paperBotConfig(), creatorType: 'user' as const, creatorId: 'owner-test-1' };
 }
 
 /** Reach the internal ActorFactory the WorkerRuntime holds, to prove a paper bot
@@ -493,5 +506,179 @@ describe('bot-failure callbacks write status (Wave E E2 Step 3)', () => {
     // stays `running` so the next process reclaims it.
     expect(markStopped).not.toHaveBeenCalled();
     expect(markCrashed).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Wave E E3-T T4 — bot actor events route to the consumer-notification outbox.
+ *
+ * The composition root constructs the notifier internally over a real
+ * `ConsumerNotificationRepository` (its only sink method is `append`), so we spy
+ * `ConsumerNotificationRepository.prototype.append` to observe the routed rows —
+ * same prototype-spy convention the E2 status tests use for `BotRepository`. The
+ * bot `onJournalEvent` / `onHalted` / `onStartFailed` are driven off the captured
+ * TradingActorDeps (and the runtime onStartFailed hook) exactly as E2 does.
+ */
+describe('bot actor events route to the consumer outbox (Wave E E3-T T4)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    capturedActorDeps = undefined;
+  });
+
+  it('routes a bot strategy error to its creator agent', async () => {
+    const appended: InsertConsumerNotification[] = [];
+    vi.spyOn(ConsumerNotificationRepository.prototype, 'append').mockImplementation(
+      async (entry: InsertConsumerNotification) => {
+        appended.push(entry);
+      },
+    );
+
+    const trading = createTradingRuntime({
+      config: paperConfig(),
+      redis: fakeRedis(),
+      instanceLoader: async () => [],
+    });
+
+    await actorFactoryOf(trading.runtime)('bot-journal', agentBotConfig());
+    expect(capturedActorDeps?.onJournalEvent).toBeDefined();
+    capturedActorDeps!.onJournalEvent!({ type: 'strategy.error', payload: { message: 'boom' } });
+
+    // onJournalEvent floats the best-effort write — let the microtask settle.
+    await Promise.resolve();
+
+    const journal = appended.find((e) => e.type === 'journal_event');
+    expect(journal).toBeDefined();
+    // Routed to the CREATOR agent (creatorType==='agent'), scoped to the bot.
+    expect(journal!.agentId).toBe('agent-99');
+    expect(journal!.botId).toBe('bot-journal');
+    expect(journal!.ownerId).toBe('owner-test-1');
+    expect(journal!.payload).toMatchObject({
+      journalType: 'strategy.error',
+      detail: JSON.stringify({ message: 'boom' }),
+    });
+  });
+
+  it('notifies bot_status stopped with the creator\'s bots when a bot halts', async () => {
+    const appended: InsertConsumerNotification[] = [];
+    vi.spyOn(ConsumerNotificationRepository.prototype, 'append').mockImplementation(
+      async (entry: InsertConsumerNotification) => {
+        appended.push(entry);
+      },
+    );
+    vi.spyOn(BotRepository.prototype, 'markBotStopped').mockResolvedValue(undefined);
+    // managedBots source: the creator agent's bots at emit time.
+    vi.spyOn(BotRepository.prototype, 'getBotsByCreator').mockResolvedValue([
+      { id: 'bot-journal', status: 'crashed' },
+      { id: 'bot-sibling', status: 'running' },
+    ] as never);
+
+    const trading = createTradingRuntime({
+      config: paperConfig(),
+      redis: fakeRedis(),
+      instanceLoader: async () => [],
+    });
+    vi.spyOn(trading.runtime, 'handleActorCrash').mockResolvedValue(undefined);
+
+    await actorFactoryOf(trading.runtime)('bot-journal', agentBotConfig());
+    expect(capturedActorDeps?.onHalted).toBeDefined();
+    await capturedActorDeps!.onHalted!('bot-journal');
+
+    const status = appended.find((e) => e.type === 'bot_status');
+    expect(status).toBeDefined();
+    expect(status!.agentId).toBe('agent-99');
+    expect(status!.botId).toBe('bot-journal');
+    expect(status!.payload).toMatchObject({
+      status: 'stopped',
+      reason: 'bot_halted_error_limit',
+      managedBots: [
+        { id: 'bot-journal', status: 'crashed' },
+        { id: 'bot-sibling', status: 'running' },
+      ],
+    });
+  });
+
+  it('notifies only the owner for user-created bots', async () => {
+    const appended: InsertConsumerNotification[] = [];
+    vi.spyOn(ConsumerNotificationRepository.prototype, 'append').mockImplementation(
+      async (entry: InsertConsumerNotification) => {
+        appended.push(entry);
+      },
+    );
+    vi.spyOn(BotRepository.prototype, 'markBotStopped').mockResolvedValue(undefined);
+    const getBotsByCreator = vi
+      .spyOn(BotRepository.prototype, 'getBotsByCreator')
+      .mockResolvedValue([] as never);
+
+    const trading = createTradingRuntime({
+      config: paperConfig(),
+      redis: fakeRedis(),
+      instanceLoader: async () => [],
+    });
+    vi.spyOn(trading.runtime, 'handleActorCrash').mockResolvedValue(undefined);
+
+    await actorFactoryOf(trading.runtime)('bot-user', userBotConfig());
+
+    // A journal event: user bot → agentId null (only the owner publish applies).
+    expect(capturedActorDeps?.onJournalEvent).toBeDefined();
+    capturedActorDeps!.onJournalEvent!({ type: 'stream.disconnect' });
+    await Promise.resolve();
+
+    // A status event: user bot → agentId null AND managedBots empty (agent-only).
+    await capturedActorDeps!.onHalted!('bot-user');
+
+    const journal = appended.find((e) => e.type === 'journal_event');
+    expect(journal).toBeDefined();
+    expect(journal!.agentId).toBeNull();
+    expect(journal!.ownerId).toBe('owner-test-1');
+
+    const status = appended.find((e) => e.type === 'bot_status');
+    expect(status).toBeDefined();
+    expect(status!.agentId).toBeNull();
+    expect(status!.payload).toMatchObject({ status: 'stopped', managedBots: [] });
+    // managedBots is agent-created only — never fetched for a user bot.
+    expect(getBotsByCreator).not.toHaveBeenCalled();
+  });
+
+  it('notifies bot_status crashed on start failure, resolving routing from the row', async () => {
+    const appended: InsertConsumerNotification[] = [];
+    vi.spyOn(ConsumerNotificationRepository.prototype, 'append').mockImplementation(
+      async (entry: InsertConsumerNotification) => {
+        appended.push(entry);
+      },
+    );
+    vi.spyOn(BotRepository.prototype, 'markBotCrashed').mockResolvedValue(undefined);
+    // onStartFailed is runtime-level (no factory closure) → it loads the row to
+    // resolve creator/owner routing.
+    vi.spyOn(BotRepository.prototype, 'getBotById').mockResolvedValue({
+      id: 'bot-start-fail',
+      ownerId: 'owner-test-1',
+      creatorType: 'agent',
+      creatorId: 'agent-99',
+      status: 'crashed',
+    } as never);
+    vi.spyOn(BotRepository.prototype, 'getBotsByCreator').mockResolvedValue([
+      { id: 'bot-start-fail', status: 'crashed' },
+    ] as never);
+
+    const trading = createTradingRuntime({
+      config: paperConfig(),
+      redis: fakeRedis(),
+      instanceLoader: async () => [],
+    });
+
+    const onStartFailed = onStartFailedOf(trading.runtime);
+    expect(onStartFailed).toBeDefined();
+    await onStartFailed!('bot-start-fail', new Error('factory boom'));
+
+    const status = appended.find((e) => e.type === 'bot_status');
+    expect(status).toBeDefined();
+    expect(status!.agentId).toBe('agent-99');
+    expect(status!.botId).toBe('bot-start-fail');
+    expect(status!.payload).toMatchObject({
+      status: 'crashed',
+      reason: 'start_failed',
+      managedBots: [{ id: 'bot-start-fail', status: 'crashed' }],
+    });
   });
 });
