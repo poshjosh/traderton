@@ -188,6 +188,29 @@ notifications:
   pruneIntervalMs: 3600000     # how often the boundary prune loop runs (1h)
   pruneBatchSize: 5000         # expired rows deleted per prune batch
 
+# Wave E / E1 agent technical-scanner operator config (trading-owned; relocated
+# from herobids' dropped platform agentRuntime block). Deploy/restart, not runtime.
+# Scanner capacity (per-worker RPM / concurrency / candidate caps) lives under
+# marketData.<venue>.scanner, not here.
+agentScanner:
+  scannerSignalDedup:            # skip LLM wakes when signal fingerprints are unchanged (hybrid mode)
+    enabled: true                # master switch for signal dedup
+    topN: 5                      # number of top signals hashed into the fingerprint (1–50)
+    confidenceBucketSize: 0.05   # confidence rounding bucket so tiny score drift doesn't re-wake (0.01–1)
+    ttlSeconds: 600              # fingerprint retention before a repeat signal re-wakes (>=60)
+  candleFetchRetry:              # in-cycle bounded retry for transient candle fetch failures
+    enabled: true                # master switch for in-cycle retry
+    maxRetries: 3                # retries per symbol within a scan (0–10)
+    baseDelayMs: 250             # initial backoff delay (50–5000ms)
+    maxDelayMs: 2000             # backoff ceiling (100–10000ms)
+  candleFetchBreaker:            # cross-scan circuit breaker for symbols failing every retry
+    enabled: true                # master switch for the breaker
+    failScansBeforeOpen: 3       # consecutive failing scans before the breaker opens (1–20)
+    baseSkipScans: 2             # scans skipped on first open (1–50)
+    maxSkipScans: 8              # skip-scan ceiling as backoff grows (1–100)
+  swap:                          # DEX scanning rollout flags
+    enabled: false               # master kill-switch — false = swap-bound agents return no candidates
+
 marketData:
   dexscreener:
     baseUrl: "https://api.dexscreener.com"

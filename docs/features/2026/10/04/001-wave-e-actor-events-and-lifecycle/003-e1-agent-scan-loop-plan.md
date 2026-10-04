@@ -1,6 +1,6 @@
 # 003 — E1: agent technical scan loop + agent-actor lifecycle
 
-**Status:** E1-T PENDING (T1 DONE, T2 PENDING, T3 PENDING, T4 PENDING, T5 PENDING);
+**Status:** E1-T PENDING (T1 DONE, T2 DONE, T3 PENDING, T4 PENDING, T5 PENDING);
 E1-H GATED (herobids, awaiting human go).
 **Depends on:** E3-T (scan results reach agents only through
 the E3 `consumer_notifications` channel), and E2 (loader + status callbacks). **Repos:** traderton (E1-T), then
@@ -228,3 +228,10 @@ updated.
 - NOTE: parity fixture `__fixtures__/herobids-preset-resolution.json` was independently
   verified by the reviewer to be genuine herobids output (not circular); preset YAMLs +
   presets.ts are byte-identical across repos, so no drift.
+
+### [T2] agentScanner operator config
+- LOW: the out-of-bounds schema test exercises one bound (`scannerSignalDedup.topN:51`).
+  A few more boundary cases (maxDelayMs>10000, maxSkipScans>100, ttlSeconds<60) would
+  broaden regression coverage. Optional.
+- NOTE: herobids keeps swap under `scanner.swap`; Traderton flattens it to
+  `agentScanner.swap` per the T2 plan text (defaults/bounds byte-identical, parity holds).

@@ -9,6 +9,7 @@ import {
   RiskConfigSchema,
   BotRiskSchema,
   ExecutionDefaultsSchema,
+  AppConfigSchema,
 } from './schema.js';
 
 describe('BotConfigSchema', () => {
@@ -611,5 +612,89 @@ describe('ExecutionDefaultsSchema — sliageBps null tolerance', () => {
 
   it('rejects a negative slippageBps', () => {
     expect(() => ExecutionDefaultsSchema.parse({ mode: 'paper', slippageBps: -1 })).toThrow();
+  });
+});
+
+// ── Wave E / E1 agentScanner operator config ─────────────────────────────────
+
+describe('AppConfigSchema — agentScanner', () => {
+  // Minimal valid AppConfig: only fields without a Zod default are supplied.
+  const minimalAppConfig = {
+    app: { port: 3000, logLevel: 'info' as const },
+    database: { url: 'postgres://localhost/test' },
+    redis: { url: 'redis://localhost:6379' },
+    execution: { defaultSlippageBps: 50 },
+    risk: { globalMaxDrawdownPct: 20 },
+  };
+
+  it('defaults the whole agentScanner block when absent', () => {
+    const result = AppConfigSchema.safeParse(minimalAppConfig);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const scanner = result.data.agentScanner;
+      expect(scanner.scannerSignalDedup).toEqual({
+        enabled: true,
+        topN: 5,
+        confidenceBucketSize: 0.05,
+        ttlSeconds: 600,
+      });
+      expect(scanner.candleFetchRetry).toEqual({
+        enabled: true,
+        maxRetries: 3,
+        baseDelayMs: 250,
+        maxDelayMs: 2000,
+      });
+      expect(scanner.candleFetchBreaker).toEqual({
+        enabled: true,
+        failScansBeforeOpen: 3,
+        baseSkipScans: 2,
+        maxSkipScans: 8,
+      });
+      expect(scanner.swap).toEqual({ enabled: false });
+    }
+  });
+
+  it('accepts operator overrides for every agentScanner subtree', () => {
+    const result = AppConfigSchema.safeParse({
+      ...minimalAppConfig,
+      agentScanner: {
+        scannerSignalDedup: { enabled: false, topN: 10, confidenceBucketSize: 0.1, ttlSeconds: 120 },
+        candleFetchRetry: { enabled: false, maxRetries: 1, baseDelayMs: 100, maxDelayMs: 500 },
+        candleFetchBreaker: { enabled: false, failScansBeforeOpen: 5, baseSkipScans: 1, maxSkipScans: 20 },
+        swap: { enabled: true, venues: { jupiter: true, '1inch': false } },
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const scanner = result.data.agentScanner;
+      expect(scanner.scannerSignalDedup.topN).toBe(10);
+      expect(scanner.candleFetchRetry.maxRetries).toBe(1);
+      expect(scanner.candleFetchBreaker.maxSkipScans).toBe(20);
+      expect(scanner.swap.enabled).toBe(true);
+      expect(scanner.swap.venues).toEqual({ jupiter: true, '1inch': false });
+    }
+  });
+
+  it('fills nested defaults when a subtree is partially specified', () => {
+    const result = AppConfigSchema.safeParse({
+      ...minimalAppConfig,
+      agentScanner: { scannerSignalDedup: { topN: 7 } },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const dedup = result.data.agentScanner.scannerSignalDedup;
+      expect(dedup.topN).toBe(7);
+      expect(dedup.enabled).toBe(true);
+      expect(dedup.confidenceBucketSize).toBe(0.05);
+      expect(dedup.ttlSeconds).toBe(600);
+    }
+  });
+
+  it('rejects out-of-bounds agentScanner values', () => {
+    const result = AppConfigSchema.safeParse({
+      ...minimalAppConfig,
+      agentScanner: { scannerSignalDedup: { topN: 51 } },
+    });
+    expect(result.success).toBe(false);
   });
 });

@@ -446,6 +446,51 @@ liveRollout:
     });
   });
 
+  describe('agentScanner config', () => {
+    it('applies Zod defaults when agentScanner is omitted', () => {
+      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
+
+      const config = loadConfig(tmpDir);
+
+      expect(config.agentScanner.scannerSignalDedup.enabled).toBe(true);
+      expect(config.agentScanner.scannerSignalDedup.topN).toBe(5);
+      expect(config.agentScanner.scannerSignalDedup.confidenceBucketSize).toBe(0.05);
+      expect(config.agentScanner.scannerSignalDedup.ttlSeconds).toBe(600);
+      expect(config.agentScanner.candleFetchRetry.maxRetries).toBe(3);
+      expect(config.agentScanner.candleFetchRetry.baseDelayMs).toBe(250);
+      expect(config.agentScanner.candleFetchRetry.maxDelayMs).toBe(2000);
+      expect(config.agentScanner.candleFetchBreaker.failScansBeforeOpen).toBe(3);
+      expect(config.agentScanner.candleFetchBreaker.baseSkipScans).toBe(2);
+      expect(config.agentScanner.candleFetchBreaker.maxSkipScans).toBe(8);
+      expect(config.agentScanner.swap.enabled).toBe(false);
+    });
+
+    it('loads explicit agentScanner config from YAML', () => {
+      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML + `
+agentScanner:
+  scannerSignalDedup:
+    enabled: false
+    topN: 8
+  candleFetchRetry:
+    maxRetries: 1
+  swap:
+    enabled: true
+    venues:
+      jupiter: true
+`);
+
+      const config = loadConfig(tmpDir);
+
+      expect(config.agentScanner.scannerSignalDedup.enabled).toBe(false);
+      expect(config.agentScanner.scannerSignalDedup.topN).toBe(8);
+      // sibling defaults preserved under a partial subtree
+      expect(config.agentScanner.scannerSignalDedup.ttlSeconds).toBe(600);
+      expect(config.agentScanner.candleFetchRetry.maxRetries).toBe(1);
+      expect(config.agentScanner.swap.enabled).toBe(true);
+      expect(config.agentScanner.swap.venues).toEqual({ jupiter: true });
+    });
+  });
+
   describe('1inch token safety config', () => {
     it('rejects unsupported 1inch chainId without tokenSafetyNetwork when token safety is enabled', () => {
       writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML + MINIMAL_MARKET_DATA_YAML + `
