@@ -74,8 +74,32 @@ vi.mock('../token-safety-adapter.js', async (importOriginal) => {
   return { ...actual, createSwapTokenSafetyAdapter: vi.fn(() => fakeAdapter) };
 });
 
+// Capture the TradingActorDeps the ActorFactory threads into each bot actor so
+// the Wave E E2 bot-failure callbacks (onCrashed / onHalted) can be exercised
+// directly. The spy SUBCLASSES the real TradingActor, so instances remain
+// `instanceof TradingActor` and every other test in this file is unaffected; it
+// records the deps object the composition root built and otherwise defers wholly
+// to the real constructor.
+let capturedActorDeps: import('../trading-actor.js').TradingActorDeps | undefined;
+vi.mock('../trading-actor.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../trading-actor.js')>();
+  class SpyTradingActor extends actual.TradingActor {
+    constructor(
+      botId: string,
+      strategyConfig: Record<string, unknown>,
+      deps: import('../trading-actor.js').TradingActorDeps,
+      scanIntervalMs?: number,
+    ) {
+      super(botId, strategyConfig, deps, scanIntervalMs);
+      capturedActorDeps = deps;
+    }
+  }
+  return { ...actual, TradingActor: SpyTradingActor };
+});
+
 import { createTradingRuntime } from './create-trading-runtime.js';
 import { TradingActor } from '../trading-actor.js';
+import { BotRepository } from '@traderton/db';
 import { createSwapTokenSafetyAdapter } from '../token-safety-adapter.js';
 import { VenueAdapterFactory } from '../venue-adapter-factory.js';
 import type { InstanceActor } from '../runtime.js';
@@ -170,6 +194,12 @@ function paperBotConfig() {
  *  config rehydrates into a TradingActor without driving a live tick. */
 function actorFactoryOf(runtime: unknown) {
   return (runtime as { actorFactory: (id: string, cfg: Record<string, unknown>) => Promise<InstanceActor> }).actorFactory;
+}
+
+/** Reach the runtime's onStartFailed hook (the WorkerRuntimeConfig callback the
+ *  composition root wired) to exercise the start-failure status write directly. */
+function onStartFailedOf(runtime: unknown) {
+  return (runtime as { onStartFailed?: (botId: string, error: Error) => Promise<void> }).onStartFailed;
 }
 
 /** A paper config VARIANT that INCLUDES marketData, so start() builds the
@@ -324,5 +354,143 @@ describe('swapTokenSafety wiring seam (CodeReviewer MEDIUM-1, C1)', () => {
     expect(createSwapTokenSafetyAdapter).not.toHaveBeenCalled();
 
     await trading.shutdown();
+  });
+});
+
+/**
+ * Wave E E2 Step 3 — bot-failure callbacks write status.
+ *
+ * These assert the composition root persists bot status truthfully:
+ *  - a start failure and an actor crash both mark the row `crashed`;
+ *  - a strategy-error halt marks the row `stopped` and releases the lease;
+ *  - a graceful runtime shutdown leaves running rows `running` (resume ruling).
+ *
+ * The DB is stubbed (createDatabase → fake), so the real BotRepository methods
+ * are spied at the prototype to observe the writes without touching Postgres.
+ * The onCrashed / onHalted callbacks are captured off the TradingActorDeps the
+ * ActorFactory threads into the bot actor (see capturedActorDeps spy above).
+ */
+describe('bot-failure callbacks write status (Wave E E2 Step 3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    capturedActorDeps = undefined;
+  });
+
+  it('marks a bot crashed when its start fails', async () => {
+    const markCrashed = vi
+      .spyOn(BotRepository.prototype, 'markBotCrashed')
+      .mockResolvedValue(undefined);
+
+    const trading = createTradingRuntime({
+      config: paperConfig(),
+      redis: fakeRedis(),
+      instanceLoader: async () => [],
+    });
+
+    const onStartFailed = onStartFailedOf(trading.runtime);
+    expect(onStartFailed).toBeDefined();
+    await onStartFailed!('bot-start-fail', new Error('factory boom'));
+
+    expect(markCrashed).toHaveBeenCalledWith('bot-start-fail');
+
+    await trading.shutdown();
+  });
+
+  it('does not throw when the crashed-status write fails on start failure', async () => {
+    vi.spyOn(BotRepository.prototype, 'markBotCrashed').mockRejectedValue(new Error('db down'));
+
+    const trading = createTradingRuntime({
+      config: paperConfig(),
+      redis: fakeRedis(),
+      instanceLoader: async () => [],
+    });
+
+    const onStartFailed = onStartFailedOf(trading.runtime);
+    expect(onStartFailed).toBeDefined();
+    // Best-effort: a failed status write must be swallowed (logged), never thrown.
+    await expect(onStartFailed!('bot-start-fail-2', new Error('boom'))).resolves.toBeUndefined();
+
+    await trading.shutdown();
+  });
+
+  it('marks a bot crashed before releasing its lease on crash', async () => {
+    const callOrder: string[] = [];
+    vi.spyOn(BotRepository.prototype, 'markBotCrashed').mockImplementation(async () => {
+      callOrder.push('markBotCrashed');
+    });
+
+    const trading = createTradingRuntime({
+      config: paperConfig(),
+      redis: fakeRedis(),
+      instanceLoader: async () => [],
+    });
+
+    // handleActorCrash is where the lease is released; spy it to observe ordering.
+    const handleActorCrash = vi
+      .spyOn(trading.runtime, 'handleActorCrash')
+      .mockImplementation(async () => {
+        callOrder.push('handleActorCrash');
+      });
+
+    await actorFactoryOf(trading.runtime)('bot-crash', paperBotConfig());
+    expect(capturedActorDeps?.onCrashed).toBeDefined();
+    await capturedActorDeps!.onCrashed!('bot-crash');
+
+    // The status write MUST precede the lease release, else the next reclaim
+    // sweep (loads WHERE status='running') could restart a crashing bot.
+    expect(callOrder).toEqual(['markBotCrashed', 'handleActorCrash']);
+    expect(handleActorCrash).toHaveBeenCalledWith('bot-crash');
+
+    await trading.shutdown();
+  });
+
+  it('marks a bot stopped and releases it when it halts on strategy errors', async () => {
+    const markStopped = vi
+      .spyOn(BotRepository.prototype, 'markBotStopped')
+      .mockResolvedValue(undefined);
+
+    const trading = createTradingRuntime({
+      config: paperConfig(),
+      redis: fakeRedis(),
+      instanceLoader: async () => [],
+    });
+
+    const handleActorCrash = vi
+      .spyOn(trading.runtime, 'handleActorCrash')
+      .mockResolvedValue(undefined);
+
+    await actorFactoryOf(trading.runtime)('bot-halt', paperBotConfig());
+    expect(capturedActorDeps?.onHalted).toBeDefined();
+    await capturedActorDeps!.onHalted!('bot-halt');
+
+    expect(markStopped).toHaveBeenCalledWith('bot-halt');
+    // Same runtime cleanup as a crash: drop from runtime.actors + release lease.
+    expect(handleActorCrash).toHaveBeenCalledWith('bot-halt');
+
+    await trading.shutdown();
+  });
+
+  it('leaves a bot running in the database when the runtime shuts down', async () => {
+    const markStopped = vi
+      .spyOn(BotRepository.prototype, 'markBotStopped')
+      .mockResolvedValue(undefined);
+    const markCrashed = vi
+      .spyOn(BotRepository.prototype, 'markBotCrashed')
+      .mockResolvedValue(undefined);
+
+    const trading = createTradingRuntime({
+      config: paperConfig(),
+      redis: fakeRedis(),
+      instanceLoader: async () => [],
+    });
+
+    await trading.start();
+    await trading.shutdown();
+
+    // Resume ruling: graceful shutdown must NOT write a terminal status. The row
+    // stays `running` so the next process reclaims it.
+    expect(markStopped).not.toHaveBeenCalled();
+    expect(markCrashed).not.toHaveBeenCalled();
   });
 });

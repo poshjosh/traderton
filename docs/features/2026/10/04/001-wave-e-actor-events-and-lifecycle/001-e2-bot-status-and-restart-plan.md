@@ -1,6 +1,6 @@
 # 001 — E2: bot status truth + restart survival (Traderton only)
 
-**Status:** PENDING (steps: 1 DONE, 2 DONE, 3 PENDING, 4 PENDING, 5 PENDING).
+**Status:** PENDING (steps: 1 DONE, 2 DONE, 3 DONE, 4 PENDING, 5 PENDING).
 **Depends on:** nothing (E0 done). **Repos:** traderton only.
 **Source behaviour:** `git -C ../herobids show 45271d28^:apps/worker/src/index.ts`:
 `WorkerRuntime` callbacks ~L1785–1880, bot actor `onCrashed`/`onHalted` ~L2160–2240,
@@ -117,3 +117,10 @@ cascade/sweep part is tracked in E1.
   the Step 5 integration round-trip is the real guard. Acceptable.
 - LOW: minor redundancy between `whereCalls` counter and the `select` spy in the loader
   test. Harmless.
+
+### [Step 3] bot failure callbacks write status
+- LOW: the shutdown test uses an empty instance loader, so it is a wiring assertion
+  (callbacks don't write terminal status) rather than a live-bot round-trip. The live
+  round-trip is Step 5's integration proof. Acceptable.
+- LOW: onCrashed/onHalted duplicate the `actorRegistry.delete` + `handleActorCrash`
+  sequence. Only two call sites; abstraction would be premature.

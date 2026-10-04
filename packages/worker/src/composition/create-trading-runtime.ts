@@ -741,11 +741,38 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
         : undefined,
       // onCrashed keeps trading lifecycle intact (013 §4.4). The herobids body
       // also published agent/status telemetry — that is item C2; here it reduces
-      // to the runtime crash handoff + registry deregistration.
+      // to persisting crashed status, the runtime crash handoff + registry
+      // deregistration. The actor has already stopped itself before this runs.
       onCrashed: async (instanceId: string) => {
+        // Mark crashed BEFORE handleActorCrash releases the lease: otherwise the
+        // released lease would let the next reclaim sweep (loads WHERE status
+        // ='running') restart a bot that is crashing. Best-effort — a failed
+        // write must not block the runtime cleanup, so log and continue.
+        try {
+          await botRepo.markBotCrashed(instanceId);
+        } catch (statusErr) {
+          logger.error({ err: statusErr, botId: instanceId }, 'Failed to mark bot crashed');
+        }
         actorRegistry.delete(instanceId);
         await runtime.handleActorCrash(instanceId);
         logger.error({ botId: instanceId }, 'Bot crashed — removed from runtime + registry');
+      },
+      // onHalted fires when the strategy error circuit breaker trips (the actor
+      // has already stopped itself). A halt is a terminal stop, so persist
+      // 'stopped' (resume ruling: only explicit stops and halts write stopped),
+      // then run the same runtime cleanup handleActorCrash does — drop from
+      // runtime.actors and release the lease — so the halted bot is not reclaimed.
+      // stop() is idempotent (guarded by its `running` flag), so the already-
+      // stopped actor is not harmed by this shared cleanup path.
+      onHalted: async (instanceId: string) => {
+        try {
+          await botRepo.markBotStopped(instanceId);
+        } catch (statusErr) {
+          logger.error({ err: statusErr, botId: instanceId }, 'Failed to mark bot stopped on halt');
+        }
+        actorRegistry.delete(instanceId);
+        await runtime.handleActorCrash(instanceId);
+        logger.warn({ botId: instanceId }, 'Bot halted — removed from runtime + registry');
       },
     };
 
@@ -757,14 +784,32 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
   };
 
   // ── WorkerRuntime (the BullMQ lifecycle-job consumer) ──
-  // M1 status callbacks are no-op stubs (their herobids bodies update the bots
-  // table + publish status → item C2). onCrashed lives on TradingActorDeps above.
+  // Status callbacks (Wave E E2). onCrashed/onHalted live on TradingActorDeps
+  // above; these three are the runtime-level lifecycle hooks.
   const runtimeConfig: WorkerRuntimeConfig = {
     redis,
     ...(ports.scanIntervalMs != null ? { scanIntervalMs: ports.scanIntervalMs } : {}),
     ...(ports.concurrency != null ? { concurrency: ports.concurrency } : {}),
-    onStartFailed: async () => {},
+    // A start failure (factory or actor.start threw) means the bot never ran.
+    // Mark it crashed so the 15s reclaim loop (loads WHERE status='running')
+    // stops retrying a bot that cannot start. Best-effort — never throw, since
+    // this runs inside the runtime's own error handling.
+    onStartFailed: async (botId: string, error: Error) => {
+      try {
+        await botRepo.markBotCrashed(botId);
+      } catch (statusErr) {
+        logger.error({ err: statusErr, botId, startErr: error.message }, 'Failed to mark bot crashed after start failure');
+      }
+    },
+    // DB NO-OP by design (resume ruling, overview 000). onStopped fires for BOTH
+    // graceful shutdown/restart AND explicit stops. Writing 'stopped' here would
+    // mark every running bot stopped on a graceful Traderton deploy, defeating
+    // resume. Explicit stops already write 'stopped' at their source (drive
+    // target stopBot, step 1; and stop_bot), so there is nothing to write here.
     onStopped: () => {},
+    // DB NO-OP by design. The drive target claims 'running' (markBotRunning)
+    // before enqueuing the start job, so the row is already correct by the time
+    // the actor finishes starting; a write here would be redundant.
     onStarted: () => {},
   };
 
