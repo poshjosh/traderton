@@ -178,6 +178,17 @@ place (000 hard-constraint block), so herobids must not bill it.
   lifecycle callbacks never authored (item C2)"). The assessment-ownership slice
   therefore follows 011 Wave E.
 
+## Bots resume after a graceful Traderton deploy (human ruling, 2026-10-04)
+
+In the source, `WorkerRuntime.shutdown()` → `stopInstance` → `onStopped` →
+`markBotStopped`, so a graceful deploy left every bot `stopped`; only a crashed
+worker's bots were reclaimed (lease expiry). Traderton is deployed on its own
+schedule, independently of the consumer, so that behaviour would silently stop
+users' bots on every release. **Ruling: running bots resume after a graceful
+shutdown.** Only explicit stops (`stop_bot`, agent cascade, orphan sweep) and
+halts change a row to `stopped`. Recorded as **Improved** (a deliberate
+behaviour change). Implemented in 011 E2.
+
 ## D1-coda: local trading-package removal and where consumer type contracts now live
 
 **Decision date:** 2026-09-17. **Gate result:** settled within the rules
