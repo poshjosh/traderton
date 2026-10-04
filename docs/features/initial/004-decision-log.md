@@ -178,6 +178,68 @@ place (000 hard-constraint block), so herobids must not bill it.
   lifecycle callbacks never authored (item C2)"). The assessment-ownership slice
   therefore follows 011 Wave E.
 
+## Preset assessment becomes data-only and free (human direction, 2026-10-04)
+
+Direction for the later assessment-ownership slice. This refines "Preset assessment is a
+trading charge" above.
+
+- **Data only, no LLM.** `assess_strategy_preset` returns computed evidence (regime,
+  volatility, candle window), per-preset scorecards, preset descriptions, the current
+  preset, and a fresh artifact reference. It returns nothing produced by LLM inference.
+  The skill teaches the agent how to read the data. The agent decides and calls
+  `change_strategy_preset` with its reason (Agent Mode Purity: the platform supplies
+  data, the agent reasons). Vision 9 therefore stands unrevised for this capability.
+- **Free, protected by cooldowns.** No charge, so no Traderton metering or billing is
+  needed for it. The vision 5 revision above lapses for this capability. Abuse and venue
+  load are bounded by cooldowns: the existing per-(agent, identity) assessment request
+  cooldown (herobids `assessment-request-service.ts` step 4, `reviewIntervalMs` floored by
+  the operator minimum) carries over.
+- **New: a preset-change cooldown.** None exists today. `preset-transition-service.ts` has
+  no cooldown, and one fresh artifact can be reused for repeated switches until it
+  expires. The implementing agent must analyse the existing cooldown/config patterns
+  before choosing its home and default. Candidates and constraints:
+  - It must follow the Agent Mode Purity risk rules: user-configured (immutable) or
+    operator default (agent-readable, agent-mutable within operator bounds). No magic
+    numbers.
+  - Existing analogues to study: `reviewIntervalMs` + operator floor;
+    `preCheck.identityCooldownMs`; `stopLossCooldownMs` (agent-mutable risk posture).
+  - The effective value must be readable by the agent (for example via
+    `get_risk_limits` or the assess response).
+- **Eligibility (human, 2026-10-04):** the assessment returns **every** preset, each with
+  data flags: `creatorAllowed`, `evidenceFresh` (scan health not `stale`), `regimeMatch`,
+  and signals vs the current preset. `change_strategy_preset` **hard-gates only** on the
+  creator's policy, fresh evidence for the target preset, and artifact freshness (plus the
+  new cooldown). Regime match and signal counts are advisory only; gating on them would be
+  hidden policy.
+- **Human review screen (human, 2026-10-04):** it shows the per-preset data table plus
+  **the agent's decision and the reason it gave** in `change_strategy_preset`. That replaces
+  the LLM pros/cons and recommendation.
+- **Placement (human-approved, 2026-10-04):**
+  - **Traderton** owns: both tools (listed in `crypto-trading`), the preset catalog
+    (authoritative; herobids reads it through a tool), the agent's active strategy, the
+    assessment artifacts/evidence/cooldown records, the preset-change history, and the
+    scheduled-review pre-check.
+  - **Herobids** owns: the creator's settings (pushed into the profile, enforced by
+    Traderton), the review screen, wake delivery and the agent runtime.
+  - Plans: traderton
+    `docs/features/2026/10/04/004-preset-assessment-data-only/001-plan.md`; herobids
+    `docs/features/2026/10/04/002-preset-assessment-on-traderton/001-plan.md`.
+
+## Agent strategy ownership in the trading profile (2026-10-04)
+
+Each part of `agent_trading_profiles` has exactly one writer.
+- **Herobids** writes **creator inputs**: `scan_mode`, `creator_strategy` (a preset key +
+  style tier, or custom technical config), and later the creator's preset policy.
+- **Traderton** writes **`active_strategy`**: the resolved technical config the actor runs,
+  with `source: 'creator' | 'agent'`. Preset → technical resolution uses Traderton's own
+  catalog.
+- A creator-input write resets `active_strategy` only when the creator input actually
+  changed (creator intent is supreme). A resend of unchanged creator inputs (e.g. while
+  saving capital) leaves an agent's choice intact.
+
+Without this split, a herobids profile resend would silently overwrite an agent's preset
+change. It is implemented in the Wave E E1 plan (T1/H1) ahead of the preset slice.
+
 ## Bots resume after a graceful Traderton deploy (human ruling, 2026-10-04)
 
 In the source, `WorkerRuntime.shutdown()` → `stopInstance` → `onStopped` →
