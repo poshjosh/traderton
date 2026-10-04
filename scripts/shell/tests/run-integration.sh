@@ -84,6 +84,11 @@ echo "==> running the gated integration tests"
 # agent-actor-run-repository: Wave E E1-T T5 — exercises the agent-actor run-state
 # repo (owner/actor upsert idempotency, stop transition, running listing, owner-
 # scoped lookup) against real Postgres. Truncates agent_actor_runs in beforeEach.
+# journal-partitioning: 003 S2 — proves journal_events RANGE partitioning
+# (0008_journal_partitioning.sql): writes land in the matching monthly partition
+# (asserted via tableoid::regclass), and getById/scanAfter span partitions in
+# (created_at, id) order. Truncates journal_events (cascades to partitions) in
+# beforeEach.
 # agent-actor-multi-replica: 001 S5 — builds TWO real createTradingRuntime
 # replicas (A + B) in one process sharing one Postgres + one Redis to prove the
 # agent-actor lease + owner routing (001 S1-S4) across replicas. CASE 1: a
@@ -102,6 +107,7 @@ pnpm exec vitest run --no-file-parallelism \
   packages/db/src/agent-trading-profile-repository.integration.test.ts \
   packages/db/src/agent-scan-repository.integration.test.ts \
   packages/db/src/agent-actor-run-repository.integration.test.ts \
+  packages/db/src/journal-partitioning.integration.test.ts \
   "$@"
 
 echo "==> integration run complete"

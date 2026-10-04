@@ -57,6 +57,13 @@
       "when": 1791140388351,
       "tag": "0007_sleepy_doctor_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791146828699,
+      "tag": "0008_journal_partitioning",
+      "breakpoints": true
     }
   ]
 }
