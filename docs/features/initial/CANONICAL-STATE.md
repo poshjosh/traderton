@@ -94,7 +94,11 @@ classic in-process scan pipeline (`technical-phase`/`complete-technical-scan`/sc
 swap-token-resolver/token-safety) was already deleted from the live runtime with the "L3d-5 actor slice";
 **B1 (2026-09-12) deleted the dead files.** It was NOT a live surface. `@herobids/engine` is **type-only**
 everywhere (all importers) — no engine value runs in-process. `TechnicalScanState` + its consumers are
-LIVE and KEPT (herobids consumes `agent.technical.scan_completed` messages Traderton now produces).
+LIVE and KEPT. **[CORRECTED 2026-10-04]** The earlier claim that "Traderton now produces"
+`agent.technical.scan_completed` is false. Traderton runs no agent scan loop, its scan/wake/journal
+callbacks are no-op stubs (item C2, never authored), and no Traderton→herobids event channel exists. The
+herobids consumers are live code with no producer. See 001 "Actor event + lifecycle callbacks never
+authored (item C2)", 003 (2026-10-04), and 011 Wave E.
 
 **What REMAINS (the real surviving in-process market-data surface):**
 - **B2 — agent-container tick-loop couplings** (`apps/worker/src/agent.ts`): regime eval (→`check_regime`),
@@ -161,6 +165,13 @@ workflow: permanent Herobids retention as an explicit exception, complete
 Traderton ownership, a deliberate split, or removal/deprecation. See
 [004](./004-decision-log.md), [001](./001-parity-ledger.md), and
 [011](./011-premerge-backlog.md).
+
+**Update 2026-10-04, human legal ruling:** charging for a preset assessment *is* a trading charge for
+payment-provider purposes. Herobids therefore cannot keep billing it, which rules out permanent Herobids
+retention and any split where Herobids bills the assessment. The workflow, its metering and its billing
+move to Traderton's side of the boundary. That revises vision decisions 5 and 9 for this capability; see
+004 "Preset assessment is a trading charge". The exact shape is still open. It is sequenced **after** 011
+Wave E, because preset changes have no trading effect until the agent scan loop exists.
 
 ### 3.1 L3 plan (herobids consumes over REST) — decisions locked 2026-09-08
 

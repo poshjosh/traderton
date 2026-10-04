@@ -189,6 +189,9 @@ we must not **degrade**. Anything we cannot preserve now is recorded in the
    Platform billing authority stays outside Traderton by design; any
    Traderton-owned usage metering, billing, or caps are cut for now and
    tracked as Deferred in the ledger.
+   **[Revised 2026-10-04 for preset assessment]:** that charge is a trading
+   charge (human legal ruling), so its metering and billing move to Traderton.
+   See [004](./004-decision-log.md) "Preset assessment is a trading charge".
 6. **In-process assembly (M1) first, REST/API (M2) second, MCP/skills later —
    both consumption paths permanently supported; deployment decides which ships.**
    M1 (the in-process library / ports-and-adapters state) is reached first: the
@@ -229,6 +232,11 @@ we must not **degrade**. Anything we cannot preserve now is recorded in the
    **split**: mechanical parts (`Dca`, `Mechanical`, `scan-engine`, `regime`)
    move to Traderton; LLM parts (`Llm`, `Hybrid`, `llm-provider`) stay
    agent-side.
+   **[Scope note 2026-10-04]:** 9 follows from 7–8 (who decides trades) plus 5
+   (no recoverable LLM spend). It does not forbid a metered Traderton analysis
+   service from calling an LLM, and the economic-calendar fallback parser
+   already does. See [004](./004-decision-log.md) "Preset assessment is a trading
+   charge".
 
 ### Ownership & seam (from source-code investigation)
 

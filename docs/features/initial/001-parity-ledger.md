@@ -96,7 +96,7 @@ Nothing regresses without an explicit **Gap** entry that someone signed off.
 | `submit_decision` | **Met** (intake/execution item C + tool/drive item D, 2026-09-07) | Decision execution — highest-stakes parity surface. Engine execution core (`submitDecisionForExecution`, planner, risk gate, executors) landed Phase 3 (Met). Intake/resolution surface: Met (item C) — `submitDecision` router + the one `actorRegistry` + venue-account-direct seam over the Phase-8-copied actor intake (running-actor only; grant-fallback dropped — Intentional Divergence row below; approvals consumer-owned). **Item D (2026-09-07):** `tools/trading.ts` copied verbatim + the in-process `publishToInbound` drive target routes `DECISION_SUBMIT`→`submitDecision` and writes the `agent:decision:reply:*` reply the tool's `blpop` awaits. Event emits are **item C2** (M1 no-op). |
 | `create_bot` | **Met (tool + drive + limit, 2026-09-07)** | `tools/bots.ts` copied verbatim; the item-D `MANAGE_BOT:create_and_start` handler validates config (`BotConfigSchema`) + mode-escalation + the swap-symbol guard, then (**item E, 2026-09-07**) `tryCreateBotWithLimit` (insert `stopped`) → `tryMarkBotRunningWithLimit` (claim `running`) → `enqueueLifecycle('start')`. **Limit-enforced creation → Met:** atomic per-`ownerId` count+insert under a `pg_advisory_xact_lock` (`BotRepository`, re-keyed from the deleted agents-row-lock; limit key per-`ownerId`, decided 2026-09-06; value from `agentRiskDefaults.maxBots` + injected override). The per-agent→per-`ownerId` reshape is an Intentional Divergence (row below). `Deferred (required for cutover)` → **RESOLVED.** See [013 §7](../archive/features/013-9b-authoring-plan.md). |
 | `start_bot` | **Met (tool + drive + limit, 2026-09-07)** | `tools/bots.ts` copied verbatim; the item-D `MANAGE_BOT:start` handler validates ownership (by injected `ownerId`) + persisted config, then enqueues a `WorkerRuntime` start job. Reclaim start re-marks running; **non-reclaim start** claims a slot via `tryMarkBotRunningWithLimit` (**item E, 2026-09-07** — atomic per-`ownerId` count+mark under the advisory lock; `tryMarkBotRunningWithLimit`, re-keyed from the deleted agents-row-lock). `Deferred (required for cutover)` → **RESOLVED.** Same item-E primitive as `create_bot`. |
-| `stop_bot` | **Met (tool + drive, 2026-09-07)** | `tools/bots.ts` copied verbatim; the item-D `MANAGE_BOT:stop` handler validates ownership then enqueues a `WorkerRuntime` stop job. Fully live. |
+| `stop_bot` | **Met (tool + drive, 2026-09-07)** | `tools/bots.ts` copied verbatim; the item-D `MANAGE_BOT:stop` handler validates ownership then enqueues a `WorkerRuntime` stop job. Fully live. **[CORRECTED 2026-10-04: the copied `stop_bot` tool does NOT use MANAGE_BOT. It marks the row stopped and publishes `bot:stop:{id}`, which nothing in Traderton subscribes to, so a running bot keeps trading. Status → Gap (HIGH) until 011 E0 lands. See "Actor event + lifecycle callbacks never authored (item C2)".]** |
 | `list_bots` | **Met (tool + drive, 2026-09-07)** | `tools/bots.ts` copied verbatim (reads `botRepo.getBotsByCreator('agent', ctx.agentId)` — decision (a) scope). Fully live. |
 | `resolve_bot` | Met (module copied, 9a) | **9a: `tools/resolvers.ts` copied verbatim** (byte-identical modulo namespace), narrowed to `TradingToolContext`; tests green. Boundary/composition wiring is 9b. (Lives in `resolvers.ts`, not `bots.ts`.) |
 | `get_bot_status` | **Met (tool + drive, 2026-09-07)** | `tools/bots.ts` copied verbatim. Fully live. |
@@ -448,7 +448,10 @@ re-source + `discover_tokens` widening. All "pending human ratification" flags o
   (technical-phase, complete-technical-scan, scanner-candidate-discovery, scanner-pre-filter,
   swap-candidate-discovery, swap-token-resolver, token-safety-adapter) + their tests removed — no
   production callers (already dead since the L3d-5 actor slice; verified). `TechnicalScanState` + its
-  consumers KEPT (LIVE — fed by `agent.technical.scan_completed` from Traderton); two DTO types relocated
+  consumers KEPT (LIVE — fed by `agent.technical.scan_completed` from Traderton **[CORRECTED 2026-10-04:
+  FALSE — Traderton does not produce this event; the agent scan loop is not wired and
+  `onTechnicalScanComplete` is a no-op. See "Actor event + lifecycle callbacks never authored (item C2)"
+  below]**); two DTO types relocated
   to `apps/worker/src/scan-types.ts`. `@herobids/engine` confirmed TYPE-ONLY everywhere. Build/lint/test
   green (378 files / 7574 passed). Not a parity concern (dead code).
 - **B2 — agent.ts tick-loop couplings (scope = option 1, human-decided):** re-point regime / volatility /
@@ -699,3 +702,48 @@ Phase 3 (herobids Step 11b / ADR 016) adds a Traderton-hosted MCP route so herob
 
 ### MCP binding implemented (Phase 3 T2.2, branch `phase3-mcp-surface`, 2026-10-03)
 The additive MCP route landed on `phase3-mcp-surface` (TC2 signed-request-material move; TC3 route over the existing dispatcher, off by default; TC4 idempotency verification against real Postgres). **Additive, off by default (`BOUNDARY_MCP_ENABLED=false`); REST bytes/behaviour unchanged; no parity impact.** The route de-frames each MCP `tools/call` into the identical 005 envelope and dispatches through the UNMODIFIED `ToolInvocationDispatcher`; the content-type parser and the REST `tools:invoke`/status handler bodies are textually identical to the pre-TC2 base. Plan + ruling pointers: `docs/features/2026/10/03/001-mcp-boundary-surface/001-plan.md`, 004 "MCP-FD", 005 §"MCP binding (additive, Phase 3)". Wire mapping normative in herobids Step 10 §2.5 (n35).
+
+### Actor event + lifecycle callbacks never authored (item C2) — Deferred (required for cutover) (2026-10-04)
+
+**How it was found.** The preset-tool reassessment (2026-10-04) asked what an agent's strategy preset
+does after extraction and traced the answer back to the actor callbacks. The 9b plan (013, archived)
+routed every actor status/event callback to **item C2 (event producer)** and stubbed them as "M1 no-op".
+C2 was never authored. The label was later reused in 011 for the swap `score_candidate` build, which was
+marked DONE, so the event producer dropped off every backlog. The B1 entry above and CANONICAL-STATE §2.1
+also claimed that Traderton produces `agent.technical.scan_completed`; it does not.
+
+**Evidence.** Traderton `packages/worker/src/composition/decision-intake.ts` (`constructAndRegisterAgentActor`,
+~L410–520), `composition/create-trading-runtime.ts` (~L745–770), `packages/boundary/src/bin.ts` (~L88–95,
+`instanceLoader: async () => []`). Source wiring: herobids `apps/worker/src/index.ts` at `45271d28^`
+(agent actor ~L1316–1510, `WorkerRuntime` callbacks ~L1785–1880, bot actor callbacks ~L2160–2250).
+
+**Agent actor (`AgentTradingActor`)**
+
+| Callback / dep | herobids (source) | Traderton today | Effect |
+|---|---|---|---|
+| `technicalConfig`, `discoverCandidates`, `fetchCandles` (+ scan retry/breaker/dedup deps) | Built for hybrid agents (`scanner_gated` strict, `mixed` lenient) from `unifiedConfig.technical` | Not in `AgentActorSpec`; omitted ("agent-container drive concern") | **No agent technical scan loop runs.** |
+| `onTechnicalScanComplete` | `emitTechnicalScanCompleted` → agent stream | no-op | Agent never receives `agent.technical.scan_completed`; mixed-mode prompts lose scan context. |
+| `emitAgentWake` | `emitAgentWake` → wake group | no-op | Scanner wakes never fire, so `scanner_gated` hybrid agents never reach the hybrid evaluator. The mode is still offered in the herobids UI. |
+| `onPersistScanCandidates` / `onPersistScanMetrics` | insert `agent_scan_candidates` / `agent_scan_metrics` (herobids DB) | not passed | Scheduled preset-review pre-check (`assessment-review-runner.ts`) has no data and never produces advice. Preset changes have no trading effect, because the preset only configured this scanner. |
+| `onJournalEvent` | `emitJournalEvent` → `instance.journal.event` | no-op | herobids session circuit breaker (`agent.ts` ~L2436; trips on `strategy_error`/`strategy_fatal`/`drift_detected`/`stream_disconnect`) receives no actor events, so its trading-health inputs are starved. |
+| `onCrashed` | deregister + `sessionManager.handleRuntimeFailure` (session failed, user notified) | deregister only | Agent session is not failed or notified; the next venue-resolving call re-ensures the actor. |
+| Lifecycle driver | session activation constructed + started the actor; session stop stopped it | lazy ensure on the first venue-resolving tool call (`agent-direct-actor-ensure.ts`); no stop on session end | A scan loop cannot start until the agent makes a trading call (chicken-and-egg for `scanner_gated`), and it would never stop. |
+
+**Bot actor (`TradingActor`) + `WorkerRuntime`**
+
+| Callback | herobids (source) | Traderton today | Effect |
+|---|---|---|---|
+| `onStarted` | mark running (atomic maxBots claim for agent bots) | no-op | **Covered:** the drive target claims `running` via `tryMarkBotRunningWithLimit` before enqueue. |
+| `onStopped` | `markBotStopped` + user `publishBotStatus` + actor-health | no-op | Covered only for tool-initiated stops (`stop_bot` marks stopped). Runtime-initiated stops leave the row `running`. |
+| `onStartFailed` | mark `crashed` + user event + actor-health | no-op | Row stays `running` with no actor. |
+| `onCrashed` | mark `crashed` + `handleActorCrash` + user event + actor-health | `handleActorCrash` + registry delete only (`markBotCrashed` exists, unused) | Row stays `running`. |
+| `onHalted` (error-threshold auto-stop) | `markBotStopped` + `emitInstanceStatus` to the owning agent (`bot_halted_error_limit`) + user event | **not passed** | Row stays `running`; the owning agent is not told its bot halted. |
+| `onJournalEvent` (`strategy.error`/`strategy.fatal`/`stream.disconnect`) | forwarded to the owning agent's stream | **not passed** | Owning agent gets no real-time bot error signal (it can still poll `get_owner_bot_journal`). |
+| `instanceLoader` (boot rehydrate + reclaim sweep) | `bots WHERE status='running'` | `async () => []` | **After any Traderton restart no bot resumes and no orphan is reclaimed, while rows still read `running`.** |
+| user `publishBotStatus` / `actorHealthPublisher` | herobids user pub/sub + health | absent | Platform UX; there is no Traderton→consumer channel to carry it (000 "Open": backend→consumer event channel). |
+| **`bot:stop:*` subscriber** (`psubscribe` → `runtime.stopInstanceDirect`) | herobids `index.ts` ~L2974–2988 (deleted in L3d-5 as "Traderton owns lifecycle") | **absent.** The copied `stop_bot` tool (`tools/bots.ts` ~L740–777) still does `markBotStopped` + `redis.publish('bot:stop:{id}')`, but nothing in Traderton subscribes. `runtime.stopInstanceDirect` has no caller. | **HIGH (found by code reading, not reproduced): stopping a running bot marks the row `stopped` while the actor keeps trading** until the process exits. `delete_bot` then sees `stopped` and can delete the row of a still-running actor. **This corrects the `stop_bot` row above:** "MANAGE_BOT:stop … Fully live" is true of the drive target, but the tool does not use it. |
+| Agent→bot cascade stop + orphan sweep (`cascadeStopAgentBots`, `botOrphanSweepInterval`) | on agent crash / session stop / terminal cleanup, plus a periodic sweep: stop running bots whose creator agent is inactive | **absent** (removed in herobids L3d-5; never authored Traderton-side, and Traderton has no agent-liveness signal) | Agent-created bots keep trading after their agent stops or crashes. |
+
+**Status: Deferred (required for cutover)** for every row except those marked Covered. herobids relies
+on Traderton for the scan loop, bot status truth, restart survival, and the actor event stream. Backlog:
+011 Wave E. Anomaly record: [003](./003-anomalies-and-deviations.md) 2026-10-04.

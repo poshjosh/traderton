@@ -148,6 +148,36 @@ legal-isolation sign-off / final cutover approval, or an earlier dedicated
 assessment-ownership slice. Record the ruling in this log and its status in 001
 and 011.
 
+## Preset assessment is a trading charge (legal ruling, 2026-10-04)
+
+**Decision (human).** Charging users for a strategy-preset assessment (today
+the herobids `assessment.request` meter, a flat per-instrument fee) counts as a
+trading charge for payment-provider purposes. Keeping trading charges off the
+platform's payment rails is the reason for the legal isolation in the first
+place (000 hard-constraint block), so herobids must not bill it.
+
+**Consequences.**
+- Options 1 (permanent Herobids retention) and 3 as originally framed (a split
+  that leaves platform billing in Herobids) are ruled out. What remains is
+  complete Traderton ownership of the workflow, including its metering and
+  billing, or removal. The exact shape is decided in the assessment-ownership
+  slice.
+- **Vision 5 (Traderton-native metering/billing deferred) is revised for this
+  capability.** Traderton needs at least metering for it, plus a billing path on
+  rails that are not the platform's.
+- **Vision 9 (no LLM in Traderton) is revised for this capability, if the
+  ranking keeps an LLM.** Rationale check: 9 was derived from "bots are
+  mechanical" (it settled who decides trades, breaking the agent/bot identity
+  cycle) together with 5 (no billing means no recoverable LLM spend). It never
+  argued that a Traderton analysis service must not call an LLM, and the
+  economic-calendar fallback parser already does. Once Traderton meters and
+  bills the assessment, the cost-recovery premise no longer applies. Whether
+  the ranking stays LLM-based is a product choice for the slice, not a rule.
+- **Sequencing.** The preset only has a trading effect through the agent
+  technical scan loop, which Traderton does not run today (001 "Actor event +
+  lifecycle callbacks never authored (item C2)"). The assessment-ownership slice
+  therefore follows 011 Wave E.
+
 ## D1-coda: local trading-package removal and where consumer type contracts now live
 
 **Decision date:** 2026-09-17. **Gate result:** settled within the rules
