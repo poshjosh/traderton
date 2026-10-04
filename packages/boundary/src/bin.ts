@@ -26,6 +26,7 @@ import {
   createScannerCandleFetcherFromConfig,
   createScannerPoolResolverFromConfig,
   buildRiskContractOpsFromRiskSource,
+  createLogger,
   type RiskSource,
 } from '@traderton/worker';
 import {
@@ -54,6 +55,7 @@ import {
 } from './subject-resolver.js';
 import { buildResolverPorts } from './resolver-ports.js';
 import { buildAgentDirectActorEnsure } from './agent-direct-actor-ensure.js';
+import { subscribeBotStopSignals } from './bot-stop-subscriber.js';
 
 function loadBoundaryConfig(): BoundaryConfig {
   const consumerId = process.env['BOUNDARY_CONSUMER_ID'];
@@ -94,6 +96,16 @@ async function main(): Promise<void> {
     instanceLoader: async () => [],
   });
   await runtime.start();
+
+  // E0 hotfix: the copied `stop_bot` tool publishes `bot:stop:{botId}`; stop the
+  // in-process actor when it does. Dedicated connection — a Redis connection in
+  // subscriber mode cannot issue other commands.
+  const botStopSubscriber = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
+  subscribeBotStopSignals(
+    botStopSubscriber,
+    (botId) => runtime.runtime.stopInstanceDirect(botId),
+    createLogger('boundary-bot-stop'),
+  );
 
   // The lazy agent-direct actor ensure (M2 GAP FIX — see the docstring on
   // `buildAgentDirectActorEnsure` in ./agent-direct-actor-ensure.ts, which now
