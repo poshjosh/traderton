@@ -1032,6 +1032,20 @@ export const AppConfigSchema = z.object({
         '1inch': z.boolean().optional(),
       }).optional(),
     }).optional().default({}),
+    /** Retention for the scan-persistence tables (`agent_scan_candidates` +
+     *  `agent_scan_metrics`). herobids never deleted these (it reads by a
+     *  `scannedAt` window — the 7d default matches its 604_800_000ms read
+     *  window); Traderton prunes them in batches so they stay bounded. Mirrors
+     *  the `notifications.*` prune-key shape + defaults. */
+    scanRetention: z.object({
+      /** Scan rows older than this many days are pruned (default 7 — matches
+       *  herobids' 604_800_000ms read window). */
+      retentionDays: z.number().int().min(1).default(7),
+      /** How often the boundary scan-prune loop runs (default 1h). */
+      pruneIntervalMs: z.number().int().min(1).default(3_600_000),
+      /** How many expired rows the prune loop deletes per batch, per table. */
+      pruneBatchSize: z.number().int().min(1).default(5000),
+    }).default({}),
   }).default({}),
 }).superRefine((data, ctx) => {
   const oneInchConfig = data.venues['1inch'];

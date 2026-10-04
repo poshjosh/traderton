@@ -77,12 +77,17 @@ echo "==> running the gated integration tests"
 # agent-trading-profile-repository: Wave E E1-T T1 — proves the active_strategy
 # derivation (first-set / changed-reset / unchanged-resend) against real Postgres,
 # alongside the pre-existing owner/actor isolation + rollback cases.
+# agent-scan-repository: Wave E E1-T T3 — exercises the scan-persistence repo
+# (bulk candidate insert, single metrics insert, batched scannedAt-keyed retention
+# delete on both scan tables) against real Postgres. Truncates both scan tables in
+# beforeEach so it does not clash with sibling suites.
 pnpm exec vitest run --no-file-parallelism \
   packages/boundary/src/boundary.verification.integration.test.ts \
   packages/boundary/src/boundary.mcp.verification.integration.test.ts \
   packages/worker/src/restart-round-trip.integration.test.ts \
   packages/db/src/consumer-notification-repository.integration.test.ts \
   packages/db/src/agent-trading-profile-repository.integration.test.ts \
+  packages/db/src/agent-scan-repository.integration.test.ts \
   "$@"
 
 echo "==> integration run complete"

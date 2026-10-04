@@ -30,3 +30,5 @@ export { marketAssessmentRuns } from './market-assessment-runs.js';
 export { marketAssessmentArtifacts } from './market-assessment-artifacts.js';
 export { boundaryInvocations } from './boundary-invocations.js';
 export { consumerNotifications } from './consumer-notifications.js';
+export { agentScanCandidates } from './agent-scan-candidates.js';
+export { agentScanMetrics } from './agent-scan-metrics.js';

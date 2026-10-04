@@ -210,6 +210,10 @@ agentScanner:
     maxSkipScans: 8              # skip-scan ceiling as backoff grows (1–100)
   swap:                          # DEX scanning rollout flags
     enabled: false               # master kill-switch — false = swap-bound agents return no candidates
+  scanRetention:                 # retention for agent_scan_candidates + agent_scan_metrics (herobids never pruned; 7d matches its read window)
+    retentionDays: 7             # scan rows older than this are pruned (>=1)
+    pruneIntervalMs: 3600000     # how often the boundary scan-prune loop runs (1h)
+    pruneBatchSize: 5000         # expired rows deleted per prune batch, per table
 
 marketData:
   dexscreener:

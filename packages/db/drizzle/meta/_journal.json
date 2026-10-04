@@ -43,6 +43,13 @@
       "when": 1791136803426,
       "tag": "0005_fresh_doctor_octopus",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791138620206,
+      "tag": "0006_slim_katie_power",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 # 003 — E1: agent technical scan loop + agent-actor lifecycle
 
-**Status:** E1-T PENDING (T1 DONE, T2 DONE, T3 PENDING, T4 PENDING, T5 PENDING);
+**Status:** E1-T PENDING (T1 DONE, T2 DONE, T3 DONE, T4 PENDING, T5 PENDING);
 E1-H GATED (herobids, awaiting human go).
 **Depends on:** E3-T (scan results reach agents only through
 the E3 `consumer_notifications` channel), and E2 (loader + status callbacks). **Repos:** traderton (E1-T), then
@@ -235,3 +235,13 @@ updated.
   broaden regression coverage. Optional.
 - NOTE: herobids keeps swap under `scanner.swap`; Traderton flattens it to
   `agentScanner.swap` per the T2 plan text (defaults/bounds byte-identical, parity holds).
+
+### [T3] scan persistence tables + repositories + retention
+- LOW: the scan integration test's `beforeAll` uses `db as unknown as Database` (test-only,
+  with a justification comment — TestDb and Database are structurally identical). Optional:
+  align `openTestDb()` to return `Database` and drop the cast.
+- LOW: comments cite herobids' 7d read window (604_800_000ms) as the retention basis;
+  herobids has no actual pruner, so this loop is new (per the plan). Documentation-only.
+- NOTE: the only intended divergence from the herobids schema is dropping the
+  `agent_scan_candidates.agentId` FK to the (non-existent in Traderton) `agents` table —
+  it is a soft text reference, verified no FK in migration 0006.

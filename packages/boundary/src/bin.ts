@@ -19,6 +19,7 @@ import {
   InstrumentRepository,
   BoundaryInvocationRepository,
   ConsumerNotificationRepository,
+  AgentScanRepository,
   computeRequestFingerprint,
 } from '@traderton/db';
 import {
@@ -59,6 +60,7 @@ import { subscribeBotStopSignals } from './bot-stop-subscriber.js';
 import { buildBoundaryTradingRuntime } from './build-boundary-runtime.js';
 import { registerBoundaryShutdown } from './boundary-shutdown.js';
 import { startConsumerNotificationPruneLoop } from './consumer-notification-prune.js';
+import { startAgentScanPruneLoop } from './agent-scan-prune.js';
 
 function loadBoundaryConfig(): BoundaryConfig {
   const consumerId = process.env['BOUNDARY_CONSUMER_ID'];
@@ -105,6 +107,18 @@ async function main(): Promise<void> {
     pruneIntervalMs: appConfig.notifications.pruneIntervalMs,
     pruneBatchSize: appConfig.notifications.pruneBatchSize,
     logger: createLogger('boundary-notification-prune'),
+  });
+
+  // Wave E / E1-T T3: prune the scan-persistence tables (agent_scan_candidates +
+  // agent_scan_metrics) so they stay bounded. herobids never pruned these (it
+  // reads by a scannedAt window); operator config drives the retention window /
+  // interval / batch size. Self-rescheduling, reschedules on failure (AGENTS).
+  const agentScanPrune = startAgentScanPruneLoop({
+    repo: new AgentScanRepository(db),
+    retentionDays: appConfig.agentScanner.scanRetention.retentionDays,
+    pruneIntervalMs: appConfig.agentScanner.scanRetention.pruneIntervalMs,
+    pruneBatchSize: appConfig.agentScanner.scanRetention.pruneBatchSize,
+    logger: createLogger('boundary-agent-scan-prune'),
   });
 
   // E0 hotfix: the copied `stop_bot` tool publishes `bot:stop:{botId}`; stop the
@@ -458,7 +472,7 @@ async function main(): Promise<void> {
     botStopSubscriber,
     logger: createLogger('boundary-shutdown'),
     exit: (code) => process.exit(code),
-    stopBackgroundLoops: [() => consumerNotificationPrune.stop()],
+    stopBackgroundLoops: [() => consumerNotificationPrune.stop(), () => agentScanPrune.stop()],
   });
 
   const port = Number(process.env['BOUNDARY_PORT'] ?? 8080);
