@@ -32,3 +32,4 @@ export { boundaryInvocations } from './boundary-invocations.js';
 export { consumerNotifications } from './consumer-notifications.js';
 export { agentScanCandidates } from './agent-scan-candidates.js';
 export { agentScanMetrics } from './agent-scan-metrics.js';
+export { agentActorRuns } from './agent-actor-runs.js';

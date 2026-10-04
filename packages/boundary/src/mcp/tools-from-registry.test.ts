@@ -113,4 +113,24 @@ describe('SKILL_TOOL_MAP (the published Traderton skills)', () => {
       expect(byTool.get(name)).toBeUndefined();
     }
   });
+
+  it('keeps the agent-actor lifecycle tools (start_agent_actor, stop_agent_actor) consumer-only — registered but in no skill tools/list', () => {
+    // Wave E / E1-T T5, RESOLVED human ruling: start_agent_actor / stop_agent_actor
+    // are called by the consumer's session manager, NOT by an agent. Their
+    // consumer-only guarantee is the same mechanism as the system-feed tools:
+    // ABSENCE from every SKILL_TOOL_MAP skill set, so neither ever appears in any
+    // agent-facing tools/list.
+    const registry = buildToolRegistry();
+    const lifecycleTools = ['start_agent_actor', 'stop_agent_actor'];
+
+    const advertised = new Set(Object.values(SKILL_TOOL_MAP).flat());
+    const byTool = buildToolSkillRefs();
+    for (const name of lifecycleTools) {
+      // Registered in the real tool registry (so the consumer can invoke them)…
+      expect(registry.get(name)).toBeDefined();
+      // …but named by no skill, so they are never advertised to an agent.
+      expect(advertised.has(name)).toBe(false);
+      expect(byTool.get(name)).toBeUndefined();
+    }
+  });
 });

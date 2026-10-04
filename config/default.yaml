@@ -214,6 +214,7 @@ agentScanner:
     retentionDays: 7             # scan rows older than this are pruned (>=1)
     pruneIntervalMs: 3600000     # how often the boundary scan-prune loop runs (1h)
     pruneBatchSize: 5000         # expired rows deleted per prune batch, per table
+  orphanSweepIntervalMs: 60000   # agent-actor orphan sweep cadence in ms (copied from herobids worker.agents.botOrphanSweepIntervalMs)
 
 marketData:
   dexscreener:

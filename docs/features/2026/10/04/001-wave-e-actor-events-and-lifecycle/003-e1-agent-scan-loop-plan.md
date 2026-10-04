@@ -1,6 +1,6 @@
 # 003 — E1: agent technical scan loop + agent-actor lifecycle
 
-**Status:** E1-T PENDING (T1 DONE, T2 DONE, T3 DONE, T4 DONE, T5 PENDING);
+**Status:** E1-T DONE (T1 DONE, T2 DONE, T3 DONE, T4 DONE, T5 DONE);
 E1-H GATED (herobids, awaiting human go).
 **Depends on:** E3-T (scan results reach agents only through
 the E3 `consumer_notifications` channel), and E2 (loader + status callbacks). **Repos:** traderton (E1-T), then
@@ -259,3 +259,15 @@ updated.
   benign, not masking a missing guard. The scanner candle fetcher is built eagerly from
   `config.marketData` (traderton reads config directly, unlike herobids which built it from
   the post-start registry).
+
+### [T5] lifecycle tools + agent_actor_runs + cascade/rehydrate/orphan sweep
+- RESOLVED (LOW, folded in): `narrowVenueType` now logs a warn on an unexpected stored
+  `venue_type` (defaults to orderbook) for observability.
+- LOW: `injectionFor` uses a placeholder `ownerMode: 'paper'` (the ensure re-derives the
+  real mode from the profile — documented). A named const would make the intent clearer.
+- LOW: no orphan-sweep swap-venue arm test / no explicit no-FK test. Minor coverage gaps.
+- LOW: unit tests use `as unknown as` for fake runtime/registry/repo (standard fake idiom).
+- NOTE: the two lifecycle tools are consumer-only per the RESOLVED human ruling — registered
+  in buildToolRegistry but ABSENT from SKILL_TOOL_MAP and with NO get_schema entry, so they
+  never appear in the agent tools/list (verified by the tools-from-registry visibility test).
+  This overrides the T5 plan text's "add to tool-schemas.ts / MCP skill map" line.

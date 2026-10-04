@@ -81,17 +81,33 @@ export interface StoredTradingProfile {
  * dispatcher's catch, which (as of bug 001) logs internally and returns
  * `precondition.not_ready`.
  */
-export function buildAgentDirectActorEnsure(
-  runtime: TradingRuntime,
-  getProfile: (ownerId: string, actorId: string, venueAccountId: string) => Promise<StoredTradingProfile | null>,
-): (injection: {
+/** The injection the ensure consumes (resolved venue coordinates + owner mode). */
+export interface AgentDirectActorInjection {
   ownerId: string;
   actorId: string;
   ownerMode: 'paper' | 'shadow' | 'live';
   venue: string;
   venueType: 'orderbook' | 'swap';
   venueAccountId: string;
-}) => Promise<void> {
+}
+
+/**
+ * The ensure callable: construct-or-reuse the agent actor for an injection, plus
+ * an `evict(ownerId, actorId)` method (Wave E / E1-T T5) that drops the cache
+ * entry WITHOUT touching the actor. `stop_agent_actor` calls `evict` after it has
+ * stopped + deregistered the actor so the NEXT `start_agent_actor` (or lazy
+ * venue-resolving call) reconstructs fresh rather than reusing a torn-down entry.
+ */
+export interface AgentDirectActorEnsure {
+  (injection: AgentDirectActorInjection): Promise<void>;
+  /** Drop the cache entry for `${ownerId}::${actorId}` (no actor teardown). */
+  evict(ownerId: string, actorId: string): void;
+}
+
+export function buildAgentDirectActorEnsure(
+  runtime: TradingRuntime,
+  getProfile: (ownerId: string, actorId: string, venueAccountId: string) => Promise<StoredTradingProfile | null>,
+): AgentDirectActorEnsure {
   interface CacheEntry {
     ensure: Promise<void>;
     revision: bigint;
@@ -102,7 +118,7 @@ export function buildAgentDirectActorEnsure(
   // boundary so a selected-binding switch cannot fast-path a stale cache entry.
   const ensureCache = new Map<string, CacheEntry>();
 
-  return async (injection) => {
+  const ensure = (async (injection: AgentDirectActorInjection): Promise<void> => {
     const key = `${injection.ownerId}::${injection.actorId}`;
     const profile = await getProfile(injection.ownerId, injection.actorId, injection.venueAccountId);
     if (!profile) {
@@ -149,7 +165,7 @@ export function buildAgentDirectActorEnsure(
     // cache entry mid-teardown: it always finds this in-flight entry and
     // awaits the SAME stop→construct→start sequence. On failure the catch
     // below evicts, so the next attempt retries fresh.
-    const ensure: Promise<void> = (async () => {
+    const ensurePromise: Promise<void> = (async () => {
       // Stop + deregister the PREVIOUS actor FIRST: register uses the same
       // actorId key, so deregistering after registering the new actor would
       // evict the wrong entry. The registry stores `ExecutionActor` (no stop()
@@ -200,18 +216,28 @@ export function buildAgentDirectActorEnsure(
     // Stash the IN-FLIGHT promise (with the spec it was built from) so
     // concurrent invocations await the same construction.
     ensureCache.set(key, {
-      ensure,
+      ensure: ensurePromise,
       revision: profile.revision,
       venueAccountId: injection.venueAccountId,
     });
 
     try {
-      await ensure;
+      await ensurePromise;
     } catch (err) {
       // Do NOT cache failures — evict so the next invocation retries
       // construction (e.g. after the operator provisions the credential).
       ensureCache.delete(key);
       throw err;
     }
+  }) as AgentDirectActorEnsure;
+
+  // E1-T T5: drop the cache entry WITHOUT touching the actor. `stop_agent_actor`
+  // calls this after it has stopped + deregistered the actor, so the NEXT ensure
+  // (an explicit start, or a later lazy venue-resolving call) reconstructs fresh
+  // instead of reusing a cache entry whose actor is already torn down.
+  ensure.evict = (ownerId: string, actorId: string): void => {
+    ensureCache.delete(`${ownerId}::${actorId}`);
   };
+
+  return ensure;
 }

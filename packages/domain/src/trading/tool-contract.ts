@@ -342,6 +342,33 @@ export interface TradingToolContext {
    * `market_data_not_configured` degrade).
    */
   economicCalendarProvider?: EconomicCalendarProvider;
+  /**
+   * Agent-actor lifecycle seam (Wave E / E1-T T5) for the consumer-only
+   * `start_agent_actor` / `stop_agent_actor` tools. The boundary builds this
+   * per request over the runtime + the agent-run repo + the ensure, closing over
+   * the request's RESOLVED venue coordinates and the signed owner/actor — so the
+   * tools stay thin and never touch venue coords, the runtime, or `@traderton/db`
+   * directly (ports-carry-values; the whole runtime is NOT leaked onto the ctx).
+   * Both methods operate on THIS request's agent (actor = the agent itself,
+   * owner-scoped). Present only for agent subjects on a venue-resolving write;
+   * absent otherwise, so a tool guards on it (fault:false when missing).
+   */
+  agentActorLifecycle?: {
+    /**
+     * Record `desired_state='running'` for this agent, with the request's resolved
+     * venue coordinates. The actor itself is constructed + started by the boundary's
+     * ensure BEFORE the tool runs (same as submit_decision) — this persists the
+     * durable intent. Idempotent (upsert of the same running row).
+     */
+    recordRunning(): Promise<void>;
+    /**
+     * Record `desired_state='stopped'`, stop + deregister this agent's actor, evict
+     * the ensure cache entry (so a later start reconstructs fresh), then cascade-stop
+     * the agent's running bots (best-effort per bot). Returns the ids of the bots that
+     * were stopped. Idempotent (stop stays stopped; cascade is safe to repeat).
+     */
+    stop(): Promise<{ stoppedBots: string[] }>;
+  };
 }
 
 /**

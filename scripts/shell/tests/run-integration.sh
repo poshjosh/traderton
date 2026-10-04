@@ -81,6 +81,9 @@ echo "==> running the gated integration tests"
 # (bulk candidate insert, single metrics insert, batched scannedAt-keyed retention
 # delete on both scan tables) against real Postgres. Truncates both scan tables in
 # beforeEach so it does not clash with sibling suites.
+# agent-actor-run-repository: Wave E E1-T T5 — exercises the agent-actor run-state
+# repo (owner/actor upsert idempotency, stop transition, running listing, owner-
+# scoped lookup) against real Postgres. Truncates agent_actor_runs in beforeEach.
 pnpm exec vitest run --no-file-parallelism \
   packages/boundary/src/boundary.verification.integration.test.ts \
   packages/boundary/src/boundary.mcp.verification.integration.test.ts \
@@ -88,6 +91,7 @@ pnpm exec vitest run --no-file-parallelism \
   packages/db/src/consumer-notification-repository.integration.test.ts \
   packages/db/src/agent-trading-profile-repository.integration.test.ts \
   packages/db/src/agent-scan-repository.integration.test.ts \
+  packages/db/src/agent-actor-run-repository.integration.test.ts \
   "$@"
 
 echo "==> integration run complete"

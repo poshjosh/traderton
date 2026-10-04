@@ -77,6 +77,7 @@ export {
 // by this re-export; it only widens the package's public surface.
 export {
   accountTools,
+  agentLifecycleTools,
   analyticsTools,
   botManagementTools,
   instrumentTools,

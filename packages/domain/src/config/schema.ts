@@ -1046,6 +1046,12 @@ export const AppConfigSchema = z.object({
       /** How many expired rows the prune loop deletes per batch, per table. */
       pruneBatchSize: z.number().int().min(1).default(5000),
     }).default({}),
+    /** Agent-actor orphan sweep cadence (Wave E / E1-T T5). How often the boundary
+     *  sweeps for (a) running bots whose creator agent's run state is stopped/absent
+     *  (stop them) and (b) running agents whose actor isn't alive (re-ensure them).
+     *  Default copied verbatim from herobids `worker.agents.botOrphanSweepIntervalMs`
+     *  (60_000). */
+    orphanSweepIntervalMs: z.number().int().min(1000).default(60_000),
   }).default({}),
 }).superRefine((data, ctx) => {
   const oneInchConfig = data.venues['1inch'];

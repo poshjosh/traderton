@@ -20,6 +20,7 @@ import {
   BoundaryInvocationRepository,
   ConsumerNotificationRepository,
   AgentScanRepository,
+  AgentActorRunRepository,
   computeRequestFingerprint,
 } from '@traderton/db';
 import {
@@ -61,6 +62,9 @@ import { buildBoundaryTradingRuntime } from './build-boundary-runtime.js';
 import { registerBoundaryShutdown } from './boundary-shutdown.js';
 import { startConsumerNotificationPruneLoop } from './consumer-notification-prune.js';
 import { startAgentScanPruneLoop } from './agent-scan-prune.js';
+import { buildAgentActorLifecycleOps } from './agent-actor-lifecycle-ops.js';
+import { rehydrateAgentActors } from './agent-actor-rehydrate.js';
+import { startAgentOrphanSweep } from './agent-orphan-sweep.js';
 
 function loadBoundaryConfig(): BoundaryConfig {
   const consumerId = process.env['BOUNDARY_CONSUMER_ID'];
@@ -140,6 +144,51 @@ async function main(): Promise<void> {
     runtime,
     (ownerId, actorId, venueAccountId) => profileRepo.getByOwnerActorVenueAccount(ownerId, actorId, venueAccountId),
   );
+
+  // Wave E / E1-T T5: the durable agent-actor run-state repo + the lifecycle ops
+  // (stop/cascade/ensure/record) shared by the consumer-only start/stop tools, the
+  // boot rehydrate, and the orphan sweep. Built ONCE over the runtime + ensure +
+  // repos; the tools consume it per-request via the ctx `agentActorLifecycle` port.
+  const agentActorRunRepo = new AgentActorRunRepository(db);
+  const agentActorLifecycleOps = buildAgentActorLifecycleOps({
+    runtime,
+    ensure: ensureAgentDirectActor,
+    runRepo: agentActorRunRepo,
+    botRepo: botRepo as unknown as Parameters<typeof buildAgentActorLifecycleOps>[0]['botRepo'],
+    stopInstanceDirect: (botId) => runtime.runtime.stopInstanceDirect(botId),
+    logger: createLogger('boundary-agent-lifecycle'),
+  });
+
+  // Wave E / E1-T T5: rehydrate running agent actors on boot. `runtime.start()`
+  // (above) rehydrates running BOTS; this rehydrates running AGENTS from the
+  // durable `agent_actor_runs` table through the SAME ensure the lazy path uses.
+  // Per-agent failures are logged and left for the orphan sweep — boot never
+  // crashes on one agent. Awaited so a running agent is live before serving.
+  await rehydrateAgentActors({
+    listRunning: () => agentActorRunRepo.listRunning(),
+    ensureAgent: (run) => agentActorLifecycleOps.ensureFromRun(run),
+    logger: createLogger('boundary-agent-rehydrate'),
+  });
+
+  // Wave E / E1-T T5: the periodic agent-actor orphan sweep. Self-rescheduling
+  // (reschedules on failure per AGENTS); operator config drives the cadence. It
+  // stops running bots whose creator agent is no longer running and re-ensures
+  // running agents whose actor died — both through the single ensure entry point
+  // (so E4 can make them lease-aware).
+  const agentOrphanSweep = startAgentOrphanSweep({
+    ports: {
+      listRunningAgentRuns: () => agentActorRunRepo.listRunning(),
+      listRunningAgentBots: () => botRepo.listRunningAgentBots(),
+      isActorAlive: (actorId) => agentActorLifecycleOps.isActorAlive(actorId),
+      reEnsureAgent: (run) => agentActorLifecycleOps.ensureFromRun(run),
+      stopBot: async (botId) => {
+        await botRepo.markBotStopped(botId);
+        await runtime.runtime.stopInstanceDirect(botId);
+      },
+    },
+    sweepIntervalMs: appConfig.agentScanner.orphanSweepIntervalMs,
+    logger: createLogger('boundary-agent-orphan-sweep'),
+  });
 
   // ── Venue-aware candle fetcher for read-only scoring tools (score_candidate).
   //    Candles are fetched BEHIND the boundary (legal-isolation: the consumer
@@ -433,6 +482,24 @@ async function main(): Promise<void> {
       // the get_operator_defaults read tool and enforced as ceilings by
       // set_agent_trading_profile. Traderton is the sole authority.
       operatorRiskDefaults: appConfig.agentRiskDefaults,
+      // Wave E / E1-T T5: the agent-actor lifecycle port for the consumer-only
+      // start_agent_actor / stop_agent_actor tools. Present only for an AGENT
+      // subject (actor = the agent itself); the tools guard on its absence. It
+      // closes over this request's RESOLVED venue coordinates (`injection`) so
+      // start records the right run state without the tool ever seeing coords,
+      // and over the shared ops so stop stops+deregisters+evicts+cascades.
+      agentActorLifecycle: request.actor.type === 'agent'
+        ? {
+            recordRunning: () => agentActorLifecycleOps.recordRunning({
+              ownerId: request.ownerId,
+              actorId: request.actor.id,
+              venueAccountId: injection.venueAccountId,
+              venue: injection.venue,
+              venueType: injection.venueType,
+            }),
+            stop: () => agentActorLifecycleOps.stopAgent(request.ownerId, request.actor.id),
+          }
+        : undefined,
     };
   };
 
@@ -472,7 +539,7 @@ async function main(): Promise<void> {
     botStopSubscriber,
     logger: createLogger('boundary-shutdown'),
     exit: (code) => process.exit(code),
-    stopBackgroundLoops: [() => consumerNotificationPrune.stop(), () => agentScanPrune.stop()],
+    stopBackgroundLoops: [() => consumerNotificationPrune.stop(), () => agentScanPrune.stop(), () => agentOrphanSweep.stop()],
   });
 
   const port = Number(process.env['BOUNDARY_PORT'] ?? 8080);

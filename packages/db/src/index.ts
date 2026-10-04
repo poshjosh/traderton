@@ -39,6 +39,8 @@ export { ConsumerNotificationRepository } from './consumer-notification-reposito
 export type { InsertConsumerNotification, ConsumerNotificationCursor, ConsumerNotificationRow } from './consumer-notification-repository.js';
 export { AgentScanRepository } from './agent-scan-repository.js';
 export type { InsertScanCandidate, InsertScanMetric } from './agent-scan-repository.js';
+export { AgentActorRunRepository } from './agent-actor-run-repository.js';
+export type { UpsertRunningParams, AgentActorRunRow } from './agent-actor-run-repository.js';
 export { AgentTradingProfileRepository, TradingProfileOperationConflictError } from './agent-trading-profile-repository.js';
 export type { AgentTradingProfile, TradingProfileConfiguration, ApplyTradingProfileChange, ApplyTradingProfileOperation } from './agent-trading-profile-repository.js';
 // decision-approval-repository / decision_approvals table removed 2026-09-07:

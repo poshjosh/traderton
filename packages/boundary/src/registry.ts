@@ -9,6 +9,7 @@
 import {
   ToolRegistry,
   accountTools,
+  agentLifecycleTools,
   analyticsTools,
   botManagementTools,
   instrumentTools,
@@ -34,6 +35,7 @@ export function buildToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   const allTools = [
     ...accountTools,
+    ...agentLifecycleTools,
     ...analyticsTools,
     ...botManagementTools,
     ...instrumentTools,

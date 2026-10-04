@@ -1110,6 +1110,23 @@ export class BotRepository {
   // listRunningBotsForInactiveAgents REMOVED (Phase 2): joined the platform `agents`
   // table for the agent-orphan reconcile sweep; only the platform worker called it.
 
+  /**
+   * List every RUNNING bot created by an agent (creatorType='agent'), returning
+   * each bot's id + creator agent id. Backs the Wave E / E1-T T5 orphan sweep,
+   * which stops bots whose creator agent's run state is `stopped`/absent — the
+   * Traderton replacement for the removed `listRunningBotsForInactiveAgents`
+   * (liveness now = `agent_actor_runs`, not the dropped platform `agents` join).
+   */
+  async listRunningAgentBots(): Promise<Array<{ id: string; creatorId: string }>> {
+    const rows = await this.db
+      .select({ id: bots.id, creatorId: bots.creatorId })
+      .from(bots)
+      .where(and(eq(bots.creatorType, 'agent'), eq(bots.status, 'running')));
+    // creatorId is non-null for agent-created bots (set at creation); filter
+    // defensively so the return type is clean (no null creatorId).
+    return rows.flatMap((r) => (r.creatorId ? [{ id: r.id, creatorId: r.creatorId }] : []));
+  }
+
   /** Count running bots for an actor. */
   async countRunningBotsByCreator(creatorType: string, creatorId: string): Promise<number> {
     const rows = await this.db

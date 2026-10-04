@@ -12,6 +12,7 @@
 // trading tools that copy green in 9a plus the registry surface.
 
 export { accountTools } from './account.js';
+export { agentLifecycleTools } from './agent-lifecycle.js';
 export { analyticsTools } from './analytics.js';
 export { botManagementTools } from './bots.js';
 export { instrumentTools } from './find-instrument.js';
