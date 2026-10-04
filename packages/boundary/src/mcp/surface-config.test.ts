@@ -1,62 +1,52 @@
-// Phase 3 T2.2 — `resolveMcpSurfaceConfig` entry-point fail-fast behaviour.
+// Phase 3 T2.2 (rewritten Phase 4 T2) — `resolveMcpSurfaceConfig` entry-point
+// fail-fast behaviour, now building tools/list from the tool registry.
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { ToolRegistry } from '@traderton/worker';
 import { resolveMcpSurfaceConfig } from './surface-config.js';
-
-const VALID_DESCRIPTOR = new URL('../__fixtures__/descriptor-conformance/valid.json', import.meta.url)
-  .pathname;
-
-/** A readFile that must never be called (asserts no file access on the disabled paths). */
-const forbiddenReadFile = (): string => {
-  throw new Error('readFile must not be called');
-};
+import { buildToolRegistry } from '../registry.js';
+import { SKILL_REFS_META_KEY, SKILL_TOOL_MAP } from './skill-tool-map.js';
 
 describe('resolveMcpSurfaceConfig', () => {
   it('stays unmounted when BOUNDARY_MCP_ENABLED is unset or false', () => {
-    expect(resolveMcpSurfaceConfig({}, forbiddenReadFile)).toBeUndefined();
-    expect(resolveMcpSurfaceConfig({ enabled: 'false' }, forbiddenReadFile)).toBeUndefined();
-  });
-
-  it('mounts with an empty tool list when enabled without a descriptor', () => {
-    expect(resolveMcpSurfaceConfig({ enabled: 'true' }, forbiddenReadFile)).toEqual({ tools: [] });
-    expect(resolveMcpSurfaceConfig({ enabled: 'true', descriptorPath: '' }, forbiddenReadFile)).toEqual({
-      tools: [],
-    });
+    const registry = new ToolRegistry();
+    expect(resolveMcpSurfaceConfig({}, registry)).toBeUndefined();
+    expect(resolveMcpSurfaceConfig({ enabled: 'false' }, registry)).toBeUndefined();
   });
 
   it('rejects a non-boolean BOUNDARY_MCP_ENABLED', () => {
-    expect(() => resolveMcpSurfaceConfig({ enabled: 'yes' }, forbiddenReadFile)).toThrow(
+    const registry = new ToolRegistry();
+    expect(() => resolveMcpSurfaceConfig({ enabled: 'yes' }, registry)).toThrow(
       /must be 'true' or 'false'/,
     );
   });
 
-  it('rejects a descriptor path while MCP is disabled', () => {
-    expect(() =>
-      resolveMcpSurfaceConfig({ enabled: 'false', descriptorPath: VALID_DESCRIPTOR }, forbiddenReadFile),
-    ).toThrow(/BOUNDARY_MCP_ENABLED is not true/);
-  });
-
-  it('fails fast on an unreadable or invalid descriptor file', () => {
-    expect(() =>
-      resolveMcpSurfaceConfig({ enabled: 'true', descriptorPath: '/no/such/descriptor.json' }, (p) =>
-        readFileSync(p, 'utf8'),
-      ),
-    ).toThrow(/failed to read/);
-
-    expect(() =>
-      resolveMcpSurfaceConfig({ enabled: 'true', descriptorPath: 'x' }, () => 'not json'),
-    ).toThrow(/not valid JSON/);
-
-    expect(() =>
-      resolveMcpSurfaceConfig({ enabled: 'true', descriptorPath: 'x' }, () => '{"nope":true}'),
-    ).toThrow(/not a serviceable descriptor/);
-  });
-
-  it('serves the descriptor tools when enabled with a valid descriptor file', () => {
-    const config = resolveMcpSurfaceConfig(
-      { enabled: 'true', descriptorPath: VALID_DESCRIPTOR },
-      (p) => readFileSync(p, 'utf8'),
+  it('fails fast when the real tool registry is missing a mapped skill tool', () => {
+    // An empty registry cannot satisfy SKILL_TOOL_MAP → start-time crash.
+    const registry = new ToolRegistry();
+    expect(() => resolveMcpSurfaceConfig({ enabled: 'true' }, registry)).toThrow(
+      /could not be built from the tool registry/,
     );
-    expect(config?.tools.map((t) => t.name).sort()).toEqual(['echo_text', 'reverse_text']);
+  });
+
+  it('builds the surface from the real production registry when enabled', () => {
+    const registry = buildToolRegistry();
+    const config = resolveMcpSurfaceConfig({ enabled: 'true' }, registry);
+    expect(config).toBeDefined();
+    const names = new Set(config?.tools.map((t) => t.name));
+    // Every tool named by the published skills is served.
+    for (const toolNames of Object.values(SKILL_TOOL_MAP)) {
+      for (const n of toolNames) expect(names.has(n)).toBe(true);
+    }
+    // Each served tool carries its skill ref(s) in the neutral _meta key.
+    for (const t of config?.tools ?? []) {
+      expect(Array.isArray(t._meta[SKILL_REFS_META_KEY])).toBe(true);
+    }
+  });
+
+  it('advertises submit_decision (a crypto-trading tool) from the production registry', () => {
+    const config = resolveMcpSurfaceConfig({ enabled: 'true' }, buildToolRegistry());
+    const submit = config?.tools.find((t) => t.name === 'submit_decision');
+    expect(submit).toBeDefined();
+    expect(submit?._meta[SKILL_REFS_META_KEY]).toEqual(['traderton/skills/crypto-trading']);
   });
 });

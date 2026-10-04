@@ -3,7 +3,6 @@
 // middleware that signs with the committed dev signer (`dev/sign.ts`, which
 // reuses `auth.ts` `buildCanonicalString`). Nothing on the auth path is stubbed.
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -15,9 +14,18 @@ import { createBoundaryApp } from '../app.js';
 import type { BoundaryConfig } from '../config.js';
 import type { BoundaryInvocationStore, TradingToolContextFactory } from '../dispatcher.js';
 import { signRequest, type SigningIdentity } from '../dev/sign.js';
-import { projectDescriptorTools } from './descriptor-tools.js';
+import { buildToolsFromRegistry } from './tools-from-registry.js';
+import { SKILL_REFS_META_KEY } from './skill-tool-map.js';
 import { MCP_PATH } from './constants.js';
 import { ENVELOPE_META_KEYS } from './tool-call.js';
+
+// Phase 4 T2: the MCP surface is built from a ToolRegistry (not a descriptor
+// file). This fixture skill-tool map tags the SDK fixture tools so the real
+// `buildToolsFromRegistry` path is exercised end-to-end.
+const FIXTURE_SKILL_REF = 'example/fixtures/sdk-read-tools';
+const FIXTURE_SKILL_TOOL_MAP = {
+  [FIXTURE_SKILL_REF]: ['echo_read', 'slow_read', 'fail_read'],
+};
 
 const IDENTITY: SigningIdentity = {
   consumerId: 'herobids',
@@ -37,7 +45,7 @@ const echoReadTool: AgentTool<TradingToolContext> = {
   name: 'echo_read',
   description: 'read-only echo (sdk fixture)',
   parametersSchema: z.object({ value: z.string() }),
-  parameters: {},
+  parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] },
   category: 'read-config',
   async execute(params: unknown): Promise<ToolResult> {
     toolRuns.echo += 1;
@@ -50,7 +58,7 @@ const slowReadTool: AgentTool<TradingToolContext> = {
   name: 'slow_read',
   description: 'read-only, answers after 1.2 s (sdk fixture)',
   parametersSchema: z.object({}),
-  parameters: {},
+  parameters: { type: 'object', properties: {}, required: [] },
   category: 'read-config',
   async execute(): Promise<ToolResult> {
     await new Promise((resolve) => setTimeout(resolve, 1_200));
@@ -62,7 +70,7 @@ const failReadTool: AgentTool<TradingToolContext> = {
   name: 'fail_read',
   description: 'read-only, non-retryable content failure (sdk fixture)',
   parametersSchema: z.object({}),
-  parameters: {},
+  parameters: { type: 'object', properties: {}, required: [] },
   category: 'read-config',
   async execute(): Promise<ToolResult> {
     return { success: false, error: 'nope', fault: false, retryable: false };
@@ -87,10 +95,6 @@ const STORE: BoundaryInvocationStore = {
     return null;
   },
 };
-
-const DESCRIPTOR = JSON.parse(
-  readFileSync(new URL('../__fixtures__/descriptor-conformance/valid.json', import.meta.url), 'utf8'),
-) as unknown;
 
 interface SendRecord {
   method: string;
@@ -171,8 +175,8 @@ describe('MCP SDK client ↔ the real boundary route', () => {
     registry.register(echoReadTool);
     registry.register(slowReadTool);
     registry.register(failReadTool);
-    const projected = projectDescriptorTools(DESCRIPTOR);
-    if (!projected.ok) throw new Error('descriptor fixture did not project');
+    const built = buildToolsFromRegistry(registry, FIXTURE_SKILL_TOOL_MAP);
+    if (!built.ok) throw new Error(`tool surface did not build: ${built.error.code}`);
     app = createBoundaryApp({
       config: CONFIG,
       registry,
@@ -180,7 +184,7 @@ describe('MCP SDK client ↔ the real boundary route', () => {
       invocationStore: STORE,
       computeRequestFingerprint: (input) => `fp:${input.consumerId}:${input.toolName}`,
       retentionMs: 168 * 60 * 60 * 1000,
-      mcp: { tools: projected.data },
+      mcp: { tools: built.tools },
     });
     await app.listen({ port: 0, host: '127.0.0.1' });
     const address = app.server.address() as AddressInfo;
@@ -319,20 +323,29 @@ describe('MCP SDK client ↔ the real boundary route', () => {
     });
   });
 
-  it('tools/list from the client agrees with the descriptor under the cross-check rule', async () => {
+  it('tools/list from the client serves the registry-built surface with skill refs in _meta', async () => {
+    const registry = new ToolRegistry();
+    registry.register(echoReadTool);
+    registry.register(slowReadTool);
+    registry.register(failReadTool);
+    const built = buildToolsFromRegistry(registry, FIXTURE_SKILL_TOOL_MAP);
+    if (!built.ok) throw new Error(`tool surface did not build: ${built.error.code}`);
+
     const sends: SendRecord[] = [];
     const meta = envelopeMeta();
     const client = await connectClient(meta.deadlineAt, sends);
     const listed = await client.listTools();
     await client.close();
-    const projected = projectDescriptorTools(DESCRIPTOR);
-    if (!projected.ok) throw new Error('descriptor fixture did not project');
-    expect(listed.tools.map((t) => t.name).sort()).toEqual(projected.data.map((t) => t.name).sort());
-    for (const declared of projected.data) {
+
+    expect(listed.tools.map((t) => t.name).sort()).toEqual(built.tools.map((t) => t.name).sort());
+    for (const declared of built.tools) {
       const served = listed.tools.find((t) => t.name === declared.name);
       expect(served?.description).toBe(declared.description);
-      // JCS-equality is the cross-check rule; string compare of a stable key order suffices here.
       expect(canonicalize(served?.inputSchema)).toBe(canonicalize(declared.inputSchema));
+      // Phase 4: every advertised tool carries its skill ref(s) in the neutral _meta key.
+      expect((served?._meta as Record<string, unknown> | undefined)?.[SKILL_REFS_META_KEY]).toEqual([
+        FIXTURE_SKILL_REF,
+      ]);
     }
   });
 });

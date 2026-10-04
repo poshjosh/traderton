@@ -40,7 +40,6 @@ import {
   type CompositeEconomicCalendarConfig,
 } from '@traderton/market-data';
 import type { RedisEvalClient } from '@traderton/market-data';
-import { readFileSync } from 'node:fs';
 import { createBoundaryApp } from './app.js';
 import { BoundaryConfigSchema, type BoundaryConfig } from './config.js';
 import { resolveMcpSurfaceConfig } from './mcp/surface-config.js';
@@ -401,15 +400,13 @@ async function main(): Promise<void> {
     };
   };
 
-  // The additive MCP binding (Phase 3 T2.2) — off unless the operator opts in.
-  // `resolveMcpSurfaceConfig` fails fast on a bad env/descriptor so a misconfig
-  // crashes the process at start rather than mounting a broken surface.
+  // The additive MCP binding (Phase 3 T2.2; Phase 4 T2 — tools/list from the
+  // registry) — off unless the operator opts in. `resolveMcpSurfaceConfig` fails
+  // fast on a bad env or an unserviceable tool surface so a misconfig crashes the
+  // process at start rather than mounting a broken surface.
   const mcp = resolveMcpSurfaceConfig(
-    {
-      enabled: process.env['BOUNDARY_MCP_ENABLED'],
-      descriptorPath: process.env['BOUNDARY_MCP_DESCRIPTOR_PATH'],
-    },
-    (path) => readFileSync(path, 'utf8'),
+    { enabled: process.env['BOUNDARY_MCP_ENABLED'] },
+    registry,
   );
   if (mcp) {
     // eslint-disable-next-line no-console
