@@ -59,7 +59,7 @@ agent, and decisions landing on either copy.
   runtime's Redis connection and `workerId`).
 - Test: "exposes the runtime's worker id".
 
-### S2. Lease-aware ensure — PENDING
+### S2. Lease-aware ensure — DONE
 - `agent-direct-actor-ensure.ts`:
   - Acquire `agent:{agentId}` before constructing.
   - If held elsewhere, return `{ owner: 'remote', workerId }`; otherwise
@@ -129,6 +129,36 @@ ticked.
   the owner's command list, but not relative to the owner's own direct calls. That's the
   same guarantee as two concurrent calls on one container today.
 
+### S2 implementation notes (how the plan text was realised)
+- **Lease-loss detection without touching `InstanceLease`.** As the plan's split-brain
+  risk anticipated, the copied `InstanceLease` stops its renew timer silently on a lost
+  renewal and does not signal callers. Rather than add a callback into the copied file
+  (kept unchanged per S1), S2 detects loss lazily on the cache-hit path: before trusting
+  a cached `local`+alive entry, the ensure re-checks `agentLease.holder('agent:'+actorId)
+  === runtime.workerId`. If we no longer hold it, the cache entry is evicted and the
+  ensure falls through to reconstruct — which re-acquires (and may legitimately land
+  `remote` if another worker took over). This is the "add a callback in the ensure if the
+  copied lease does not signal it" option, implemented as a holder re-check (cheaper, no
+  extra timer, no mutation of the shared lease). The S3 consumer's lease-still-held check
+  before executing a forwarded decision remains the authoritative split-brain guard.
+- **Self-owned reconstruct.** `acquire` uses `SET NX`, so it returns `false` BOTH when a
+  remote worker holds the lease AND when THIS worker already holds it (the revision/venue
+  reconstruct path runs under the lease taken on the first ensure). The ensure
+  distinguishes the two by comparing `holder(...)` to `runtime.workerId`: a foreign holder
+  ⇒ return `{ owner: 'remote', workerId }` and construct nothing; our own holder ⇒ proceed
+  to rebuild (the original renew timer keeps running). This was implicit in "acquired →
+  construct … as today" but is called out here because it is the one non-obvious branch.
+- **`evict` also releases the lease.** The plan says "release on `stop_agent_actor`". The
+  boundary's stop path (`agent-actor-lifecycle-ops.ts`) already calls `ensure.evict(...)`
+  after stopping+deregistering the actor, so S2 folds the `agent:{actorId}` release into
+  `evict` (best-effort, fire-and-forget; `release` is a no-op when we are not the holder).
+  No new call site is needed in the stop flow.
+- **Return type.** `AgentDirectActorEnsure` now returns `Promise<AgentDirectActorResult>`
+  (`{ owner: 'local' } | { owner: 'remote'; workerId }`). Existing in-repo callers
+  (`bin.ts` context factory, `agent-actor-lifecycle-ops.ts` `ensureFromRun`) `await` and
+  discard the result, so the change is non-breaking for them; S3 is the first consumer of
+  the `remote` branch.
+
 ## Outstanding Issues
 
 Non-critical review findings carried forward (grouped by step). None are blocking.
@@ -142,3 +172,13 @@ Non-critical review findings carried forward (grouped by step). None are blockin
   `runtime`. Cosmetic only.
 - [LOW] Optional test tightening: assert `agentLease instanceof InstanceLease` rather
   than only `toBeDefined()`.
+
+### S2 — Lease-aware ensure
+- [MEDIUM, ADDRESSED] Remote cache entries never fast-path (re-probe each call); added a
+  clarifying comment + a takeover test ("re-ensure after a remote result stays remote,
+  then takes over once the foreign lease expires").
+- [MEDIUM, ADDRESSED] Single-flight is now load-bearing for lease ownership (prevents a
+  double-acquire split). Added a safety-invariant comment in the acquire block + a test
+  ("acquires the lease exactly once under concurrent ensures for the same agent").
+- [LOW, ADDRESSED] `workerId: ''` unknown-owner sentinel documented on
+  `AgentDirectActorResult` for S3; non-owner `evict` no-op test added.
