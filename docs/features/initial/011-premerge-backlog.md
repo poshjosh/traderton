@@ -235,3 +235,26 @@ BUILD/migration: sound. 0070 is a hand-written custom DROP (drizzle-kit's rename
 Plus the ACCEPTED Gaps needing explicit sign-off at cutover: g1 decision-failure persistence, g2 llm-artifact persistence (neither side persists until the agent-reasoning-runtime relocates — greenfield, no history lost).
 Also inherently HUMAN/operational (cannot be code-satisfied): merge-gate items (3) run locally + on staging a while (manual/visual/black-box) and (4) human approval; and the operator-config touchpoints (allowedActorTypes:['system'] for the alert-dispatcher consumer; SCRAPFLY/LLM env for the boundary).
 BOTTOM LINE: c4.9 (trading-table extraction + drop) is DONE and isolation holds. The MIGRATION is not merge-ready until the remaining Deferred-required entries (1–6) are resolved-or-signed-off and the human runs the staging/approval gate. These six are the next work; each is its own slice under the same loop.
+
+## Wave E — actor events + lifecycle (the never-authored "item C2")
+
+Restores the actor callbacks stubbed as "M1 no-op → item C2" when trading moved out of herobids.
+Plans + per-step/per-task status live in
+[`docs/features/2026/10/04/001-wave-e-actor-events-and-lifecycle/`](../2026/10/04/001-wave-e-actor-events-and-lifecycle/).
+
+- [x] **E0 — `bot:stop:*` subscriber** (traderton). DONE 2026-10-04.
+- [x] **E2 — bot status truth + restart survival** (traderton only). DONE 2026-10-04 — explicit-stop marking,
+  shared running-bot loader + boot rehydrate, bot failure callbacks persist status, resume-ruling graceful
+  shutdown, boundary SIGTERM/SIGINT handler. See [001 "item C2"](./001-parity-ledger.md).
+- [x] **E3-T — Traderton → consumer event channel (producer side)** (traderton). DONE 2026-10-04 —
+  `consumer_notifications` outbox + repo, best-effort notifier wired into agent + bot actors, the
+  system-only `scan_consumer_notifications` tool, and a retention prune loop.
+- [ ] **E3-H — herobids relay** — GATED (awaiting human go). Polls the outbox and republishes the existing
+  herobids message types.
+- [x] **E1-T — agent scan loop + agent-actor lifecycle** (traderton). DONE 2026-10-04 — profile
+  creator/active strategy ownership split (parity-tested), `agentScanner` operator config, scan persistence
+  + retention, the hybrid scan loop wired into the agent actor, and consumer-only
+  `start_agent_actor`/`stop_agent_actor` + `agent_actor_runs` with cascade stop, boot rehydrate, orphan sweep.
+- [ ] **E1-H — herobids profile fields + session start/stop calls** — GATED (awaiting human go).
+- Follow-ups: **E4** (agent-actor lease + owner routing) and **E5** (`journal_events` retention +
+  partitioning) are separate feature folders, not started.

@@ -1,6 +1,7 @@
 # 000 — Wave E overview: actor events + lifecycle (the never-authored "item C2")
 
-**Status:** planned, not started. **Date:** 2026-10-04.
+**Status:** Traderton (`-T`) phases DONE (E0, E2, E3-T, E1-T); herobids (`-H`) phases
+GATED (awaiting human go); E4/E5 separate folders, not started. **Date:** 2026-10-04.
 **Backlog:** [011 Wave E](../../../../initial/011-premerge-backlog.md). **Ledger:**
 [001 "Actor event + lifecycle callbacks never authored (item C2)"](../../../../initial/001-parity-ledger.md).
 **Anomaly:** [003, 2026-10-04](../../../../initial/003-anomalies-and-deviations.md).
@@ -14,9 +15,9 @@ When trading moved from herobids to Traderton, the actor callbacks were stubbed 
 | Item | What | Plan | Repos |
 |---|---|---|---|
 | E0 | `bot:stop:*` subscriber, so `stop_bot` actually stops a running bot | DONE (2026-10-04) | traderton |
-| E2 | Bot status stays true; bots survive restarts | [001](./001-e2-bot-status-and-restart-plan.md) | traderton only |
-| E3 | Traderton → consumer event channel (scan results, wakes, breaker inputs, bot/agent status) | [002](./002-e3-consumer-event-channel-plan.md) | traderton, then herobids |
-| E1 | Agent technical scan loop, explicit agent-actor lifecycle, agent→bot cascade stop + orphan sweep | [003](./003-e1-agent-scan-loop-plan.md) | traderton, then herobids |
+| E2 | Bot status stays true; bots survive restarts | [001](./001-e2-bot-status-and-restart-plan.md) — **DONE** | traderton only |
+| E3 | Traderton → consumer event channel (scan results, wakes, breaker inputs, bot/agent status) | [002](./002-e3-consumer-event-channel-plan.md) — **E3-T DONE; E3-H GATED** | traderton, then herobids |
+| E1 | Agent technical scan loop, explicit agent-actor lifecycle, agent→bot cascade stop + orphan sweep | [003](./003-e1-agent-scan-loop-plan.md) — **E1-T DONE; E1-H GATED** | traderton, then herobids |
 | E4 | Agent-actor lease + owner routing (safe multi-replica) | [../002-agent-actor-lease-and-routing/001-plan.md](../002-agent-actor-lease-and-routing/001-plan.md) | traderton only; after E1 |
 | E5 | `journal_events` retention + partitioning | [../003-journal-retention/001-plan.md](../003-journal-retention/001-plan.md) | traderton only; independent, best before real data |
 

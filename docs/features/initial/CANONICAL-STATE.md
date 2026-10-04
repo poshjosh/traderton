@@ -95,10 +95,15 @@ swap-token-resolver/token-safety) was already deleted from the live runtime with
 **B1 (2026-09-12) deleted the dead files.** It was NOT a live surface. `@herobids/engine` is **type-only**
 everywhere (all importers) — no engine value runs in-process. `TechnicalScanState` + its consumers are
 LIVE and KEPT. **[CORRECTED 2026-10-04]** The earlier claim that "Traderton now produces"
-`agent.technical.scan_completed` is false. Traderton runs no agent scan loop, its scan/wake/journal
-callbacks are no-op stubs (item C2, never authored), and no Traderton→herobids event channel exists. The
-herobids consumers are live code with no producer. See 001 "Actor event + lifecycle callbacks never
-authored (item C2)", 003 (2026-10-04), and 011 Wave E.
+`agent.technical.scan_completed` was false at the time. **[UPDATED 2026-10-04 — Wave E `-T` landed]**
+Traderton now DOES produce the actor events: the agent scan loop is wired (E1-T T4), the scan/wake/journal
+and bot/agent-status callbacks write to a dedicated `consumer_notifications` outbox (E3-T T2–T4), and the
+system-only `scan_consumer_notifications` tool exposes them for a poller. The producer side is live.
+What remains is the herobids RELAY (E3-H) that polls the outbox and republishes the existing herobids
+message types — it is GATED behind a human go, so until it lands the notifications accumulate unread and
+are pruned after `notifications.retentionDays`. See 001 "Actor event + lifecycle callbacks never authored
+(item C2)" (Wave E `-T` restoration), 003 (2026-10-04), and
+`docs/features/2026/10/04/001-wave-e-actor-events-and-lifecycle/`.
 
 **What REMAINS (the real surviving in-process market-data surface):**
 - **B2 — agent-container tick-loop couplings** (`apps/worker/src/agent.ts`): regime eval (→`check_regime`),
