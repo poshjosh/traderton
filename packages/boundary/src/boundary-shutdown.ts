@@ -30,6 +30,10 @@ export interface BoundaryShutdownDeps {
   logger: ShutdownLogger;
   /** Injected so tests can assert the exit code without killing the process. */
   exit: (code: number) => void;
+  /** Optional background-loop stop hooks run first (best-effort, synchronous) so
+   *  timers (e.g. the consumer-notification prune loop) stop before teardown.
+   *  The process exit alone would also stop them; this just makes it tidy. */
+  stopBackgroundLoops?: Array<() => void>;
 }
 
 /**
@@ -63,6 +67,16 @@ export function createBoundaryShutdown(deps: BoundaryShutdownDeps): () => Promis
     shuttingDown = true;
 
     deps.logger.info({}, 'Shutting down boundary...');
+
+    // 0. Stop background timers (best-effort). Each stop handle is a no-throw
+    //    latch; a failure here must not block the teardown below.
+    for (const stop of deps.stopBackgroundLoops ?? []) {
+      try {
+        stop();
+      } catch (err) {
+        deps.logger.error({ err }, 'boundary shutdown: stopping a background loop failed');
+      }
+    }
 
     // 1. Stop accepting new requests.
     try {

@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gte, inArray, lte, or, sql, sum } from 'drizzle-orm
 import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, BotConfigSchema, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig, validateExecutionCapability } from '@traderton/domain';
 import type { Database } from '@traderton/db';
-import { fills, journalEvents, positions, bots, venueAccounts, FillRepository, PositionRepository, PgJournal, ReconciliationEventRepository, DecisionRepository, DecisionFailureRepository } from '@traderton/db';
+import { fills, journalEvents, positions, bots, venueAccounts, FillRepository, PositionRepository, PgJournal, ReconciliationEventRepository, DecisionRepository, DecisionFailureRepository, ConsumerNotificationRepository } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
 import { markOpenPositions, POSITION_MARK_BUDGET_MS } from './position-marks.js';
 import { createLogger } from '../logger.js';
@@ -722,6 +722,56 @@ const getEventByIdTool: AgentTool<TradingToolContext> = {
     const event = await new PgJournal(ctx.db as Database).getById(id);
 
     return { success: true, data: { ok: true, event } };
+  },
+};
+
+// --- scan_consumer_notifications (Wave E / E3-T T5) ---
+//
+// Cross-owner polled read over the Traderton→consumer outbox table
+// (consumer_notifications), modelled on scan_trade_events above: a thin
+// pass-through to ConsumerNotificationRepository.scanAfter (asc createdAt, id).
+// The herobids actor-event relay (E3-H) polls this to republish the existing
+// herobids message types; external MCP consumers can poll the same way.
+//
+// Like scan_trade_events it is system-subject only BY CONVENTION — reachable
+// only under a `system` subject (actor.type='system') fenced via the boundary
+// consumer's allowedActorTypes:['system'] grant. There is NO per-tool allow-list
+// field; the fence is actor-type-only at the boundary. Consumer-only visibility
+// is additionally guaranteed by its ABSENCE from SKILL_TOOL_MAP, so it never
+// appears in any skill's agent-facing tools/list.
+
+const ScanConsumerNotificationsParamsSchema = z.object({
+  cursor: z
+    .object({
+      createdAt: z.string().describe('ISO date of the cursor boundary timestamp'),
+      seenIds: z.array(z.string()).describe('Notification IDs already processed at the boundary timestamp'),
+    })
+    .optional()
+    .describe('Cursor pair — omit to start from the beginning'),
+  types: z.array(z.string()).optional().describe('Only include notifications whose type is one of these exact strings'),
+  limit: z.number().int().positive().max(500).describe('Max notifications to return (capped at 500)'),
+});
+
+const scanConsumerNotificationsTool: AgentTool<TradingToolContext> = {
+  name: 'scan_consumer_notifications',
+  description: 'Cursor-based scan of consumer notifications (the Traderton→consumer outbox), ordered ascending (oldest first). Cross-owner; the caller supplies types as the only filter. System-subject only.',
+  parametersSchema: ScanConsumerNotificationsParamsSchema,
+  parameters: convertZodToJsonSchema(ScanConsumerNotificationsParamsSchema),
+  category: 'read-database',
+  async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { cursor, types, limit } = params as z.infer<typeof ScanConsumerNotificationsParamsSchema>;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+
+    const notifications = await new ConsumerNotificationRepository(ctx.db as Database).scanAfter({
+      cursor: cursor ? { createdAt: new Date(cursor.createdAt), seenIds: cursor.seenIds } : undefined,
+      types,
+      limit,
+    });
+
+    return { success: true, data: { ok: true, notifications } };
   },
 };
 
@@ -2000,6 +2050,7 @@ export const botManagementTools: AgentTool[] = [
   scanTradeEventsTool,
   getEventsByIdsTool,
   getEventByIdTool,
+  scanConsumerNotificationsTool,
   stopBotTool,
   startBotTool,
   adjustBotConfigTool,

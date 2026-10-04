@@ -181,10 +181,12 @@ marketDataRecording:
 
 # Wave E / E3 Traderton→consumer event channel (consumer_notifications outbox).
 # A herobids relay polls the outbox and republishes the existing message types.
-# T3 adds only the scan payload cap below; T5 will add retention/prune keys here.
 notifications:
   scanCompleted:
     maxSignals: 20             # max signals forwarded per scan_completed row; extra signals are truncated and the row is flagged signalsTruncated
+  retentionDays: 7             # rows older than this are pruned; a consumer must poll within this window or lose unread notifications
+  pruneIntervalMs: 3600000     # how often the boundary prune loop runs (1h)
+  pruneBatchSize: 5000         # expired rows deleted per prune batch
 
 marketData:
   dexscreener:

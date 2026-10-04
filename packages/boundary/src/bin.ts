@@ -18,6 +18,7 @@ import {
   AgentTradingProfileRepository,
   InstrumentRepository,
   BoundaryInvocationRepository,
+  ConsumerNotificationRepository,
   computeRequestFingerprint,
 } from '@traderton/db';
 import {
@@ -57,6 +58,7 @@ import { buildAgentDirectActorEnsure } from './agent-direct-actor-ensure.js';
 import { subscribeBotStopSignals } from './bot-stop-subscriber.js';
 import { buildBoundaryTradingRuntime } from './build-boundary-runtime.js';
 import { registerBoundaryShutdown } from './boundary-shutdown.js';
+import { startConsumerNotificationPruneLoop } from './consumer-notification-prune.js';
 
 function loadBoundaryConfig(): BoundaryConfig {
   const consumerId = process.env['BOUNDARY_CONSUMER_ID'];
@@ -92,6 +94,18 @@ async function main(): Promise<void> {
   // (E2 F2) — see `buildBoundaryTradingRuntime` for the wiring + resume rationale.
   const runtime = buildBoundaryTradingRuntime({ config: appConfig, redis, db });
   await runtime.start();
+
+  // Wave E / E3-T T5: prune the consumer-notification outbox so it stays bounded.
+  // Self-rescheduling loop (reschedules on failure per AGENTS); operator config
+  // drives the retention window / interval / batch size. The relay (E3-H) and
+  // other MCP consumers must poll within `notifications.retentionDays`.
+  const consumerNotificationPrune = startConsumerNotificationPruneLoop({
+    repo: new ConsumerNotificationRepository(db),
+    retentionDays: appConfig.notifications.retentionDays,
+    pruneIntervalMs: appConfig.notifications.pruneIntervalMs,
+    pruneBatchSize: appConfig.notifications.pruneBatchSize,
+    logger: createLogger('boundary-notification-prune'),
+  });
 
   // E0 hotfix: the copied `stop_bot` tool publishes `bot:stop:{botId}`; stop the
   // in-process actor when it does. Dedicated connection — a Redis connection in
@@ -444,6 +458,7 @@ async function main(): Promise<void> {
     botStopSubscriber,
     logger: createLogger('boundary-shutdown'),
     exit: (code) => process.exit(code),
+    stopBackgroundLoops: [() => consumerNotificationPrune.stop()],
   });
 
   const port = Number(process.env['BOUNDARY_PORT'] ?? 8080);

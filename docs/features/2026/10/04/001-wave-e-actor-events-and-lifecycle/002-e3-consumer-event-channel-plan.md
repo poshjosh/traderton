@@ -1,6 +1,6 @@
 # 002 — E3: Traderton → consumer event channel
 
-**Status:** E3-T PENDING (T1 DONE, T2 DONE, T3 DONE, T4 DONE, T5 PENDING);
+**Status:** E3-T DONE (T1 DONE, T2 DONE, T3 DONE, T4 DONE, T5 DONE);
 E3-H GATED (herobids, awaiting human go).
 **Depends on:** E2 step 2 (loader stamps `creatorType`/`creatorId`
 on bot configs). **Repos:** traderton (E3-T), then herobids (E3-H, gated on human go).
@@ -194,3 +194,14 @@ channel" → settled (outbox table, polled; push remains 010 B10). 005 updated. 
 - NOTE: the E2 step-3 callback tests now also exercise the notifier path (fake DB has no
   `.insert`), producing harmless best-effort "append failed" log lines; the E2 assertions
   (status writes, ordering, resume-ruling no-op) remain intact and green.
+
+### [T5] read tool + pruning
+- LOW: no tool-level "rejects a non-system subject" test — the fence is actor-type-only at
+  the boundary (`allowedActorTypes:['system']`), as with `scan_trade_events`; the tool only
+  guards `ctx.db`. The consumer-only guarantee is tested at the right layer (absent from
+  SKILL_TOOL_MAP / agent tools/list). No action.
+- LOW: prune loop timer is not `unref()`-ed, by house convention (matches the
+  economic-calendar loop); shutdown stops it explicitly via the returned handle + stopped
+  latch. No action.
+- LOW: `deleteOlderThan` one-extra-no-op-query edge (expired count an exact multiple of
+  batchSize) — pre-existing T1 trait, already logged. No action.

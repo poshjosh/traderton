@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { ToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES } from '@traderton/domain';
-import { FillRepository, PositionRepository, PgJournal, DecisionRepository, DecisionFailureRepository } from '@traderton/db';
+import { FillRepository, PositionRepository, PgJournal, DecisionRepository, DecisionFailureRepository, ConsumerNotificationRepository } from '@traderton/db';
 import { botManagementTools } from './bots.js';
 
 const createBotTool = botManagementTools.find((t) => t.name === 'create_bot')!;
@@ -15,6 +15,7 @@ const getOwnerBotJournalTool = botManagementTools.find((t) => t.name === 'get_ow
 const scanTradeEventsTool = botManagementTools.find((t) => t.name === 'scan_trade_events')!;
 const getEventsByIdsTool = botManagementTools.find((t) => t.name === 'get_events_by_ids')!;
 const getEventByIdTool = botManagementTools.find((t) => t.name === 'get_event_by_id')!;
+const scanConsumerNotificationsTool = botManagementTools.find((t) => t.name === 'scan_consumer_notifications')!;
 const deleteBotTool = botManagementTools.find((t) => t.name === 'delete_bot')!;
 const instantiateBotTool = botManagementTools.find((t) => t.name === 'instantiate_bot')!;
 const getAgentFillsTool = botManagementTools.find((t) => t.name === 'get_agent_fills')!;
@@ -2542,6 +2543,80 @@ describe('get_event_by_id — cross-owner single fetch by id', () => {
     (ctx as { db?: unknown }).db = undefined;
 
     const result = await getEventByIdTool.execute({ id: 'ev-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toContain('direct db access');
+  });
+});
+
+// ── Cross-owner consumer-notification outbox scan (Wave E / E3-T T5) ─────────
+//
+// scan_consumer_notifications is a thin pass-through over
+// ConsumerNotificationRepository.scanAfter (asc createdAt, id), mirroring
+// scan_trade_events. It applies NO owner/actor filter (deliberate cross-owner):
+// the system subject supplies `types` as the only narrowing filter. The fence is
+// actor-type-only at the boundary (allowedActorTypes:['system']), so — like
+// scan_trade_events — the tool itself only guards ctx.db-absent, not actor type.
+// The consumer-only guarantee (absence from any skill tools/list) is asserted in
+// the boundary skill-tool-map test.
+
+describe('scan_consumer_notifications — cross-owner cursor-based scan', () => {
+  it('is registered read-database', () => {
+    expect(scanConsumerNotificationsTool).toBeDefined();
+    expect(scanConsumerNotificationsTool.category).toBe('read-database');
+  });
+
+  it('returns notifications after the cursor for a system subject, threading cursor (ISO→Date) / types / limit through to scanAfter', async () => {
+    const rows = [{ id: 'n-1' }, { id: 'n-2' }];
+    const spy = vi.spyOn(ConsumerNotificationRepository.prototype, 'scanAfter').mockResolvedValue(rows as never);
+    const ctx = makeCtx({ db: stubDb });
+
+    const result = await scanConsumerNotificationsTool.execute(
+      {
+        cursor: { createdAt: '2024-05-01T00:00:00.000Z', seenIds: ['a', 'b'] },
+        types: ['scan_completed', 'bot_status'],
+        limit: 200,
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ok: true, notifications: rows });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [optsArg] = spy.mock.calls[0];
+    const opts = optsArg as { cursor?: { createdAt: Date; seenIds: string[] }; types?: string[]; limit: number };
+    // Cursor createdAt reaches scanAfter as a Date (ISO→Date parsed).
+    expect(opts.cursor?.createdAt).toBeInstanceOf(Date);
+    expect(opts.cursor?.createdAt.toISOString()).toBe('2024-05-01T00:00:00.000Z');
+    // seenIds passes verbatim; types + limit thread through unchanged.
+    expect(opts.cursor?.seenIds).toEqual(['a', 'b']);
+    expect(opts.types).toEqual(['scan_completed', 'bot_status']);
+    expect(opts.limit).toBe(200);
+  });
+
+  it('passes cursor: undefined when omitted', async () => {
+    const spy = vi.spyOn(ConsumerNotificationRepository.prototype, 'scanAfter').mockResolvedValue([] as never);
+    const ctx = makeCtx({ db: stubDb });
+
+    await scanConsumerNotificationsTool.execute({ limit: 50 }, ctx);
+
+    const [optsArg] = spy.mock.calls[0];
+    const opts = optsArg as { cursor?: unknown; limit: number };
+    expect(opts.cursor).toBeUndefined();
+    expect(opts.limit).toBe(50);
+  });
+
+  it('rejects a limit above the 500 cap at schema parse time', () => {
+    const parsed = scanConsumerNotificationsTool.parametersSchema.safeParse({ limit: 501 });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('fails fault:false when direct db access is unavailable', async () => {
+    const ctx = makeCtx({});
+    (ctx as { db?: unknown }).db = undefined;
+
+    const result = await scanConsumerNotificationsTool.execute({ limit: 10 }, ctx);
 
     expect(result.success).toBe(false);
     expect(result.fault).toBe(false);

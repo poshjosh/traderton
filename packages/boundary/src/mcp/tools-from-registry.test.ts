@@ -6,6 +6,7 @@ import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domai
 import { ToolRegistry } from '@traderton/worker';
 import { buildToolsFromRegistry } from './tools-from-registry.js';
 import { SKILL_REFS_META_KEY, SKILL_TOOL_MAP, buildToolSkillRefs } from './skill-tool-map.js';
+import { buildToolRegistry } from '../registry.js';
 
 function readTool(name: string): AgentTool<TradingToolContext> {
   return {
@@ -93,5 +94,23 @@ describe('SKILL_TOOL_MAP (the published Traderton skills)', () => {
     ]);
     // find_instrument belongs only to crypto-trading.
     expect(byTool.get('find_instrument')).toEqual(['traderton/skills/crypto-trading']);
+  });
+
+  it('keeps the system-feed tools (scan_consumer_notifications, scan_trade_events) consumer-only — registered but in no skill tools/list', () => {
+    // These are reachable only under a `system` subject at the boundary. Their
+    // consumer-only guarantee is their ABSENCE from every skill set: a tool not
+    // in SKILL_TOOL_MAP never appears in any agent-facing tools/list (Wave E E3).
+    const registry = buildToolRegistry();
+    const systemFeedTools = ['scan_consumer_notifications', 'scan_trade_events'];
+
+    const advertised = new Set(Object.values(SKILL_TOOL_MAP).flat());
+    const byTool = buildToolSkillRefs();
+    for (const name of systemFeedTools) {
+      // Registered in the real tool registry…
+      expect(registry.get(name)).toBeDefined();
+      // …but named by no skill, so it carries no _meta and is never advertised.
+      expect(advertised.has(name)).toBe(false);
+      expect(byTool.get(name)).toBeUndefined();
+    }
   });
 });

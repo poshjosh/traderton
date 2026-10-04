@@ -467,6 +467,49 @@ in the boundary config surface — c4.9j OQ-2).
 - **`get_event_by_id`** — payload `{ id: string }`; result
   `{ ok: true, event: JournalRow | null }` (`event` is null when absent).
 
+### `scan_consumer_notifications` (read-only) — Wave E / E3-T
+
+The Traderton→consumer **outbox** read. Traderton writes delivery records to a
+**dedicated** `consumer_notifications` table (NOT `journal_events`, which is the
+trading audit log — mixing them would pollute the agent journal views). The
+herobids actor-event relay polls this tool and republishes the **existing**
+herobids message types, so herobids consumers stay unchanged; external MCP
+consumers can poll the same way. `read-database` (read-only; venue resolution
+short-circuited). Like the trade-event feed it applies **NO owner/actor filter**
+(deliberate cross-owner): the subject supplies `types` as the only narrowing
+filter. Invoked under a `system` subject (`actor.type='system'`), fenced by the
+consumer's `allowedActorTypes:['system']` grant (no per-tool allow-list). It is
+**consumer-only**: it is absent from every skill tool set (`SKILL_TOOL_MAP`), so
+it never appears in an agent's `tools/list`.
+
+- **`scan_consumer_notifications`** — payload `{ cursor?: { createdAt:
+  string(ISO), seenIds: string[] }, types?: string[], limit: number (≤500) }`;
+  result `{ ok: true, notifications: ConsumerNotificationRow[] }`. Cursor-based
+  scan ordered ascending (`createdAt, id`), returning rows after the cursor. The
+  consumer advances the cursor to the last returned row's `(createdAt, id)`.
+
+**Outbox vocabulary.** Each row: `id` (UUIDv7), `type`, `ownerId` (herobids user
+id — the soft owner, so `publishBotStatus` needs no lookup), `agentId | null` (the
+agent to notify; for a bot it is the bot's `creatorId` when `creatorType==='agent'`,
+else `null`), `botId | null`, `payload` (jsonb), `createdAt`. The five types and
+their herobids republish targets:
+
+| Type | Payload | Herobids republish |
+|---|---|---|
+| `scan_completed` | `scan` (signals capped at `notifications.scanCompleted.maxSignals`, `signalsTruncated`) | `emitTechnicalScanCompleted(agentId, scan)` |
+| `agent_wake` | `wake` | `emitAgentWake(agentId, wake)` |
+| `journal_event` | `journalType`, `detail` (JSON string) | `emitJournalEvent(agentId, { journalType, detail })` → session circuit breaker |
+| `bot_status` | `status`, `reason`, `managedBots` | agent set: `emitInstanceStatus(agentId, …)`; always: `publishBotStatus(ownerId, botId, status)` |
+| `agent_status` | `status: 'crashed'`, `error` | `sessionManager.handleRuntimeFailure(…)` |
+
+**Delivery and retention.** Delivery is **at-least-once**: a crash between a
+relay republish and its cursor save re-delivers a batch (a breaker may count one
+event twice — accepted). Rows are pruned after `notifications.retentionDays`
+(default 7), so **a consumer MUST poll within that window** or lose unread rows
+(accepted: they are stale by then; status truth lives in the `bots` table).
+Payloads are **additive-only** — new fields may be added, existing fields are
+never removed or repurposed, so an older relay keeps parsing newer rows.
+
 ### `get_owner_bot_fills` / `get_owner_bot_positions` / `get_owner_fills` / `get_owner_positions` / `get_owner_journal` (read-only) — c4.2
 
 Owner-scoped raw-row reads used by the herobids PLATFORM export routes

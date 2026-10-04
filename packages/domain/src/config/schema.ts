@@ -977,11 +977,10 @@ export const AppConfigSchema = z.object({
   marketDataRecording: MarketDataRecordingConfigSchema.default({}),
   marketData: MarketDataConfigSchema.optional(),
   liveRollout: LiveRolloutConfigSchema.default({}),
-  // Wave E / E3 consumer-notification channel (outbox table). T3 adds only the
-  // scan payload cap; T5 extends `notifications.*` with retention/prune keys.
-  // Both the object and its nested `scanCompleted` default to `{}` so existing
-  // operator configs without the block still parse, and T5 can add siblings
-  // without breaking anything.
+  // Wave E / E3 consumer-notification channel (outbox table). T3 adds the scan
+  // payload cap; T5 adds the retention/prune keys (the boundary prune loop reads
+  // them). Every key has a default so existing operator configs without the
+  // block — or without the T5 siblings — still parse.
   notifications: z.object({
     scanCompleted: z.object({
       /** Max `signals` forwarded per scan_completed notification (mirrors the
@@ -989,6 +988,14 @@ export const AppConfigSchema = z.object({
        *  and flagged `signalsTruncated: true`. */
       maxSignals: z.number().int().min(1).default(20),
     }).default({}),
+    /** How long a notification row is retained before the boundary prune loop
+     *  deletes it. A consumer MUST poll within this window or lose unread rows
+     *  (accepted: stale by then; status truth lives in the `bots` table). */
+    retentionDays: z.number().int().min(1).default(7),
+    /** How often the boundary prune loop runs (default 1h). */
+    pruneIntervalMs: z.number().int().min(1).default(3_600_000),
+    /** How many expired rows the prune loop deletes per batch. */
+    pruneBatchSize: z.number().int().min(1).default(5000),
   }).default({}),
 }).superRefine((data, ctx) => {
   const oneInchConfig = data.venues['1inch'];
