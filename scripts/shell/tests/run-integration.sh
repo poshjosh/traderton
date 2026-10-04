@@ -84,9 +84,19 @@ echo "==> running the gated integration tests"
 # agent-actor-run-repository: Wave E E1-T T5 — exercises the agent-actor run-state
 # repo (owner/actor upsert idempotency, stop transition, running listing, owner-
 # scoped lookup) against real Postgres. Truncates agent_actor_runs in beforeEach.
+# agent-actor-multi-replica: 001 S5 — builds TWO real createTradingRuntime
+# replicas (A + B) in one process sharing one Postgres + one Redis to prove the
+# agent-actor lease + owner routing (001 S1-S4) across replicas. CASE 1: a
+# decision submitted on B for an A-owned agent is forwarded to A's command list,
+# executes on A's single live actor, and B's caller reads the reply. CASE 2:
+# after A "dies" without a graceful release (lease key deleted to simulate TTL
+# expiry), B's orphan sweep takes over the still-running agent and a new decision
+# executes locally on B. Paper agent → fully offline (no venue/network). Truncates
+# agent_actor_runs/bots/venue_accounts in beforeEach + clears the agent lease key.
 pnpm exec vitest run --no-file-parallelism \
   packages/boundary/src/boundary.verification.integration.test.ts \
   packages/boundary/src/boundary.mcp.verification.integration.test.ts \
+  packages/boundary/src/agent-actor-multi-replica.integration.test.ts \
   packages/worker/src/restart-round-trip.integration.test.ts \
   packages/db/src/consumer-notification-repository.integration.test.ts \
   packages/db/src/agent-trading-profile-repository.integration.test.ts \

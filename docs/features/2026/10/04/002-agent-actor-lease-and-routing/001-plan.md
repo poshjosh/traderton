@@ -93,7 +93,7 @@ agent, and decisions landing on either copy.
   success.
 - Test: "two runtimes rehydrating the same agent start exactly one actor".
 
-### S5. Multi-replica integration proof (real Redis + Postgres) — PENDING
+### S5. Multi-replica integration proof (real Redis + Postgres) — DONE
 1. Two boundary app instances in one test process share Redis and Postgres.
 2. Activate an agent through instance A, then submit a decision through instance B. It
    executes once, on A, and B's caller gets the reply.
@@ -303,3 +303,19 @@ Non-critical review findings carried forward (grouped by step). None are blockin
   cross-replica interleaving over real Redis is proven by S5 (next). Left as-is.
 - [LOW] Test-local `injectionFor` duplicates the production venueType narrowing (mirrors
   `ensureFromRun`'s `injectionFor`); a future narrowing-rule change must be mirrored.
+
+### S5 — Multi-replica integration proof
+- New gated integration test `packages/boundary/src/agent-actor-multi-replica.integration.test.ts`
+  (DATABASE_URL/REDIS_URL `skipIf`); appended to `run-integration.sh`. CASE 1 (B→A forward,
+  A executes, B's caller gets the reply), CASE 1b (sender envelope-contract assertion on
+  A's command list — added to lock the sender contract, CodeReviewer MEDIUM), CASE 2
+  (A dies via `agentLease.shutdown()` + `del` lease key → B's sweep takes over → local on B).
+  Original CASE 1 + CASE 2 verified LIVE by the implementer (2 passed). CASE 1b compiles +
+  skips cleanly; it will run live under the final `run-five.sh` (tt-integration).
+- [MEDIUM, ADDRESSED] Reply-writer attribution was proven by construction; CASE 1b now
+  asserts the raw forwarded envelope (unchanged payload + resolved injection) and that the
+  sender writes NO reply, locking the sender contract against drift.
+- [LOW] CASE 2 does not exercise forwarding TO B after takeover (both ensures are local
+  post-takeover) — the forward path is covered by CASE 1. Optional future case.
+- [LOW] Test gives the S3 sender its own tracked Redis connection (the runtime does not
+  expose its internal connection); functionally identical on one Redis server.
