@@ -35,6 +35,8 @@ export { DecisionFailureRepository } from './decision-failure-repository.js';
 export type { InsertDecisionFailure, DecisionFailureQuery } from './decision-failure-repository.js';
 export { BoundaryInvocationRepository, computeRequestFingerprint } from './boundary-invocation-repository.js';
 export type { BeginOrResolveParams, BeginResult, CompleteParams, BoundaryInvocationRow } from './boundary-invocation-repository.js';
+export { ConsumerNotificationRepository } from './consumer-notification-repository.js';
+export type { InsertConsumerNotification, ConsumerNotificationCursor, ConsumerNotificationRow } from './consumer-notification-repository.js';
 export { AgentTradingProfileRepository, TradingProfileOperationConflictError } from './agent-trading-profile-repository.js';
 export type { AgentTradingProfile, TradingProfileConfiguration, ApplyTradingProfileChange, ApplyTradingProfileOperation } from './agent-trading-profile-repository.js';
 // decision-approval-repository / decision_approvals table removed 2026-09-07:

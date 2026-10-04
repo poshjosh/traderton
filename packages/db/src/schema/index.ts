@@ -29,3 +29,4 @@ export { decisionFailures } from './decision-failures.js';
 export { marketAssessmentRuns } from './market-assessment-runs.js';
 export { marketAssessmentArtifacts } from './market-assessment-artifacts.js';
 export { boundaryInvocations } from './boundary-invocations.js';
+export { consumerNotifications } from './consumer-notifications.js';

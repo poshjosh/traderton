@@ -1,6 +1,6 @@
 # 002 — E3: Traderton → consumer event channel
 
-**Status:** E3-T PENDING (T1 PENDING, T2 PENDING, T3 PENDING, T4 PENDING, T5 PENDING);
+**Status:** E3-T PENDING (T1 DONE, T2 PENDING, T3 PENDING, T4 PENDING, T5 PENDING);
 E3-H GATED (herobids, awaiting human go).
 **Depends on:** E2 step 2 (loader stamps `creatorType`/`creatorId`
 on bot configs). **Repos:** traderton (E3-T), then herobids (E3-H, gated on human go).
@@ -162,3 +162,11 @@ channel" → settled (outbox table, polled; push remains 010 B10). 005 updated. 
   Acceptable, because they're stale by then; status truth stays in the `bots` table.
 - At-least-once: a crash between republish and cursor save re-delivers a batch (a breaker
   may count one event twice). Accepted; noted in 005.
+
+## Outstanding Issues (non-blocking, from code review)
+
+### [T1] consumer_notifications outbox table + repository
+- LOW: integration test uses `skipIf(!DATABASE_URL)` rather than a vitest exclude —
+  consistent with existing journal/boundary integration tests (established convention).
+- LOW: `deleteOlderThan` issues one extra no-op query when the expired-row count is an
+  exact multiple of `batchSize`. Harmless.

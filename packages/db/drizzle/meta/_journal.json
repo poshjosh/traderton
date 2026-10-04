@@ -29,6 +29,13 @@
       "when": 1789832543335,
       "tag": "0003_dusty_banshee",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791132936686,
+      "tag": "0004_steady_franklin_richards",
+      "breakpoints": true
     }
   ]
 }

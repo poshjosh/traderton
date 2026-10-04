@@ -72,10 +72,13 @@ echo "==> running the gated integration tests"
 # createRunningBotLoader to prove a running PAPER bot survives a graceful
 # shutdown and is reclaimed by a fresh runtime (resume ruling), while a stopped
 # bot is not.
+# consumer-notification: Wave E E3-T T1 — exercises the Traderton→consumer outbox
+# repo (cursor scan, type filter, batched retention delete) against real Postgres.
 pnpm exec vitest run --no-file-parallelism \
   packages/boundary/src/boundary.verification.integration.test.ts \
   packages/boundary/src/boundary.mcp.verification.integration.test.ts \
   packages/worker/src/restart-round-trip.integration.test.ts \
+  packages/db/src/consumer-notification-repository.integration.test.ts \
   "$@"
 
 echo "==> integration run complete"
