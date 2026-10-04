@@ -1,6 +1,6 @@
 # 002 — E3: Traderton → consumer event channel
 
-**Status:** E3-T PENDING (T1 DONE, T2 PENDING, T3 PENDING, T4 PENDING, T5 PENDING);
+**Status:** E3-T PENDING (T1 DONE, T2 DONE, T3 PENDING, T4 PENDING, T5 PENDING);
 E3-H GATED (herobids, awaiting human go).
 **Depends on:** E2 step 2 (loader stamps `creatorType`/`creatorId`
 on bot configs). **Repos:** traderton (E3-T), then herobids (E3-H, gated on human go).
@@ -170,3 +170,10 @@ channel" → settled (outbox table, polled; push remains 010 B10). 005 updated. 
   consistent with existing journal/boundary integration tests (established convention).
 - LOW: `deleteOlderThan` issues one extra no-op query when the expired-row count is an
   exact multiple of `batchSize`. Harmless.
+
+### [T2] consumer notifier
+- LOW: the best-effort error log omits `botId`; `journalEvent`/`botStatus` can carry a
+  non-null botId, so a failed bot-scoped write loses that correlator. Harmless (rows aren't
+  lost at the actor). Optional: add `botId: entry.botId ?? null` to the log object.
+- LOW: doc-comment source line references (`~L1320–1345`, `~L2192–2244`) are drift-prone but
+  match the plan's own provenance citations. No action.
