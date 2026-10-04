@@ -698,3 +698,74 @@ describe('AppConfigSchema — agentScanner', () => {
     expect(result.success).toBe(false);
   });
 });
+
+// ── Plan 003 S4 journal retention operator config ────────────────────────────
+
+describe('AppConfigSchema — journal retention', () => {
+  const minimalAppConfig = {
+    app: { port: 3000, logLevel: 'info' as const },
+    database: { url: 'postgres://localhost/test' },
+    redis: { url: 'redis://localhost:6379' },
+    execution: { defaultSlippageBps: 50 },
+    risk: { globalMaxDrawdownPct: 20 },
+  };
+
+  it('defaults the whole journal block to keep-everything retention', () => {
+    const result = AppConfigSchema.safeParse(minimalAppConfig);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.journal.retention).toEqual({
+        auditRetentionMonths: null,
+        backtestRetentionMonths: null,
+        archiveBeforeDrop: false,
+        archiveDir: null,
+        premakeMonths: 3,
+        maintenanceIntervalMs: 86_400_000,
+      });
+    }
+  });
+
+  it('accepts operator overrides for the retention knobs', () => {
+    const result = AppConfigSchema.safeParse({
+      ...minimalAppConfig,
+      journal: {
+        retention: {
+          auditRetentionMonths: 12,
+          backtestRetentionMonths: 24,
+          archiveBeforeDrop: true,
+          archiveDir: '/var/backups/journal',
+          premakeMonths: 6,
+          maintenanceIntervalMs: 3_600_000,
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.journal.retention.auditRetentionMonths).toBe(12);
+      expect(result.data.journal.retention.archiveDir).toBe('/var/backups/journal');
+    }
+  });
+
+  it('requires archiveDir when archiveBeforeDrop is true', () => {
+    const result = AppConfigSchema.safeParse({
+      ...minimalAppConfig,
+      journal: { retention: { archiveBeforeDrop: true } },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((i) => i.path)).toContainEqual([
+        'journal',
+        'retention',
+        'archiveDir',
+      ]);
+    }
+  });
+
+  it('rejects a zero auditRetentionMonths (min 1 when set)', () => {
+    const result = AppConfigSchema.safeParse({
+      ...minimalAppConfig,
+      journal: { retention: { auditRetentionMonths: 0 } },
+    });
+    expect(result.success).toBe(false);
+  });
+});

@@ -21,6 +21,7 @@ import {
   ConsumerNotificationRepository,
   AgentScanRepository,
   AgentActorRunRepository,
+  JournalPartitionMaintenance,
   computeRequestFingerprint,
 } from '@traderton/db';
 import {
@@ -29,6 +30,7 @@ import {
   createScannerPoolResolverFromConfig,
   buildRiskContractOpsFromRiskSource,
   createLogger,
+  InstanceLease,
   type RiskSource,
 } from '@traderton/worker';
 import {
@@ -73,6 +75,7 @@ import { startAgentScanPruneLoop } from './agent-scan-prune.js';
 import { buildAgentActorLifecycleOps } from './agent-actor-lifecycle-ops.js';
 import { rehydrateAgentActors } from './agent-actor-rehydrate.js';
 import { startAgentOrphanSweep } from './agent-orphan-sweep.js';
+import { startJournalMaintenanceLoop } from './journal-maintenance.js';
 
 function loadBoundaryConfig(): BoundaryConfig {
   const consumerId = process.env['BOUNDARY_CONSUMER_ID'];
@@ -131,6 +134,26 @@ async function main(): Promise<void> {
     pruneIntervalMs: appConfig.agentScanner.scanRetention.pruneIntervalMs,
     pruneBatchSize: appConfig.agentScanner.scanRetention.pruneBatchSize,
     logger: createLogger('boundary-agent-scan-prune'),
+  });
+
+  // Plan 003 S4: the journal_events partition-maintenance loop. Single-flight
+  // across replicas via a DEDICATED InstanceLease (its OWN worker id + renew-timer
+  // map, NOT the runtime's agent/bot lease handle — S1 forbids reuse). The loop
+  // acquires `journal-maintenance` at tick start and releases it in a finally.
+  // Self-rescheduling, reschedules on failure (AGENTS). Default retention is null
+  // (keep everything): it only provisions future partitions until an operator
+  // sets a bound. The lease id maps to Redis key `lease:instance:journal-maintenance`.
+  const journalMaintenanceLease = new InstanceLease(redis, `journal-maint-${runtime.workerId}`, 30);
+  const journalMaintenance = startJournalMaintenanceLoop({
+    maintenance: JournalPartitionMaintenance.fromDatabase(db),
+    lease: {
+      tryAcquire: () => journalMaintenanceLease.acquire('journal-maintenance'),
+      release: async () => {
+        await journalMaintenanceLease.release('journal-maintenance');
+      },
+    },
+    retention: appConfig.journal.retention,
+    logger: createLogger('boundary-journal-maintenance'),
   });
 
   // E0 hotfix: the copied `stop_bot` tool publishes `bot:stop:{botId}`; stop the
@@ -607,6 +630,13 @@ async function main(): Promise<void> {
       () => consumerNotificationPrune.stop(),
       () => agentScanPrune.stop(),
       () => agentOrphanSweep.stop(),
+      // Plan 003 S4: stop the journal-maintenance loop (latch no-ops a pending
+      // tick) and clear any lease renew timer (a tick mid-run releases in its own
+      // finally; this covers the loop being stopped between acquire and release).
+      () => {
+        journalMaintenance.stop();
+        journalMaintenanceLease.shutdown();
+      },
       // 001 S3: stop the command consumer loop (unblocks + quits its dedicated
       // BLPOP connection) and quit the agent-actor stop subscriber connection.
       () => agentCommandConsumer.stop(),

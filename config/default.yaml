@@ -216,6 +216,18 @@ agentScanner:
     pruneBatchSize: 5000         # expired rows deleted per prune batch, per table
   orphanSweepIntervalMs: 60000   # agent-actor orphan sweep cadence in ms (copied from herobids worker.agents.botOrphanSweepIntervalMs)
 
+# journal_events audit-log retention + partitioning maintenance (plan 003).
+# Default keeps everything (auditRetentionMonths null) — the mechanism ships
+# without waiting on the retention-policy decision.
+journal:
+  retention:
+    auditRetentionMonths: null   # months; null = keep forever (drop nothing)
+    backtestRetentionMonths: null # months; null = never drop partitions holding backtest rows (S1 exempt-via-guard)
+    archiveBeforeDrop: false     # export a partition to archiveDir before dropping it
+    archiveDir: null             # local dir for gzip archives (operator config; required if archiveBeforeDrop)
+    premakeMonths: 3             # monthly partitions created ahead of the current month each run
+    maintenanceIntervalMs: 86400000 # maintenance loop cadence in ms (24h)
+
 marketData:
   dexscreener:
     baseUrl: "https://api.dexscreener.com"

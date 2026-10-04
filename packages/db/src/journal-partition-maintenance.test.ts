@@ -3,6 +3,7 @@ import {
   JournalPartitionMaintenance,
   monthPartitionName,
   monthPartitionBounds,
+  monthStartFromPartitionName,
 } from './journal-partition-maintenance.js';
 
 describe('monthPartitionName', () => {
@@ -37,6 +38,23 @@ describe('monthPartitionBounds', () => {
       lo: '2026-12-01 00:00:00+00',
       hi: '2027-01-01 00:00:00+00',
     });
+  });
+});
+
+describe('monthStartFromPartitionName', () => {
+  it('returns the first UTC instant of the partition month', () => {
+    expect(monthStartFromPartitionName('journal_events_2026_10')?.toISOString()).toBe(
+      '2026-10-01T00:00:00.000Z',
+    );
+  });
+
+  it('returns null for the default partition', () => {
+    expect(monthStartFromPartitionName('journal_events_default')).toBeNull();
+  });
+
+  it('returns null for a non-monthly name', () => {
+    expect(monthStartFromPartitionName('journal_events_2026_13')).toBeNull();
+    expect(monthStartFromPartitionName('not_a_partition')).toBeNull();
   });
 });
 

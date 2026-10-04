@@ -1053,6 +1053,27 @@ export const AppConfigSchema = z.object({
      *  (60_000). */
     orphanSweepIntervalMs: z.number().int().min(1000).default(60_000),
   }).default({}),
+  /** `journal_events` audit-log retention + partitioning maintenance (plan 003).
+   *  Deploy/restart operator config, not runtime. The default keeps everything
+   *  (`auditRetentionMonths` null) so the mechanism ships without waiting on the
+   *  retention-policy decision. The maintenance loop (boundary) always provisions
+   *  partitions ahead and only drops when a retention bound is set. */
+  journal: z.object({
+    retention: z.object({
+      /** Audit (non-backtest) journal rows: partitions whose whole month is older than this many months are dropped. null = keep forever (default). */
+      auditRetentionMonths: z.number().int().min(1).nullable().default(null),
+      /** Backtest journal rows (backtest_run_id set) are exempt from auditRetentionMonths. Set this (months) to ALSO drop partitions containing backtest rows older than it. null = never drop backtest-bearing partitions (S1 exempt-via-guard default). */
+      backtestRetentionMonths: z.number().int().min(1).nullable().default(null),
+      /** Export a partition to archiveDir before dropping it. */
+      archiveBeforeDrop: z.boolean().default(false),
+      /** Local directory for gzip archives (operator config, not a secret). Required when archiveBeforeDrop is true. null = none. */
+      archiveDir: z.string().nullable().default(null),
+      /** Partitions created ahead of the current month each maintenance run. */
+      premakeMonths: z.number().int().min(0).default(3),
+      /** How often the maintenance loop runs (default 24h). */
+      maintenanceIntervalMs: z.number().int().min(1).default(86_400_000),
+    }).default({}),
+  }).default({}),
 }).superRefine((data, ctx) => {
   const oneInchConfig = data.venues['1inch'];
   if (
@@ -1078,9 +1099,23 @@ export const AppConfigSchema = z.object({
       });
     }
   }
+  // Archiving a partition before dropping it needs a destination directory.
+  const journalRetention = data.journal.retention;
+  if (journalRetention.archiveBeforeDrop && !journalRetention.archiveDir) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'journal.retention.archiveDir is required when journal.retention.archiveBeforeDrop is true',
+      path: ['journal', 'retention', 'archiveDir'],
+    });
+  }
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 /** Agent technical-scanner operator config (Wave E E1). Threaded into the scan
  *  loop wiring in T4 — exported here so consumers reference a named type rather
  *  than `AppConfig['agentScanner']`. */
 export type AgentScannerConfig = AppConfig['agentScanner'];
+/** `journal_events` retention + partitioning maintenance operator config (plan
+ *  003 S4). Threaded into the boundary maintenance-loop wiring in bin.ts —
+ *  exported here so consumers reference a named type rather than
+ *  `AppConfig['journal']`. */
+export type JournalConfig = AppConfig['journal'];

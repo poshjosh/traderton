@@ -23,6 +23,7 @@ export {
   JournalPartitionMaintenance,
   monthPartitionName,
   monthPartitionBounds,
+  monthStartFromPartitionName,
 } from './journal-partition-maintenance.js';
 export type { MonthPartitionBounds } from './journal-partition-maintenance.js';
 export { FillRepository, PositionRepository, ExecutionPlanRepository, OrderRepository, BalanceSnapshotRepository, DecisionRepository, BotRepository } from './repositories.js';

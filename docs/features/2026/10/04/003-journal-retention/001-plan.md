@@ -249,7 +249,7 @@ emits a harmless `relation already exists, skipping` NOTICE — exactly the
 implemented per S1's exempt-via-guard decision; the config keys that drive it
 (`backtestRetentionMonths`, retention cutoff) remain S4.
 
-### S4. Config + wiring — PENDING
+### S4. Config + wiring — DONE
 - Schema + `default.yaml` keys (design §2), with comments. `archiveDir` is operator
   config, not a secret; if an env override is added, add it to `.env.example` and
   `infra/hetzner/.env.environment.example` with comments.
@@ -257,6 +257,96 @@ implemented per S1's exempt-via-guard decision; the config keys that drive it
   stop it on shutdown (E2 step 4 handler).
 - Test: "maintenance loop runs once per interval under a lease and reschedules after a
   failure".
+
+#### S4 implementation notes (2026-10-04)
+
+**Files changed**
+- `packages/domain/src/config/schema.ts` — new top-level `journal.retention`
+  block in `AppConfigSchema` (inserted after `agentScanner`, before the closing
+  `}).superRefine`), each key JSDoc'd. Keys + Zod validation + defaults:
+  `auditRetentionMonths` (int ≥1 | null, default null), `backtestRetentionMonths`
+  (int ≥1 | null, default null), `archiveBeforeDrop` (bool, default false),
+  `archiveDir` (string | null, default null), `premakeMonths` (int ≥0, default 3),
+  `maintenanceIntervalMs` (int ≥1, default 86_400_000). Added a `superRefine`
+  check: `archiveBeforeDrop === true` ⇒ `archiveDir` must be non-null/non-empty
+  (issue path `['journal','retention','archiveDir']`); existing refine checks
+  left intact. Exported `JournalConfig = AppConfig['journal']` next to
+  `AgentScannerConfig`.
+- `config/default.yaml` — `journal.retention` block near `agentScanner:` /
+  `notifications:`, one inline `#` comment per key, keep-everything defaults.
+- `packages/boundary/src/journal-maintenance.ts` — NEW self-rescheduling loop,
+  same shape as `consumer-notification-prune.ts` / `agent-scan-prune.ts`
+  (injected `setTimeoutFn` seam, `stopped` latch, `scheduleNext`/`run`,
+  reschedule-on-failure, first run after the interval). Injects a
+  `JournalPartitionMaintenancePort` (structural over `JournalPartitionMaintenance`),
+  a `JournalMaintenanceLease` (`tryAcquire`/`release`), the retention config,
+  logger, and the `setTimeoutFn` seam. Each tick: acquire lease → if not acquired
+  skip + reschedule (no body, no release) → else `ensureFuturePartitions` always,
+  then (only when `auditRetentionMonths` non-null) `listExpiredPartitions(cutoff)`
+  and per-partition backtest-guard → archive-if-configured → drop, releasing the
+  lease in a `finally`. Per-partition failures log + continue; a top-level throw
+  reschedules.
+- `packages/db/src/journal-partition-maintenance.ts` + `index.ts` — added a pure,
+  exported helper `monthStartFromPartitionName(name): Date | null` (first UTC
+  instant of a `journal_events_YYYY_MM` month, null otherwise) so the S4 loop can
+  compare a backtest-bearing partition's month against the backtest cutoff. Unit
+  tested in `journal-partition-maintenance.test.ts`.
+- `packages/boundary/src/bin.ts` — wired the loop near the other `start*Loop`
+  wiring: `JournalPartitionMaintenance.fromDatabase(db)` + a DEDICATED
+  `InstanceLease` (own worker id `journal-maint-${runtime.workerId}`, NOT the
+  runtime's agent/bot lease handle). The lease port binds
+  `acquire('journal-maintenance')`/`release('journal-maintenance')`. Started with
+  `appConfig.journal.retention`. Added `journalMaintenance.stop()` +
+  `journalMaintenanceLease.shutdown()` to the `registerBoundaryShutdown`
+  `stopBackgroundLoops` array.
+- `packages/worker/src/index.ts` — re-exported `InstanceLease` (it was not on the
+  package's public surface). Re-export only; no behaviour authored.
+- Tests: `packages/boundary/src/journal-maintenance.test.ts` (7 cases, plain
+  `pnpm test`, fakes + injected `setTimeoutFn` + fake lease + fake maintenance);
+  `schema.test.ts` journal-defaults + override + archive-refine + bounds cases;
+  `journal-partition-maintenance.test.ts` `monthStartFromPartitionName` cases.
+
+**Lease approach** — chose to re-export + reuse the existing `InstanceLease`
+(SET NX EX + DEL-if-owner Lua, with a renew timer) rather than hand-roll an
+inline lease in bin.ts, per the plan's stated preference ("prefer importing
+InstanceLease if available"). It was not previously exported from
+`@traderton/worker`, so S4 adds the re-export. A DEDICATED instance (its own
+worker id + `renewTimers` map) is constructed — the runtime's agent/bot lease
+handle is NOT reused (S1 forbids it). `acquire(id)` starts a renew timer;
+`release(id)` stops it, so the acquire→run→release-in-finally per tick leaves no
+timer leaked. `InstanceLease.release` is a no-op when another replica owns the
+key (DEL-if-owner), so a skipped tick (tryAcquire false) correctly does NOT call
+release in the loop.
+
+**Lease KEY (minor deviation):** `InstanceLease` prefixes ids with
+`lease:instance:`, so the effective Redis key is
+`lease:instance:journal-maintenance`, not the plan's literal
+`lease:journal-maintenance`. Reusing the shared lease primitive (and its proven
+atomic acquire/renew/release) was judged more valuable than matching the exact
+key string; it is still a single dedicated single-flight key. Flagged here so S5
+ops docs reference the actual key.
+
+**Month arithmetic for the cutoffs** — the audit cutoff is the first UTC instant
+of `(current UTC month − auditRetentionMonths)` via
+`new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - N, 1))` (JS Date
+normalises the negative/overflowing month), passed straight to
+`listExpiredPartitions` (which already lists partitions whose exclusive upper
+bound ≤ cutoff). The backtest cutoff is computed the same way from
+`backtestRetentionMonths`; a backtest-bearing partition is droppable only when
+`backtestRetentionMonths` is set AND its month-start (from
+`monthStartFromPartitionName`) is strictly before the backtest cutoff — otherwise
+it is skipped (exempt-via-guard, S1).
+
+**Env-override decision — NONE.** `archiveDir` stays yaml-only operator config in
+`config/default.yaml`, matching `docs/best-practices/configuration.md` (operator
+config in default.yaml, validated at startup via Zod). No `JOURNAL_ARCHIVE_DIR`
+env override was added, so no `.env.example` / `infra/hetzner/.env.environment.example`
+twins were touched (nothing to document).
+
+**Verification** — `pnpm build`, `pnpm lint`, and `pnpm test` (full unit suite:
+2935 passed, 92 integration skipped, 0 failures) all pass. The S4 loop is
+unit-tested with fakes; it drives the S3 `JournalPartitionMaintenance` whose
+DB-touching behaviour was proven live in S3.
 
 ### S5. Ops docs — PENDING
 007: the retention knobs, how archives relate to the existing Hetzner backup jobs
@@ -303,3 +393,19 @@ backtest-row choice. 007 updated.
 - [LOW, ADDRESSED] `dropPartition` comment corrected (plain `DROP TABLE` takes ACCESS
   EXCLUSIVE on the child + brief parent catalog lock; not a concurrent detach) + a note that
   the archive COPY occupies a pool connection until it drains.
+
+### S4 — Outstanding Issues
+- [LOW, ADDRESSED] `JournalRetentionConfig` is now derived from `JournalConfig['retention']`
+  (imported from `@traderton/domain`) instead of a hand-maintained duplicate, so a future
+  schema key cannot drift from what the loop reads. Required exporting `JournalConfig` from
+  the domain `config/index.ts` allowlist (it was defined in schema.ts but not re-exported).
+- [LOW, ADDRESSED] Test fake builder no longer uses `as never` (now `satisfies`-style typed
+  return).
+- [LOW] Lease Redis key is `lease:instance:journal-maintenance` (InstanceLease prefixes the
+  id), not the plan's literal `lease:journal-maintenance`. Reused the proven lease primitive;
+  S5 ops docs must document the real key.
+- NOTE: `packages/domain/src/config/presets.test.ts` + `agent-strategy.parity.test.ts` show
+  9+1 failures when vitest is run DIRECTLY on the domain package (ENOENT on
+  `config/strategy-presets/*.yaml` — a cwd/path-resolution artifact of the direct run).
+  Confirmed PRE-EXISTING on clean HEAD (da783e5), unrelated to S4; the proper test harness
+  (`scripts/shell/tests/run-all-tests.sh`) resolves the preset path correctly.

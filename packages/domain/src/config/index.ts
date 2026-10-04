@@ -113,6 +113,7 @@ export type {
   AgentRiskDefaultsConfig,
   AppConfig,
   MechanicalStrategy,
+  JournalConfig,
 } from './schema.js';
 
 export {

@@ -44,6 +44,12 @@ export type { ExecutionActor, IntakeResult, IntakeRejection, IntakeRejectionCode
 // re-export; it only widens the package's public surface.
 export { loadConfig } from './config.js';
 
+// The distributed-lock lease — re-exported so the M2 REST boundary
+// (@traderton/boundary) can run single-flight periodic maintenance (plan 003 S4
+// journal-maintenance loop) under a DEDICATED lease id, without reusing the
+// runtime's agent/bot lease handle. No behaviour authored by the re-export.
+export { InstanceLease } from './instance-lease.js';
+
 // The venue-aware scanner candle fetcher (orderbook→Binance, swap→GeckoTerminal).
 // Exported so the boundary composition root can surface it onto the read-tool
 // context (score_candidate fetches candles behind the boundary — legal-isolation).

@@ -84,6 +84,21 @@ export function monthPartitionBounds(d: Date): MonthPartitionBounds {
 }
 
 /**
+ * First UTC instant of the month a monthly partition name denotes, or null for
+ * a name that is not `journal_events_YYYY_MM` (or whose month is out of range).
+ * Pure — unit-testable. The S4 maintenance loop uses it to compare a backtest-
+ * bearing partition's month against the backtest-retention cutoff.
+ */
+export function monthStartFromPartitionName(name: string): Date | null {
+  const match = MONTHLY_PARTITION_PATTERN.exec(name);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]); // 1-based
+  if (month < 1 || month > 12) return null;
+  return new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+}
+
+/**
  * Validate a partition name against the monthly pattern and throw on mismatch.
  * Returns the name so it can be used inline. Rejects the parent, the default,
  * and anything that is not exactly `journal_events_YYYY_MM`.
