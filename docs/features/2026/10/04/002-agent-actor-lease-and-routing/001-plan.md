@@ -71,7 +71,7 @@ agent, and decisions landing on either copy.
   - "does not construct when another worker holds the lease"
   - "releases the lease when construction fails"
 
-### S3. Command forwarding — PENDING
+### S3. Command forwarding — DONE
 - `packages/boundary/src/agent-command-router.ts`:
   - **Sender:** wraps the drive target. For `DECISION_SUBMIT`, if the ensure said
     `remote`, `RPUSH agent-actor:cmd:{workerId}` with the envelope.
@@ -159,6 +159,65 @@ ticked.
   discard the result, so the change is non-breaking for them; S3 is the first consumer of
   the `remote` branch.
 
+### S3 implementation notes (how the plan text was realised)
+- **Module:** `packages/boundary/src/agent-command-router.ts` with three surfaces —
+  `wrapPublishToInbound` (sender), `startAgentCommandConsumer` (consumer loop), and
+  `subscribeAgentActorStopSignals` (stop subscriber). Co-located unit tests in
+  `agent-command-router.test.ts` (the four plan-listed cases plus local/non-decision
+  pass-through + the unknown-owner retryable-reply case). Wired in `bin.ts`.
+- **Exported channel/list names + envelope shape.**
+  - Command list: `agent-actor:cmd:{workerId}` (`AGENT_ACTOR_CMD_LIST_PREFIX`).
+  - Stop channel: `agent-actor:stop:{agentId}` / pattern `agent-actor:stop:*`
+    (`AGENT_ACTOR_STOP_CHANNEL_PREFIX` / `_PATTERN`).
+  - Reply key: `agent:decision:reply:{decisionId}` (`DECISION_REPLY_KEY_PREFIX`) —
+    reused as-is so the copied `submit_decision` tool's BLPOP matches.
+  - Envelope: `{ type, payload, injection }` where `payload` is the UNCHANGED
+    decision payload (keeps `decisionId` + `_expectsReply`) and `injection` is the
+    resolved `AgentDirectActorInjection` (ownerId, actorId, ownerMode, venue,
+    venueType, venueAccountId) the owner rebuilds its local drive target from.
+    `injection` is a TRUSTED intra-cluster value — resolved by the sending
+    container and carried over the shared internal Redis; the owner rebuilds the
+    drive target from it directly and does NOT re-validate it owner-side (the
+    command list is not an external trust boundary).
+- **Not-ready reply shape (and what it actually buys us).** The unknown-owner
+  (sender) and lease-lost (consumer) refusals write
+  `{ status:'rejected', code:'precondition.not_ready', message, retryable:true }`
+  — the `DecisionSubmitResult` rejected variant. The tool parses it
+  (`parsed.status === 'rejected'`) and returns PROMPTLY with a clear
+  `precondition.not_ready` rejection instead of hanging to its 30s BLPOP timeout.
+  That fast fail is the real benefit. It is **not** a transport-level retry: the
+  copied `submit_decision` tool (packages/worker/src/tools/trading.ts) derives
+  `retryable:true` ONLY from `capability_denied:*` codes (and only
+  `rate_limit`/`max_concurrent` within those), so the top-level `retryable` field
+  on this reply is IGNORED and the caller sees `retryable:false`. The field is kept
+  because it is harmless and documents intent. Re-submission is driven by the
+  agent's own reasoning loop and the next decision's re-ensure resolving a concrete
+  owner (or taking over locally) — not by any flag the tool reads. Only written
+  when `payload._expectsReply === true`. **Follow-up (OUT of S3 scope):** making
+  `precondition.not_ready` genuinely transport-retryable would require a tool-parse
+  change in trading.ts (that file is an extracted parity copy and untouched here).
+- **Lease-guard agentId source.** The consumer reads the agent id from
+  `envelope.injection.actorId` (the decision payload does not carry it — the drive
+  target stamps `deps.actorId` from the injection), then checks
+  `lease.holder('agent:'+agentId) === workerId` before executing.
+- **DEVIATION (minor, additive): new repo read `AgentActorRunRepository.getByActorId`.**
+  The plan's stop-subscriber text ("stop the agent actor … if owned here") did not
+  spell out owner resolution. The broadcast `agent-actor:stop:{agentId}` carries only
+  the agent id, but the existing stop path (`agentActorLifecycleOps.stopAndEvictActor`
+  → `ensure.evict`) needs the `ownerId` for the ensure cache key `${ownerId}::${actorId}`.
+  Added a focused `getByActorId(actorId)` lookup (the `(ownerId, actorId)` unique index
+  guarantees ≤1 row for a given owner+actor; a lone-`actorId` read returns the single
+  such row, ordered defensively by most-recent `updatedAt`) so bin.ts resolves `ownerId`
+  from the durable run row; no row ⇒ no-op. No schema change. This is a read-only,
+  backward-compatible addition.
+- **Consumer teardown.** `startAgentCommandConsumer` returns a `stop()` that latches a
+  flag and quits its dedicated BLPOP connection; both it and the dedicated
+  `agent-actor:stop:*` subscriber connection are torn down via the boundary shutdown's
+  `stopBackgroundLoops` hook (alongside the existing prune/sweep loops). `quit()` is a
+  declared member of the `AgentCommandConsumerRedis` interface (teardown genuinely
+  depends on it to unblock the in-flight BLPOP), so `stop()` calls it directly with a
+  best-effort `.catch()` rather than through a structural cast.
+
 ## Outstanding Issues
 
 Non-critical review findings carried forward (grouped by step). None are blocking.
@@ -182,3 +241,19 @@ Non-critical review findings carried forward (grouped by step). None are blockin
   ("acquires the lease exactly once under concurrent ensures for the same agent").
 - [LOW, ADDRESSED] `workerId: ''` unknown-owner sentinel documented on
   `AgentDirectActorResult` for S3; non-owner `evict` no-op test added.
+
+### S3 — Command forwarding
+- [HIGH, ADDRESSED] The not-ready reply's top-level `retryable:true` is IGNORED by the
+  copied `submit_decision` tool (it derives retryability only from `capability_denied:*`
+  codes). Corrected all comments + the S3 notes to state the real behavior (fast-fail is
+  the benefit; re-submission is driven by the agent's next decision / re-ensure, not a
+  retry flag). Making `precondition.not_ready` transport-retryable needs a tool-parse
+  change — OUT of S3 scope (follow-up).
+- [MEDIUM, ADDRESSED] `stop()` quit-via-cast replaced with a declared `quit()` on
+  `AgentCommandConsumerRedis`.
+- [LOW, ADDRESSED] Corrected stale "tool retries" wording in the test narration.
+- [LOW] The `agent-actor:stop:*` PUBLISHER is not part of S3 (the plan assigns it to a
+  non-owner `stop_agent_actor` write path, a later step). S3 ships only the subscriber,
+  so the stop path is dormant until a publisher exists.
+- [LOW] `getByActorId` has no integration-test coverage yet (its repo integration test is
+  in the always-skipped suite). Worth a case when S5's real-Redis/Postgres proof lands.

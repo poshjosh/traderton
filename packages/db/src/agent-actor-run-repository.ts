@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { Database } from './index.js';
 import { agentActorRuns } from './schema/index.js';
 
@@ -76,6 +76,24 @@ export class AgentActorRunRepository {
       .select()
       .from(agentActorRuns)
       .where(eq(agentActorRuns.desiredState, 'running'));
+  }
+
+  /**
+   * Single run row for an actor id, or null. The (owner, actor) unique index
+   * means an actor id resolves to at most one row, so this is the owner-resolving
+   * lookup the agent-actor stop subscriber needs (001 S3): the broadcast
+   * `agent-actor:stop:{agentId}` signal carries only the agent id, and the owner
+   * must recover the `ownerId` to evict its ensure cache entry. Returns the most
+   * recently updated row defensively (there should only ever be one).
+   */
+  async getByActorId(actorId: string): Promise<AgentActorRunRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(agentActorRuns)
+      .where(eq(agentActorRuns.actorId, actorId))
+      .orderBy(desc(agentActorRuns.updatedAt))
+      .limit(1);
+    return row ?? null;
   }
 
   /** Single run row for (ownerId, actorId), or null — for liveness checks. */

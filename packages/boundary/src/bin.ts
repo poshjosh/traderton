@@ -57,7 +57,15 @@ import {
 } from './subject-resolver.js';
 import { buildResolverPorts } from './resolver-ports.js';
 import { buildAgentDirectActorEnsure } from './agent-direct-actor-ensure.js';
+import type { AgentDirectActorResult } from './agent-direct-actor-ensure.js';
 import { subscribeBotStopSignals } from './bot-stop-subscriber.js';
+import {
+  wrapPublishToInbound,
+  startAgentCommandConsumer,
+  subscribeAgentActorStopSignals,
+  type AgentCommandSenderRedis,
+  type AgentCommandConsumerRedis,
+} from './agent-command-router.js';
 import { buildBoundaryTradingRuntime } from './build-boundary-runtime.js';
 import { registerBoundaryShutdown } from './boundary-shutdown.js';
 import { startConsumerNotificationPruneLoop } from './consumer-notification-prune.js';
@@ -189,6 +197,43 @@ async function main(): Promise<void> {
     sweepIntervalMs: appConfig.agentScanner.orphanSweepIntervalMs,
     logger: createLogger('boundary-agent-orphan-sweep'),
   });
+
+  // 001 S3: the agent-actor command consumer. One blocking-pop loop per container
+  // on its OWN command list (`agent-actor:cmd:{workerId}`), with a DEDICATED Redis
+  // connection — BLPOP blocks the connection, so it cannot be the shared client.
+  // A decision forwarded here by a remote sender runs on the LOCAL drive target
+  // (rebuilt from the envelope's injection) after re-checking we still hold the
+  // agent lease; the owner writes the reply the sender's tool BLPOPs.
+  const agentCommandConsumerConn = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379', {
+    maxRetriesPerRequest: null,
+  });
+  const agentCommandConsumer = startAgentCommandConsumer({
+    redis: agentCommandConsumerConn as unknown as AgentCommandConsumerRedis,
+    workerId: runtime.workerId,
+    lease: runtime.agentLease,
+    createDriveTarget: (injection) => runtime.createDriveTarget(injection),
+    logger: createLogger('boundary-agent-command-consumer'),
+  });
+
+  // 001 S3: the agent-actor stop-signal subscriber. The `stop_agent_actor` tool on
+  // a NON-owner marks the run stopped + cascades, then publishes
+  // `agent-actor:stop:{agentId}`; the OWNER stops its in-process actor on that
+  // signal (same shape as `bot:stop:*`). Dedicated connection — subscriber mode
+  // cannot issue other commands. The stop is a no-op on a non-owner (the registry
+  // stop is keyed on the actor id, and evict releases only a lease we hold).
+  const agentActorStopSubscriber = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
+  subscribeAgentActorStopSignals(
+    agentActorStopSubscriber,
+    async (agentId) => {
+      // The signal carries only the agent id; recover the ownerId from the durable
+      // run row so the ensure cache can be evicted under its `${ownerId}::${actorId}`
+      // key. No row ⇒ nothing this process owns to stop (no-op).
+      const run = await agentActorRunRepo.getByActorId(agentId);
+      if (!run) return;
+      await agentActorLifecycleOps.stopAndEvictActor(run.ownerId, agentId);
+    },
+    createLogger('boundary-agent-actor-stop'),
+  );
 
   // ── Venue-aware candle fetcher for read-only scoring tools (score_candidate).
   //    Candles are fetched BEHIND the boundary (legal-isolation: the consumer
@@ -403,10 +448,25 @@ async function main(): Promise<void> {
     const profileInjection = profile?.executionDefaults?.mode
       ? { ...injection, ownerMode: profile.executionDefaults.mode }
       : injection;
-    if (!skipVenueResolution && request.actor.type === 'agent') {
-      await ensureAgentDirectActor(profileInjection);
-    }
-    const publishToInbound = runtime.createDriveTarget(profileInjection);
+    // 001 S3: capture the ensure's ownership result. `local` ⇒ this worker owns
+    // the actor and runs the decision in-process; `remote` ⇒ another worker owns
+    // it, so a DECISION_SUBMIT must be forwarded to that owner's command list
+    // instead of executing locally. Non-agent / venue-skipped calls stay local.
+    const ensureResult: AgentDirectActorResult =
+      !skipVenueResolution && request.actor.type === 'agent'
+        ? await ensureAgentDirectActor(profileInjection)
+        : { owner: 'local' };
+    const localPublishToInbound = runtime.createDriveTarget(profileInjection);
+    // Wrap the local drive target with the owner-routing sender: a decision for a
+    // remotely-owned agent RPUSHes to `agent-actor:cmd:{workerId}` and the owner
+    // writes the reply the tool BLPOPs; everything else runs locally.
+    const publishToInbound = wrapPublishToInbound({
+      local: localPublishToInbound,
+      ensureResult,
+      injection: profileInjection,
+      redis: redis as unknown as AgentCommandSenderRedis,
+      logger: createLogger('boundary-agent-command-router'),
+    });
 
     // Risk reads are profile-only. A missing profile is a readiness failure;
     // operator defaults must never become a payload-free fallback authority.
@@ -539,7 +599,15 @@ async function main(): Promise<void> {
     botStopSubscriber,
     logger: createLogger('boundary-shutdown'),
     exit: (code) => process.exit(code),
-    stopBackgroundLoops: [() => consumerNotificationPrune.stop(), () => agentScanPrune.stop(), () => agentOrphanSweep.stop()],
+    stopBackgroundLoops: [
+      () => consumerNotificationPrune.stop(),
+      () => agentScanPrune.stop(),
+      () => agentOrphanSweep.stop(),
+      // 001 S3: stop the command consumer loop (unblocks + quits its dedicated
+      // BLPOP connection) and quit the agent-actor stop subscriber connection.
+      () => agentCommandConsumer.stop(),
+      () => void agentActorStopSubscriber.quit().catch(() => { /* best-effort */ }),
+    ],
   });
 
   const port = Number(process.env['BOUNDARY_PORT'] ?? 8080);
