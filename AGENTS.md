@@ -11,6 +11,17 @@ policy, venue integrations, credentials, persistence, and trading documentation.
 This is a Node.js 22+, TypeScript strict, ESM, pnpm monorepo using Vitest,
 PostgreSQL, and Redis. 
 
+## Project Structure
+
+```
+packages/
+  domain/      # Types, ports, value objects, config schemas (zero deps)
+  engine/      # Core trading logic: planner, risk gate, executors, position tracker
+  strategy/    # Strategy implementations (momentum, etc.)
+  venues/      # Venue adapters (Hyperliquid, Jupiter), stream pool, mark sources
+  db/          # Drizzle schema, migrations, repositories
+```
+
 ## Development
 
 ### Quick help scripts
