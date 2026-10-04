@@ -102,10 +102,21 @@ agent, and decisions landing on either copy.
 
 Append to `scripts/shell/tests/run-integration.sh`.
 
-### S6. Ops docs — PENDING
+### S6. Ops docs — DONE
 - 007 operational readiness: remove the "one replica only" note once S5 passes. Document
   the takeover window (≤ lease TTL + sweep interval) and that decisions in that window
   return the existing retryable timeout.
+- **Implemented 2026-10-04.** Added a "## Multi-Replica Boundary (agent-actor ownership)"
+  section to 007 (ownership via `lease:instance:agent:{agentId}`, 30s TTL; forwarding;
+  takeover window ≤ TTL (30s) + `agentScanner.orphanSweepIntervalMs` (60000ms, verified in
+  `config/default.yaml` + `bin.ts` `sweepIntervalMs`)). 007 had NO "one replica only" note
+  in its body (the caveat lived in 011 E4 + this plan), so the section instead states the
+  former constraint is now lifted. **Accuracy correction vs the step text:** the window
+  returns the tool's existing `decision_reply_timeout`, which is NOT transport-retryable —
+  the copied `submit_decision` tool ignores the top-level `retryable` field (S3 finding), so
+  the caller re-submits via its own loop; there is no automatic transport retry. 005 gained
+  an internal/no-wire-change + takeover-timeout note in §Deadlines, Retries, And Idempotency.
+  001 recorded E4 as **Improved**. 011 Wave E E4 ticked DONE. Code/tests untouched.
 
 ## Verification
 `pnpm build && pnpm lint && pnpm test`; package-level type-check of new tests;
@@ -319,3 +330,19 @@ Non-critical review findings carried forward (grouped by step). None are blockin
   post-takeover) — the forward path is covered by CASE 1. Optional future case.
 - [LOW] Test gives the S3 sender its own tracked Redis connection (the runtime does not
   expose its internal connection); functionally identical on one Redis server.
+
+### S6 — Ops docs
+- 007: new "Multi-Replica Boundary (agent-actor ownership)" section + takeover-window
+  subsection (≤ 30s TTL + `agentScanner.orphanSweepIntervalMs` 60s; window returns the
+  existing `decision_reply_timeout`, no automatic transport retry — accurate per S3).
+- 005: remote-owner routing documented as internal/no-wire-change; takeover timeout framed
+  as the existing contract, no new failure code.
+- 001 parity ledger: lease + forwarding recorded as **Improved**; the stale E1-T
+  "no lease yet / one-replica" note updated to point forward to E4 (CodeReviewer MEDIUM #1).
+- 011: Wave E E4 ticked DONE; "one replica only" caveat lifted.
+- [MEDIUM, ADDRESSED] Fixed the operator-facing contradictions in the E Wave 000-overview
+  ("Single boundary replica assumed" bullet + risk-table row) that were falsified by E4.
+- [LOW, ADDRESSED] Tightened "same handle the bot lease uses" wording in 001 to "shares the
+  bot lease's Redis connection + prefix (agent: namespace never collides with UUID bot ids)".
+- [LOW] 003-e1 plan's historical "safe only with one boundary replica" note left as-is (it
+  already points to 002 and is a superseded planning note, not an operator doc).

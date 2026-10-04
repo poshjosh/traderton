@@ -262,6 +262,19 @@ Traderton may retry a downstream venue or provider call internally only when
 the operation is idempotent under the same persisted invocation key, and only
 before `deadlineAt`.
 
+Multi-replica agent-actor ownership is an INTERNAL mechanism with no wire
+change — the boundary result contract is unchanged. When Traderton runs more
+than one boundary replica, each agent actor is owned by exactly one replica, and
+a `submit_decision` for a non-owned agent is forwarded to the owner internally.
+From the consumer's perspective this is invisible, with one timing nuance: if an
+owning replica dies, there is a short takeover window during which a forwarded
+`submit_decision` can hit the engine's existing decision-reply timeout. That is
+the existing `decision_reply_timeout` outcome of `submit_decision` — not a new
+failure code and not a new contract. The consumer handles it exactly as it
+handles that timeout today: re-submit the decision through its own loop (its next
+decision re-resolves a concrete owner once a surviving replica has taken over).
+No automatic transport-level retry is implied by the forwarding mechanism.
+
 Each side-effecting invocation is persisted before any side effect. The unique
 idempotency key is:
 

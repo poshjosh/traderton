@@ -773,5 +773,22 @@ GATED behind a human go.
   with retention; explicit `start_agent_actor`/`stop_agent_actor` tools + an `agent_actor_runs` table drive
   the lifecycle, with agent→bot cascade stop, boot rehydrate, and a periodic orphan sweep. **Intentional
   divergence** (cross-process boundary): the authored `agent_actor_runs` run-state + journal-based liveness
-  replace herobids' in-process session-driven lifecycle; agent actors have no lease yet (one-replica
-  assumption, 007 note) — the durable lease is 011 Wave E E4.
+  replace herobids' in-process session-driven lifecycle. (The one-replica assumption this entry
+  originally carried has since been lifted — agent actors now carry a durable Redis lease; see the
+  E4 entry below.)
+- **Agent-actor lease + owner routing (E4 — Improved):** agent actors now carry a Redis lease
+  `lease:instance:agent:{agentId}` (`InstanceLease`, 30s TTL, auto-renewed) sharing the bot lease's Redis
+  connection + prefix (bot ids are UUIDs, so the `agent:` namespace never collides), so exactly one boundary
+  replica owns each agent actor — the lazy ensure, boot rehydrate, and orphan
+  sweep all acquire it before constructing, and a non-owner is a no-op success. `submit_decision` on a
+  non-owner forwards the unchanged `DECISION_SUBMIT` envelope to the owner's command list
+  (`agent-actor:cmd:{ownerWorkerId}`); the owner executes locally and writes the reply on the shared
+  `agent:decision:reply:{decisionId}` key the copied tool already BLPOPs, so there is no wire change. On
+  owner death the lease expires and the surviving replica's sweep takes over within ≤ lease TTL (30s) +
+  `agentScanner.orphanSweepIntervalMs` (60s); a decision forwarded during that window hits the tool's 30s
+  BLPOP deadline and returns the existing `decision_reply_timeout`, and the agent re-submits on its next
+  decision. **Improved vs source:** herobids ran one in-process worker per agent (safe only in a single
+  process); Traderton makes more than one boundary replica safe for agent actors (as it already was for
+  bots). The former "one boundary replica only" caveat (011 Wave E E4) is now lifted; see 007 "Multi-Replica
+  Boundary". Proof: `packages/boundary/src/agent-actor-multi-replica.integration.test.ts`. Plan:
+  [002-agent-actor-lease-and-routing](../2026/10/04/002-agent-actor-lease-and-routing/001-plan.md).

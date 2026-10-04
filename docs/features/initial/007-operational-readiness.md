@@ -169,6 +169,49 @@ The restart-resilience test must:
 8. retry the original invocation with the same idempotency key and confirm
    correct idempotent behavior
 
+## Multi-Replica Boundary (agent-actor ownership)
+
+Running more than one `boundary` replica is now SAFE for agent actors, as it
+already was for bots. Each agent actor is owned by exactly one replica via a
+Redis lease `lease:instance:agent:{agentId}` (`InstanceLease`, 30s TTL,
+auto-renewed at half-TTL). The lazy ensure, boot rehydrate, and orphan sweep all
+acquire the lease before constructing; a replica that loses the acquire race is a
+no-op (the owner runs the actor). A `submit_decision` for a non-owned agent is
+forwarded to the owner's command list (`agent-actor:cmd:{ownerWorkerId}`), and
+the owner writes the reply on the shared `agent:decision:reply:{decisionId}` key
+the decision tool already waits on. Read tools are owner-independent and run on
+any replica.
+
+### Takeover window on owner death
+
+When the owning replica dies, its lease expires after the TTL (30s), and the
+orphan sweep on a surviving replica re-ensures every `desiredState='running'`
+agent with no live lease. The sweep cadence is the operator config
+`agentScanner.orphanSweepIntervalMs` (default 60000ms; wired into the boundary as
+the sweep interval in `bin.ts`). The upper bound on takeover is therefore
+≤ lease TTL (30s) + the orphan-sweep interval.
+
+During that window, a decision forwarded to the dead owner never reaches a live
+actor and hits the decision tool's existing 30s BLPOP deadline, returning the
+tool's existing `decision_reply_timeout` outcome. There is NO automatic
+transport retry here: per the lease/forwarding design (S3), the forwarded
+not-ready replies are not transport-retryable (the copied `submit_decision` tool
+ignores the top-level `retryable` field and derives retryability only from
+`capability_denied:*` codes), and the timeout path simply returns
+`decision_reply_timeout`. The caller re-submits via its own reasoning loop; its
+next decision re-ensures a concrete owner (or takes over locally once the lease
+is free).
+
+Takeover rebuilds in-memory actor state (equity peak, circuit breaker) on the new
+owner — the same semantics as today's restart/rebuild; daily realized loss
+rehydrates from fills. This is not new behavior introduced by the lease.
+
+Reference: the lease + routing design in
+[002-agent-actor-lease-and-routing](../2026/10/04/002-agent-actor-lease-and-routing/001-plan.md)
+and the integration proof
+`packages/boundary/src/agent-actor-multi-replica.integration.test.ts`. This lifts
+the former "one boundary replica only" constraint tracked in 011 Wave E E4.
+
 ## Load-Test Expectations
 
 ### Scope

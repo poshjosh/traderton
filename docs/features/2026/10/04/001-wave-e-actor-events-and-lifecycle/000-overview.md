@@ -61,8 +61,10 @@ cascade/sweep completes E2's bot-lifecycle story.
 - **Tool names** are verb_noun (`start_agent_actor`, `stop_agent_actor`).
   Side-effecting tools follow 005 idempotency (caller-supplied key, `boundary_invocations`
   dedup).
-- **Single boundary replica assumed.** `infra/hetzner/compose.yaml` runs one `boundary`
-  service. Bots are lease-protected; agent actors are not (see risks).
+- **Multiple boundary replicas now safe** (E4 landed; was "single replica assumed" in E1).
+  `infra/hetzner/compose.yaml` still runs one `boundary` service, but both bots AND agent
+  actors are now lease-protected, so running more than one is safe. See
+  [002-agent-actor-lease-and-routing](../002-agent-actor-lease-and-routing/001-plan.md).
 
 ## Doc updates on completion (all phases)
 
@@ -81,6 +83,6 @@ cascade/sweep completes E2's bot-lifecycle story.
 |---|---|
 | Notification volume (a row per agent per scan interval) | Separate table with pruning + a scan payload cap (E3). Adds nothing to `journal_events`. |
 | `journal_events` (audit log) has no retention (pre-existing) | Planned: [003-journal-retention](../003-journal-retention/001-plan.md) (monthly partitions + operator retention policy). Tracked as 011 Wave E E5. |
-| Agent actors have no lease. A second boundary replica would run duplicate scan loops and duplicate decisions. | Planned: [002-agent-actor-lease-and-routing](../002-agent-actor-lease-and-routing/001-plan.md) (after E1). Until it lands: one replica only (true today; 007 note). Tracked as 011 Wave E E4. |
+| Agent actors have no lease. A second boundary replica would run duplicate scan loops and duplicate decisions. | RESOLVED (E4): [002-agent-actor-lease-and-routing](../002-agent-actor-lease-and-routing/001-plan.md) landed — agent actors carry a `lease:instance:agent:{agentId}` lease; the lazy ensure, boot rehydrate, and orphan sweep acquire it before constructing, and non-owner decisions forward to the owner. Multiple replicas are now safe. |
 | Relay down for a long time, then replays stale wakes | Persisted cursor initialised to "now", plus a max-event-age skip for wakes/scans (E3). |
 | Reclaim loop restarts a bot that keeps failing | Mark `crashed` before releasing the lease (E2). Reclaim only loads `running`. |
