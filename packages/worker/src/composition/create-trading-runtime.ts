@@ -24,6 +24,7 @@ import {
   TokenSafetyOverrideRepository,
   InstrumentRepository,
   ConsumerNotificationRepository,
+  AgentScanRepository,
 } from '@traderton/db';
 import { MarkSelector, createFillFirstMarkSource } from '@traderton/engine';
 import {
@@ -44,6 +45,10 @@ import { MarketDataRecorder } from '@traderton/backtesting';
 import { createLogger } from '../logger.js';
 import { populateInstrumentsFromVenues } from '../instrument-population.js';
 import { createIdGen } from './id-gen.js';
+import { createScannerCandleFetcherFromConfig } from '../scanner-candle-fetcher.js';
+import { CandleFetchBreaker } from '../candle-fetch-breaker.js';
+import type { RetryOptions } from '../candle-fetch-retry.js';
+import type { SignalFingerprintStore } from '../agent-trading-actor.js';
 import { InstanceLease } from '../instance-lease.js';
 import {
   WorkerRuntime,
@@ -950,6 +955,46 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
     actorRegistry.delete(actorId);
   };
 
+  // ── Agent technical scan loop singletons (Wave E / E1-T T4) ──────────────
+  // Built once per process and threaded onto agentActorRuntimeDeps; the per-actor
+  // scan closures (discoverCandidates / onPersistScan*) are assembled from these
+  // + the spec in constructAndRegisterAgentActor. Traced to the scanner-singleton
+  // block in herobids index.ts ~L286–335: the capacity source
+  // (marketData.binance.scanner), the scanner candle fetcher, the candle-fetch
+  // retry/breaker, and the Redis-backed fingerprint store seam.
+  const scannerCapacity = config.marketData?.binance?.scanner ?? {
+    maxRequestsPerMinute: 50,
+    maxConcurrentScans: 4,
+    maxCandidates: 20,
+  };
+  // Scanner candle fetcher — built from config.marketData (undefined when absent,
+  // which disables the scan loop since the actor guards on fetchCandles).
+  const scannerCandleFetcher = config.marketData
+    ? createScannerCandleFetcherFromConfig(config.marketData)
+    : undefined;
+  // In-cycle candle-fetch retry — the RetryOptions ARE the config subtree
+  // (candle-fetch-retry.ts consumes them directly). Undefined when disabled, so
+  // the actor's fail-open path applies.
+  const candleFetchRetry: RetryOptions | undefined = config.agentScanner.candleFetchRetry.enabled
+    ? config.agentScanner.candleFetchRetry
+    : undefined;
+  // Cross-scan candle-fetch circuit breaker — Redis-backed, keyed by agentId +
+  // provider symbol. Undefined when disabled (optional dep downstream).
+  const candleFetchBreaker = config.agentScanner.candleFetchBreaker.enabled
+    ? new CandleFetchBreaker(redis, {
+        failScansBeforeOpen: config.agentScanner.candleFetchBreaker.failScansBeforeOpen,
+        baseSkipScans: config.agentScanner.candleFetchBreaker.baseSkipScans,
+        maxSkipScans: config.agentScanner.candleFetchBreaker.maxSkipScans,
+      })
+    : undefined;
+  // Scan-persistence repo (T3) — backs onPersistScan{Candidates,Metrics}.
+  const scanRepo = new AgentScanRepository(db);
+  // The signal-fingerprint store is the Redis client cast to the minimal
+  // GET/SET surface the scanner dedup uses. This `redis as unknown as
+  // SignalFingerprintStore` is the sanctioned seam the pre-extraction source
+  // used (herobids index.ts:1366) — the only such cast in this wiring.
+  const signalFingerprintStore = redis as unknown as SignalFingerprintStore;
+
   // The item-B singletons the agent-direct actor shares with bots (013 §6 / 019
   // §6). Assembled once; threaded into each agent actor's deps so B and C
   // compose over the same infrastructure.
@@ -997,6 +1042,18 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
     // config is in scope; decision-intake takes runtimeDeps, not config).
     consumerNotifier,
     scanMaxSignals: config.notifications.scanCompleted.maxSignals,
+    // E1-T T4: agent technical scan loop singletons. getMarketDataRegistry reads
+    // the `let sharedMarketDataRegistry` lazily (it is assigned in start()).
+    getMarketDataRegistry: () => sharedMarketDataRegistry,
+    scannerCandleFetcher,
+    scanRepo,
+    candleFetchRetry,
+    candleFetchBreaker,
+    maxConcurrentScans: scannerCapacity.maxConcurrentScans,
+    scannerMaxCandidates: scannerCapacity.maxCandidates,
+    signalFingerprintStore,
+    scannerSignalDedup: config.agentScanner.scannerSignalDedup,
+    swapScannerConfig: config.agentScanner.swap,
   };
 
   return {

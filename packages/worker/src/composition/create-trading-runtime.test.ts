@@ -175,6 +175,17 @@ function paperConfig(): AppConfig {
       crashPolicy: 'alert_manual_intervention',
     },
     notifications: { scanCompleted: { maxSignals: 20 } },
+    // E1-T T4 reads config.agentScanner.{candleFetchRetry,candleFetchBreaker,
+    // scannerSignalDedup,swap} when building the agent scan singletons — mirror
+    // the schema defaults (T2) so the runtime assembles without a scan loop
+    // (marketData omitted ⇒ scannerCandleFetcher undefined).
+    agentScanner: {
+      scannerSignalDedup: { enabled: true, topN: 5, confidenceBucketSize: 0.05, ttlSeconds: 600 },
+      candleFetchRetry: { enabled: true, maxRetries: 3, baseDelayMs: 250, maxDelayMs: 2000 },
+      candleFetchBreaker: { enabled: true, failScansBeforeOpen: 3, baseSkipScans: 2, maxSkipScans: 8 },
+      swap: { enabled: false },
+      scanRetention: { retentionDays: 7, pruneIntervalMs: 3_600_000, pruneBatchSize: 5000 },
+    },
   } as AppConfig;
 }
 
@@ -223,7 +234,23 @@ function onStartFailedOf(runtime: unknown) {
  *  (`config.marketData && sharedMarketDataRegistry`) reads; the safety adapter
  *  factory is spied, so its config shape is never inspected. */
 function configWithMarketData(): AppConfig {
-  return { ...paperConfig(), marketData: {} } as AppConfig;
+  // E1-T T4 added an eager reader of config.marketData at construct time (the
+  // scanner candle fetcher, built via createScannerCandleFetcherFromConfig),
+  // which reads binance/geckoterminal sub-configs. Production marketData is
+  // always fully schema-defaulted, so give the fixture the minimal real shape
+  // those readers touch (baseUrl + rate-limit fields) rather than an empty
+  // object. The provider-registry construction stays stubbed (start() path).
+  return {
+    ...paperConfig(),
+    marketData: {
+      binance: { baseUrl: 'https://api.binance.com', requestsPerMinute: 200, maxWaitMs: 30_000 },
+      geckoterminal: {
+        baseUrl: 'https://api.geckoterminal.com',
+        proBaseUrl: 'https://pro-api.coingecko.com',
+        candles: { requestsPerMinute: 15, maxWaitMs: 10_000 },
+      },
+    },
+  } as unknown as AppConfig;
 }
 
 /** A SWAP bot config (jupiter, shadow mode — swap venues cannot run paper per the

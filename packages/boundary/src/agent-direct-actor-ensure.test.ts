@@ -85,9 +85,29 @@ beforeEach(() => {
     riskPosture: null,
     riskOverrides: {},
     executionDefaults: { mode: 'paper' },
+    scanMode: null,
+    activeStrategy: null,
     revision: 1n,
   };
 });
+
+/** A resolved active strategy for the scan-config reconstruct tests. */
+function makeActiveStrategy(presetKey: string): StoredTradingProfile['activeStrategy'] {
+  return {
+    presetKey,
+    styleTier: 'standard',
+    behaviorVersion: `${presetKey}-v1`,
+    technical: {
+      filters: { venue: 'hyperliquid', venueType: 'orderbook', quoteAssetSymbol: 'USDC' },
+      candles: { interval: '1h', limit: 200 },
+      indicators: {},
+      signalBias: {},
+      scanIntervalMs: 60_000,
+    } as unknown as NonNullable<StoredTradingProfile['activeStrategy']>['technical'],
+    source: 'creator',
+    changedAt: new Date().toISOString(),
+  };
+}
 
 describe('buildAgentDirectActorEnsure', () => {
   it('1. cache hit + actor running → no reconstruct (fast path intact)', async () => {
@@ -294,6 +314,42 @@ describe('buildAgentDirectActorEnsure', () => {
 
     expect(events).toEqual(['start:va-1', 'stop:agent-1', 'start:va-2']);
     expect(construct).toHaveBeenCalledTimes(2);
+  });
+
+  it('rebuilds the actor when the technical config changes (E1-T T4)', async () => {
+    const { runtime, construct } = makeRuntime();
+    const ensure = buildEnsure(runtime);
+
+    // First ensure: scanner-gated agent with a resolved momentum strategy.
+    profile = { ...profile, scanMode: 'scanner_gated', activeStrategy: makeActiveStrategy('momentum') };
+    await ensure(injectionWith());
+    expect(construct).toHaveBeenCalledTimes(1);
+    const firstSpec = construct.mock.calls[0]![0] as AgentActorSpec;
+    expect(firstSpec.scanMode).toBe('scanner_gated');
+    expect(firstSpec.activeStrategy?.presetKey).toBe('momentum');
+
+    // A creator preset change re-resolves active_strategy, which bumps the
+    // profile revision — the existing revision-based reconstruct path rebuilds
+    // the actor with the NEW technical config (no hot-apply needed; 010 defers it).
+    profile = { ...profile, activeStrategy: makeActiveStrategy('range'), revision: 2n };
+    await ensure(injectionWith());
+
+    expect(construct).toHaveBeenCalledTimes(2);
+    const secondSpec = construct.mock.calls[1]![0] as AgentActorSpec;
+    expect(secondSpec.scanMode).toBe('scanner_gated');
+    expect(secondSpec.activeStrategy?.presetKey).toBe('range');
+  });
+
+  it('threads scanMode + activeStrategy from the profile onto the actor spec', async () => {
+    const { runtime, construct } = makeRuntime();
+    const ensure = buildEnsure(runtime);
+
+    profile = { ...profile, scanMode: 'mixed', activeStrategy: makeActiveStrategy('momentum') };
+    await ensure(injectionWith());
+
+    const spec = construct.mock.calls[0]![0] as AgentActorSpec;
+    expect(spec.scanMode).toBe('mixed');
+    expect(spec.activeStrategy).toEqual(profile.activeStrategy);
   });
 
   it('regression: reconstruction logs "agent-direct actor constructed + started" exactly once per rebuild', async () => {

@@ -10,6 +10,8 @@ import {
   type AgentRiskDefaultsConfig,
   type AgentRiskOverrides,
   type MarkSource,
+  type ScanMode,
+  type ActiveStrategy,
 } from '@traderton/domain';
 import {
   submitDecisionForExecution,
@@ -19,11 +21,19 @@ import {
   type DecisionIntakeDeps,
 } from '@traderton/engine';
 
+import type { ProviderRegistry } from '@traderton/market-data';
+import { createPriceService } from '@traderton/market-data';
+import type { AgentScanRepository } from '@traderton/db';
+
 import { createLogger } from '../logger.js';
 import type { ExecutionActor } from '../execution-actor.js';
 import { isIntakeRejection } from '../execution-actor.js';
-import { AgentTradingActor, type AgentTradingActorDeps } from '../agent-trading-actor.js';
+import { AgentTradingActor, type AgentTradingActorDeps, type SignalFingerprintStore } from '../agent-trading-actor.js';
 import type { VenueInstrumentCache } from '../venue-instrument-cache.js';
+import type { RetryOptions } from '../candle-fetch-retry.js';
+import type { CandleFetchBreaker } from '../candle-fetch-breaker.js';
+import { resolveSwapNetwork } from '../resolve-swap-assets.js';
+import { buildDiscoverCandidates } from './discover-candidates.js';
 import { buildAgentRiskLimits } from '../agent-risk-limits.js';
 import { POSITION_GROWING_INTENTS, formatLevelValidationMessage } from '../shared/decision-validation.js';
 import type { ConsumerNotifier } from './consumer-notifier.js';
@@ -361,6 +371,20 @@ export interface AgentActorSpec {
   capital?: string | null;
   riskPosture?: RiskPosture | null;
   riskOverrides?: AgentRiskOverrides;
+  /**
+   * Scan loop mode from the profile's Traderton-owned `scan_mode` column (E1-T
+   * T1). `null`/absent = the agent has no scan loop. When set (not null) the
+   * agent is hybrid and the scan deps below are fed into its actor.
+   */
+  scanMode?: ScanMode | null;
+  /**
+   * The resolved active strategy from the profile's Traderton-owned
+   * `active_strategy` column (E1-T T1). Its `technical` feeds `technicalConfig`;
+   * `presetKey`/`behaviorVersion` ride into scan-metric identity (derived inside
+   * the actor's copied scan from `technical`). Absent while `scanMode` is set ⇒
+   * no scan loop is started (the actor runs without a scan loop).
+   */
+  activeStrategy?: ActiveStrategy | null;
 }
 
 /**
@@ -438,6 +462,56 @@ export interface AgentActorRuntimeDeps {
    * `signalsTruncated: true`.
    */
   scanMaxSignals: number;
+
+  // ── Agent technical scan loop singletons (Wave E / E1-T T4) ──────────────
+  // Built once in createTradingRuntime and threaded here; the per-actor scan
+  // closures (discoverCandidates / onPersistScanCandidates) are assembled from
+  // these + the spec's venue/scanMode/activeStrategy in
+  // constructAndRegisterAgentActor. Omitted ⇒ the agent runs without a scan
+  // loop (the copied loop guards on technicalConfig+discoverCandidates+
+  // fetchCandles presence).
+  /**
+   * Accessor for the once-per-process market-data provider registry. Undefined
+   * until `createTradingRuntime().start()` builds it (async) and when
+   * `marketData` is not configured. Read lazily inside the discovery /
+   * DEX-pricing closures so they see the registry once it exists.
+   */
+  getMarketDataRegistry?: () => ProviderRegistry | undefined;
+  /**
+   * Shared scanner candle fetcher — built once from `config.marketData` via
+   * `createScannerCandleFetcherFromConfig`. Fed to the actor as `fetchCandles`.
+   * Undefined when `marketData` is absent (no scan loop).
+   */
+  scannerCandleFetcher?: AgentTradingActorDeps['fetchCandles'];
+  /** Scan-persistence repository (T3) — backs onPersistScan{Candidates,Metrics}. */
+  scanRepo?: AgentScanRepository;
+  /** In-cycle candle-fetch retry config (`config.agentScanner.candleFetchRetry`); undefined when disabled. */
+  candleFetchRetry?: RetryOptions;
+  /** Cross-scan candle-fetch circuit breaker (`config.agentScanner.candleFetchBreaker`); undefined when disabled. */
+  candleFetchBreaker?: CandleFetchBreaker;
+  /** Per-worker max concurrent scans (`config.marketData.<venue>.scanner.maxConcurrentScans`). */
+  maxConcurrentScans?: number;
+  /** Per-scan discovery cap (`config.marketData.<venue>.scanner.maxCandidates`). */
+  scannerMaxCandidates?: number;
+  /**
+   * Redis-backed signal-fingerprint store for scanner dedup. The sanctioned
+   * seam is the Redis client cast to `SignalFingerprintStore` in
+   * createTradingRuntime (`redis as unknown as SignalFingerprintStore`) — the
+   * same pattern the pre-extraction source used.
+   */
+  signalFingerprintStore?: SignalFingerprintStore;
+  /** Scanner signal dedup config (`config.agentScanner.scannerSignalDedup`). */
+  scannerSignalDedup?: {
+    enabled: boolean;
+    topN: number;
+    confidenceBucketSize: number;
+    ttlSeconds: number;
+  };
+  /** Swap scanning rollout flags (`config.agentScanner.swap`) — master kill-switch + per-venue. */
+  swapScannerConfig?: {
+    enabled: boolean;
+    venues?: { jupiter?: boolean; '1inch'?: boolean };
+  };
 }
 
 /**
@@ -595,10 +669,170 @@ export function constructAndRegisterAgentActor(
     },
   };
 
+  // ── Agent technical scan loop wiring (Wave E / E1-T T4) ──────────────────
+  // Feed the scan deps the copied loop expects WHEN the profile set a scanMode.
+  // The loop (agent-trading-actor.ts startTechnicalScanLoop/runTechnicalScan) is
+  // already implemented in the copied actor — it runs iff technicalConfig +
+  // discoverCandidates + fetchCandles are present, so T4 is to FEED these, not
+  // to write the loop.
+  if (spec.scanMode != null) {
+    wireScanDeps(deps, runtimeDeps, spec, markSource);
+  }
+
   const actor = new AgentTradingActor(deps);
   registry.register(spec.agentId, actor);
-  logger.info({ agentId: spec.agentId, venue: spec.venue, venueType: spec.venueType }, 'Agent actor constructed and registered');
+  logger.info(
+    { agentId: spec.agentId, venue: spec.venue, venueType: spec.venueType, scanMode: spec.scanMode ?? null, hasScanLoop: deps.technicalConfig != null },
+    'Agent actor constructed and registered',
+  );
   return actor;
+}
+
+/**
+ * wireScanDeps — mutate the agent actor's deps IN PLACE to attach the technical
+ * scan loop inputs (Wave E / E1-T T4). AUTHORED WIRING ONLY: it builds the
+ * per-actor `discoverCandidates` / `onPersistScan*` closures from the item-B
+ * runtime singletons + the spec, and copies the scanner config values straight
+ * through. The loop body lives in the copied actor.
+ *
+ * Traced to herobids apps/worker/src/index.ts:1337–1510 (the agent actor's scan
+ * deps block + the `onPersistScanCandidates` mark-coverage / DEX-pricing filter).
+ *
+ * Guard: `scanMode` set but `activeStrategy` absent ⇒ no scan loop (log + skip
+ * the scan deps). The actor runs without a loop (it guards on technicalConfig).
+ */
+function wireScanDeps(
+  deps: AgentTradingActorDeps,
+  runtimeDeps: AgentActorRuntimeDeps,
+  spec: AgentActorSpec,
+  markSource: MarkSource,
+): void {
+  const technicalConfig = spec.activeStrategy?.technical;
+  if (!technicalConfig) {
+    logger.warn(
+      { agentId: spec.agentId, scanMode: spec.scanMode },
+      'Scan mode set but no active strategy resolved — agent runs without a scan loop',
+    );
+    return;
+  }
+
+  // Resolve swap network + quote-asset identity for the swap discovery arm
+  // (orderbook venues leave these undefined). Traced to herobids index.ts:
+  // 1339–1363 — the inline swapNetwork / swapQuoteAssetAddress derivation.
+  const swapNetwork =
+    spec.venueType === 'swap'
+      ? resolveSwapNetwork(spec.venue, undefined, runtimeDeps.oneInchConfig)
+      : undefined;
+  const quoteAssetSymbol = technicalConfig.filters.quoteAssetSymbol ?? 'USDC';
+  const swapQuoteAssetAddress =
+    spec.venueType === 'swap' && swapNetwork
+      ? runtimeDeps.canonicalTokens?.[swapNetwork]?.[quoteAssetSymbol]?.address
+      : undefined;
+  const swapEnabled =
+    spec.venueType === 'swap'
+      ? (runtimeDeps.swapScannerConfig?.enabled ?? false)
+        && (spec.venue === 'jupiter'
+          ? (runtimeDeps.swapScannerConfig?.venues?.jupiter ?? true)
+          : spec.venue === '1inch'
+            ? (runtimeDeps.swapScannerConfig?.venues?.['1inch'] ?? true)
+            : false)
+      : false;
+
+  const getRegistry = runtimeDeps.getMarketDataRegistry ?? (() => undefined);
+
+  deps.technicalConfig = technicalConfig;
+  // scanMode set ⇒ hybrid (advisory scan — signals only, no direct submission).
+  deps.isHybridMode = true;
+  deps.discoverCandidates = buildDiscoverCandidates({
+    getRegistry,
+    bindingVenue: spec.venue,
+    bindingVenueType: spec.venueType,
+    swapNetwork,
+    swapQuoteAssetSymbol: quoteAssetSymbol,
+    swapQuoteAssetAddress,
+    swapEnabled,
+    maxCandidates: runtimeDeps.scannerMaxCandidates ?? 20,
+    logger,
+  });
+  deps.fetchCandles = runtimeDeps.scannerCandleFetcher;
+  deps.candleFetchRetry = runtimeDeps.candleFetchRetry;
+  deps.candleFetchBreaker = runtimeDeps.candleFetchBreaker;
+  deps.maxConcurrentScans = runtimeDeps.maxConcurrentScans;
+  deps.signalFingerprintStore = runtimeDeps.signalFingerprintStore;
+  deps.scannerSignalDedup = runtimeDeps.scannerSignalDedup;
+
+  const scanRepo = runtimeDeps.scanRepo;
+  if (scanRepo) {
+    // onPersistScanCandidates: the copied pricing filter (herobids index.ts:
+    // 1372–1455) + the T3 repo insert. Orderbook candidates pass the per-actor
+    // mark-coverage check (markSource.fetchMark — prevents persisting
+    // instruments that always reject with no_context); DEX candidates resolve
+    // their exact on-chain price identity but are persisted DEFENSIVELY even
+    // when pricing fails or is stale (a DEX observation must not be suppressed
+    // by a provider-specific pricing gap). Best-effort: the actor already wraps
+    // this in try/catch, and the repo insert is additionally guarded here.
+    deps.onPersistScanCandidates = async (candidates) => {
+      if (candidates.length === 0) return;
+      const registry = getRegistry();
+      // Lazily-created price service — only when the first DEX candidate is seen,
+      // so orderbook-only agents never pay the provider-registry cost.
+      let dexPriceService: ReturnType<typeof createPriceService> | null = null;
+      const priced: typeof candidates = [];
+      for (const c of candidates) {
+        if (c.instrumentKind === 'dex' || c.instrumentKind === 'swap') {
+          if (!c.symbol || !c.network || !c.address) {
+            priced.push(c); // missing on-chain identity — persist anyway (defensive)
+            continue;
+          }
+          if (!dexPriceService && registry) {
+            dexPriceService = createPriceService(registry);
+          }
+          if (!dexPriceService) {
+            priced.push(c); // no registry — persist without a pricing check
+            continue;
+          }
+          try {
+            const result = await dexPriceService.resolvePriceTarget(c.symbol, c.network, c.address);
+            // Persist whether priced, stale, or unavailable — DEX observations
+            // are never suppressed by a pricing gap (defensive).
+            priced.push(c);
+            if (!result.ok || result.data.stale) {
+              logger.debug(
+                { agentId: spec.agentId, symbol: c.symbol, network: c.network },
+                'DEX candidate price unavailable or stale — persisting anyway (defensive)',
+              );
+            }
+          } catch {
+            priced.push(c); // price lookup threw — persist anyway (defensive)
+          }
+          continue;
+        }
+        // Orderbook candidate: mark-coverage check via the per-actor mark source.
+        const instrument = c.symbol
+          ? `${c.symbol}-PERP`
+          : c.address
+            ? `${c.network ?? ''}:${c.address}`
+            : null;
+        if (!instrument) {
+          priced.push(c); // no symbol/address — persist anyway (defensive)
+          continue;
+        }
+        const markResult = await markSource.fetchMark(instrument);
+        if (markResult.ok) {
+          priced.push(c);
+        } else {
+          logger.debug({ agentId: spec.agentId, symbol: c.symbol, instrument }, 'Skipping candidate — mark unavailable');
+        }
+      }
+      if (priced.length === 0) return;
+      await scanRepo.insertCandidates(priced);
+    };
+    // onPersistScanMetrics: straight pass-through to the T3 repo (the repo
+    // generates the row id). Best-effort — the actor wraps it in try/catch.
+    deps.onPersistScanMetrics = async (metrics) => {
+      await scanRepo.insertMetrics(metrics);
+    };
+  }
 }
 
 /**

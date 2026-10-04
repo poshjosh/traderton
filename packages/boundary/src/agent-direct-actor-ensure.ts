@@ -7,7 +7,13 @@ import {
   type TradingRuntime,
   type AgentActorSpec,
 } from '@traderton/worker';
-import type { AgentRiskOverrides, ExecutionDefaults, RiskPosture } from '@traderton/domain';
+import type {
+  ActiveStrategy,
+  AgentRiskOverrides,
+  ExecutionDefaults,
+  RiskPosture,
+  ScanMode,
+} from '@traderton/domain';
 
 const logger = createLogger('boundary-agent-direct-ensure');
 
@@ -21,6 +27,14 @@ export interface StoredTradingProfile {
   riskPosture: RiskPosture | null;
   riskOverrides: AgentRiskOverrides;
   executionDefaults: ExecutionDefaults | null;
+  /**
+   * Traderton-owned scan config (E1-T T1), threaded from the profile row into
+   * the actor spec. `scanMode` set (not null) ⇒ the agent runs a technical scan
+   * loop over `activeStrategy.technical`. A change to either rides the profile
+   * `revision` bump, so the existing reconstruct path (below) re-applies them.
+   */
+  scanMode: ScanMode | null;
+  activeStrategy: ActiveStrategy | null;
   revision: bigint;
 }
 
@@ -160,6 +174,13 @@ export function buildAgentDirectActorEnsure(
         capital: profile.capital,
         riskPosture: profile.riskPosture,
         riskOverrides: profile.riskOverrides,
+        // Traderton-owned scan config (E1-T T4): the actor starts a scan loop
+        // only when scanMode is set AND activeStrategy carries a resolved
+        // technical config. A profile change bumps `revision`, which forces the
+        // reconstruct above, so a technical/preset change applies through the
+        // existing rebuild path (hot-apply deferred to 010).
+        scanMode: profile.scanMode,
+        activeStrategy: profile.activeStrategy,
       };
       const actor = runtime.constructAndRegisterAgentActor(spec);
       try {

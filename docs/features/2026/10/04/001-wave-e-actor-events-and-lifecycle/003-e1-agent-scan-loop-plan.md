@@ -1,6 +1,6 @@
 # 003 — E1: agent technical scan loop + agent-actor lifecycle
 
-**Status:** E1-T PENDING (T1 DONE, T2 DONE, T3 DONE, T4 PENDING, T5 PENDING);
+**Status:** E1-T PENDING (T1 DONE, T2 DONE, T3 DONE, T4 DONE, T5 PENDING);
 E1-H GATED (herobids, awaiting human go).
 **Depends on:** E3-T (scan results reach agents only through
 the E3 `consumer_notifications` channel), and E2 (loader + status callbacks). **Repos:** traderton (E1-T), then
@@ -245,3 +245,17 @@ updated.
 - NOTE: the only intended divergence from the herobids schema is dropping the
   `agent_scan_candidates.agentId` FK to the (non-existent in Traderton) `agents` table —
   it is a soft text reference, verified no FK in migration 0006.
+
+### [T4] wire scan loop into agent actor
+- LOW: no test exercises the swap-venue arm of `wireScanDeps`
+  (swapNetwork/swapQuoteAssetAddress/swapEnabled resolution); orderbook path is well
+  covered. Optional swap-spec test would broaden coverage.
+- LOW: `quoteAssetSymbol ?? 'USDC'` default is applied both in `wireScanDeps` and inside
+  `buildDiscoverCandidates`. Harmless double-default, mirrors source.
+- LOW: test fixtures use `as unknown as TechnicalConfig/ActiveStrategy` for partial
+  strategy objects (test-only). A typed factory helper would remove the cast.
+- NOTE: `marketData` is optional in schema and guarded in production (scannerCandleFetcher
+  undefined when absent → scan loop simply doesn't start); the test-fixture completion is
+  benign, not masking a missing guard. The scanner candle fetcher is built eagerly from
+  `config.marketData` (traderton reads config directly, unlike herobids which built it from
+  the post-start registry).

@@ -61,7 +61,8 @@ import type { ExecutionActor, IntakeResult } from '../execution-actor.js';
 import type { DecisionContext, PositionState, DecisionIntakeDeps } from '@traderton/engine';
 import type { ConsumerNotifier } from './consumer-notifier.js';
 import type { TechnicalScanState } from '../scan-types.js';
-import type { AgentWakePayload } from '@traderton/domain';
+import type { ActiveStrategy, AgentWakePayload, TechnicalConfig } from '@traderton/domain';
+import type { PersistableScanCandidate, ScanMetricInput } from '../complete-technical-scan.js';
 
 /** A fake ConsumerNotifier recording every call — the E3-T wiring assertion seam. */
 function makeFakeNotifier(): ConsumerNotifier & {
@@ -507,5 +508,239 @@ describe('constructAndRegisterAgentActor — consumer-notifier wiring (AUTHORED 
       status: 'crashed',
       error: 'venue stream died',
     });
+  });
+});
+
+describe('constructAndRegisterAgentActor — technical scan loop wiring (AUTHORED — E1-T T4)', () => {
+  beforeEach(() => {
+    agentActorCtorSpy.mockReset();
+  });
+
+  /** A minimal resolved technical config (only the fields the wiring reads). */
+  function makeTechnical(): TechnicalConfig {
+    return {
+      filters: { venue: 'hyperliquid', venueType: 'orderbook', quoteAssetSymbol: 'USDC' },
+      candles: { interval: '1h', limit: 200 },
+      indicators: {},
+      signalBias: {},
+      scanIntervalMs: 60_000,
+    } as unknown as TechnicalConfig;
+  }
+
+  function makeActiveStrategy(): ActiveStrategy {
+    return {
+      presetKey: 'momentum',
+      styleTier: 'standard',
+      behaviorVersion: 'ts-standard-v1',
+      technical: makeTechnical(),
+      source: 'creator',
+      changedAt: new Date().toISOString(),
+    };
+  }
+
+  /** A spy AgentScanRepository recording insertCandidates / insertMetrics calls. */
+  function makeScanRepo(): { insertCandidates: ReturnType<typeof vi.fn>; insertMetrics: ReturnType<typeof vi.fn> } {
+    return { insertCandidates: vi.fn(async () => {}), insertMetrics: vi.fn(async () => {}) };
+  }
+
+  /**
+   * Build runtime deps carrying the T4 scan singletons. fetchCandles /
+   * discoverCandidates registry / scanRepo are the load-bearing ones the wiring
+   * reads; the rest are the base deps the stubbed actor never touches.
+   */
+  function buildScanRuntimeDeps(opts: {
+    scanRepo?: { insertCandidates: ReturnType<typeof vi.fn>; insertMetrics: ReturnType<typeof vi.fn> };
+    withScanSingletons?: boolean;
+    markOk?: boolean;
+  }): AgentActorRuntimeDeps {
+    const base = {
+      fillRepo: { getLatestFillByInstrument: async () => null },
+      fallbackMarkSource: { fetchMark: async () => ({ ok: false, error: { code: 'unavailable', message: 'stub' } }) },
+      markStalenessThresholdMs: 30_000,
+      agentRiskDefaults: AgentRiskDefaultsSchema.parse({}),
+      instrumentCache: new VenueInstrumentCache({ info: () => {}, warn: () => {}, error: () => {} } as never),
+      consumerNotifier: makeFakeNotifier(),
+      scanMaxSignals: 20,
+    };
+    if (opts.withScanSingletons === false) {
+      return base as unknown as AgentActorRuntimeDeps;
+    }
+    return {
+      ...base,
+      // Per-actor mark source resolves to the fallback (ok:false by default),
+      // so the orderbook mark-coverage filter is exercised. markOk flips it.
+      fallbackMarkSource: {
+        fetchMark: async () =>
+          opts.markOk
+            ? { ok: true, data: { instrument: 'x', price: '1', source: 'oracle', timestamp: new Date().toISOString() } }
+            : { ok: false, error: { code: 'unavailable', message: 'stub' } },
+      },
+      getMarketDataRegistry: () => undefined, // no registry → DEX candidates persist defensively
+      scannerCandleFetcher: vi.fn(async () => []),
+      scanRepo: opts.scanRepo,
+      candleFetchRetry: { enabled: true, maxRetries: 3, baseDelayMs: 250, maxDelayMs: 2000 },
+      candleFetchBreaker: undefined,
+      maxConcurrentScans: 4,
+      scannerMaxCandidates: 20,
+      signalFingerprintStore: { get: async () => null, set: async () => undefined },
+      scannerSignalDedup: { enabled: true, topN: 5, confidenceBucketSize: 0.05, ttlSeconds: 600 },
+      swapScannerConfig: { enabled: false },
+    } as unknown as AgentActorRuntimeDeps;
+  }
+
+  const scanSpec: AgentActorSpec = {
+    agentId: 'agent-scan-1',
+    ownerId: 'owner-7',
+    executionMode: 'paper',
+    venueAccountId: 'va-1',
+    venue: 'hyperliquid',
+    venueType: 'orderbook',
+    scanMode: 'scanner_gated',
+    activeStrategy: makeActiveStrategy(),
+  };
+
+  function captureDeps(spec: AgentActorSpec, runtimeDeps: AgentActorRuntimeDeps): AgentTradingActorDeps {
+    const registry = { register: vi.fn(), deregister: vi.fn() };
+    constructAndRegisterAgentActor(registry, runtimeDeps, spec);
+    return agentActorCtorSpy.mock.calls[0]![0] as AgentTradingActorDeps;
+  }
+
+  it('starts a scan loop for a scanner-gated agent', () => {
+    const deps = captureDeps(scanSpec, buildScanRuntimeDeps({ scanRepo: makeScanRepo() }));
+
+    // The copied loop starts iff technicalConfig + discoverCandidates +
+    // fetchCandles are all present — assert the wiring fed all three.
+    expect(deps.technicalConfig).toEqual(scanSpec.activeStrategy!.technical);
+    expect(deps.isHybridMode).toBe(true);
+    expect(typeof deps.discoverCandidates).toBe('function');
+    expect(typeof deps.fetchCandles).toBe('function');
+    expect(deps.maxConcurrentScans).toBe(4);
+    expect(deps.signalFingerprintStore).toBeDefined();
+    expect(deps.scannerSignalDedup).toEqual({ enabled: true, topN: 5, confidenceBucketSize: 0.05, ttlSeconds: 600 });
+    expect(typeof deps.onPersistScanCandidates).toBe('function');
+    expect(typeof deps.onPersistScanMetrics).toBe('function');
+  });
+
+  it('runs no scan loop when scan mode is absent', () => {
+    const noScanSpec: AgentActorSpec = { ...scanSpec, scanMode: null, activeStrategy: null };
+    const deps = captureDeps(noScanSpec, buildScanRuntimeDeps({ scanRepo: makeScanRepo() }));
+
+    expect(deps.technicalConfig).toBeUndefined();
+    expect(deps.discoverCandidates).toBeUndefined();
+    expect(deps.fetchCandles).toBeUndefined();
+    expect(deps.onPersistScanCandidates).toBeUndefined();
+    expect(deps.onPersistScanMetrics).toBeUndefined();
+  });
+
+  it('runs no scan loop when scan mode is set but the active strategy is absent', () => {
+    const noStratSpec: AgentActorSpec = { ...scanSpec, scanMode: 'scanner_gated', activeStrategy: null };
+    const deps = captureDeps(noStratSpec, buildScanRuntimeDeps({ scanRepo: makeScanRepo() }));
+
+    // scanMode set but no resolved strategy ⇒ the actor runs without a scan loop.
+    expect(deps.technicalConfig).toBeUndefined();
+    expect(deps.discoverCandidates).toBeUndefined();
+    expect(deps.fetchCandles).toBeUndefined();
+  });
+
+  it('persists scan candidates and metrics after a scan', async () => {
+    const scanRepo = makeScanRepo();
+    // markOk: true → the orderbook mark-coverage filter passes the candidate through.
+    const deps = captureDeps(scanSpec, buildScanRuntimeDeps({ scanRepo, markOk: true }));
+
+    const candidate: PersistableScanCandidate = {
+      id: 'cand-1',
+      agentId: 'agent-scan-1',
+      scannedAt: new Date().toISOString(),
+      scanVersion: 'ts-standard-v1',
+      activePresetKey: 'momentum',
+      presetBehaviorVersion: 'ts-standard-v1',
+      instrumentKind: 'orderbook',
+      venueFamily: 'hyperliquid',
+      styleTier: 'standard',
+      symbol: 'BTC',
+      candidateRank: 1,
+      signalFacts: {},
+      disposition: 'entry_candidate',
+    };
+    await deps.onPersistScanCandidates!([candidate]);
+
+    expect(scanRepo.insertCandidates).toHaveBeenCalledOnce();
+    expect(scanRepo.insertCandidates.mock.calls[0]![0]).toEqual([candidate]);
+
+    const metric: ScanMetricInput = {
+      agentId: 'agent-scan-1',
+      presetKey: 'momentum',
+      presetBehaviorVersion: 'ts-standard-v1',
+      venueFamily: 'hyperliquid',
+      styleTier: 'standard',
+      scanScope: { discovered: 1, symbolsSelected: 1, eligible: 1, fetched: 1, scored: 1, signals: 1 },
+      scannedAt: new Date().toISOString(),
+      candidatesDiscovered: 1,
+      candidatesScored: 1,
+      signalsGenerated: 1,
+      scanHealth: 'healthy_signals',
+      topConfidence: 0.9,
+      regimeBucket: null,
+    };
+    await deps.onPersistScanMetrics!(metric);
+
+    expect(scanRepo.insertMetrics).toHaveBeenCalledOnce();
+    expect(scanRepo.insertMetrics.mock.calls[0]![0]).toEqual(metric);
+  });
+
+  it('drops an orderbook candidate whose mark is unavailable before persisting', async () => {
+    const scanRepo = makeScanRepo();
+    // markOk: false → the mark-coverage filter drops the orderbook candidate.
+    const deps = captureDeps(scanSpec, buildScanRuntimeDeps({ scanRepo, markOk: false }));
+
+    await deps.onPersistScanCandidates!([
+      {
+        id: 'cand-2',
+        agentId: 'agent-scan-1',
+        scannedAt: new Date().toISOString(),
+        scanVersion: 'v1',
+        activePresetKey: 'momentum',
+        presetBehaviorVersion: 'v1',
+        instrumentKind: 'orderbook',
+        venueFamily: 'hyperliquid',
+        styleTier: 'standard',
+        symbol: 'ETH',
+        candidateRank: 1,
+        signalFacts: {},
+        disposition: 'entry_candidate',
+      },
+    ]);
+
+    // All candidates filtered out → nothing inserted.
+    expect(scanRepo.insertCandidates).not.toHaveBeenCalled();
+  });
+
+  it('persists a DEX candidate defensively even when no price registry is available', async () => {
+    const scanRepo = makeScanRepo();
+    // getMarketDataRegistry → undefined, so the DEX pricing check is skipped and
+    // the candidate is persisted anyway (defensive).
+    const deps = captureDeps(scanSpec, buildScanRuntimeDeps({ scanRepo, markOk: false }));
+
+    const dexCandidate: PersistableScanCandidate = {
+      id: 'cand-dex',
+      agentId: 'agent-scan-1',
+      scannedAt: new Date().toISOString(),
+      scanVersion: 'v1',
+      activePresetKey: 'momentum',
+      presetBehaviorVersion: 'v1',
+      instrumentKind: 'dex',
+      venueFamily: 'jupiter',
+      styleTier: 'standard',
+      symbol: 'WIF',
+      network: 'solana',
+      address: '0xabc',
+      candidateRank: 1,
+      signalFacts: {},
+      disposition: 'entry_candidate',
+    };
+    await deps.onPersistScanCandidates!([dexCandidate]);
+
+    expect(scanRepo.insertCandidates).toHaveBeenCalledOnce();
+    expect(scanRepo.insertCandidates.mock.calls[0]![0]).toEqual([dexCandidate]);
   });
 });
