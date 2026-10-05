@@ -64,7 +64,7 @@ export {
 } from './dev/sign.js';
 export { MCP_PATH } from './mcp/constants.js';
 export {
-  resolveMcpSurfaceConfig,
+  buildMcpSurfaceConfig,
   type McpSurfaceConfig,
   type McpToolDefinition,
 } from './mcp/surface-config.js';

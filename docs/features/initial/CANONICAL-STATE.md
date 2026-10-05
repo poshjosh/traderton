@@ -47,8 +47,9 @@ authenticated `ownerId` + `actor`. Repos: `traderton` = `/Users/chinomso.ikwuagw
 - **`main` holds only the extraction + M1 authoring + the L1 fix.** F, the compose stack, and all
   verification scaffolding live on branches, per `main`-branch discipline (§4). **Nothing is merged to
   `main` for F**, and the merge gate is unmet (§4).
-- **MCP transport binding (Phase 3 T2.2)** lives on branch **`phase3-mcp-surface`** (NOT merged, off by
-  default — `BOUNDARY_MCP_ENABLED=false`). It is an ADDITIVE second transport over the SAME dispatcher:
+- **MCP transport binding (Phase 3 T2.2)** is merged and **always mounted** (2026-10-05; the
+  `BOUNDARY_MCP_ENABLED` opt-in was removed because herobids discovers skill tools over `tools/list`,
+  ADR 017). It is an ADDITIVE second transport over the SAME dispatcher:
   `POST /internal/v1/mcp` de-frames each MCP `tools/call` into the identical 005 envelope and dispatches
   it; REST bytes/behaviour are unchanged. The wire mapping is normative in herobids Step 10 §2.5; the
   ruling is 004 "MCP-FD". Feature folder: `docs/features/2026/10/03/001-mcp-boundary-surface/`.

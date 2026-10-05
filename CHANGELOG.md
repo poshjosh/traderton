@@ -6,6 +6,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **The MCP route (`POST /internal/v1/mcp`) is always mounted; `BOUNDARY_MCP_ENABLED` is removed.** herobids discovers each skill's tools over MCP `tools/list`, so a boundary started without the route (the old default) gave agents no trading tools. That was the staging failure in herobids bug 005. Tool calls still use REST. A leftover `BOUNDARY_MCP_ENABLED` in an env is ignored with a startup warning; remove it from staging/prod envs.
+
 ## 0.0.3-2026.10.05
 
 ### Added

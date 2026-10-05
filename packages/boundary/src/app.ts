@@ -37,8 +37,8 @@ export interface BoundaryAppDeps extends DispatcherDeps {
   /**
    * The MCP surface (Phase 3 T2.2). When present, `POST /internal/v1/mcp` is
    * mounted over the SAME dispatcher the REST route uses; when absent, no MCP
-   * route is registered. Off by default — `bin.ts` only supplies it when the
-   * operator sets `BOUNDARY_MCP_ENABLED=true`.
+   * route is registered. Production (`bin.ts`) always supplies it; tests may
+   * omit it to build a REST-only app.
    */
   mcp?: McpSurfaceConfig;
 }

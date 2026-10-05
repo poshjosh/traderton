@@ -603,13 +603,12 @@ behaviour.
   (legacy Streamable HTTP, stateless JSON). `GET`/`DELETE` → `405`; there is no
   status route — reconcile a lost MCP response by re-issuing the same
   `idempotencyKey`.
-- **Enablement (operator env, read only in `bin.ts`):**
-  `BOUNDARY_MCP_ENABLED=true` mounts the route; `BOUNDARY_MCP_DESCRIPTOR_PATH`
-  (optional, requires enabled) points at the signed External Backend Descriptor
-  wrapper served verbatim by `tools/list` (unset = empty list; D16 — traderton
-  serves, never invents, and does not verify the signature — herobids is the
-  verifier). A bad value or unreadable/invalid descriptor fails the boundary at
-  startup.
+- **Enablement:** always mounted (2026-10-05). Consumers discover their skills'
+  tools over `tools/list` (herobids ADR 017), so the route is required. The
+  former `BOUNDARY_MCP_ENABLED` opt-in and `BOUNDARY_MCP_DESCRIPTOR_PATH` are
+  removed; `tools/list` is built from Traderton's own tool registry, each tool
+  tagged with its skill ref(s). An unserviceable tool surface fails the boundary
+  at startup.
 - **Normative mapping:** the `tools/call` ↔ invocation-envelope field mapping,
   result encoding (`structuredContent` = the 005 result, `isError` iff failure),
   pre-dispatch failure encoding, the dispatcher-exception → sanitized

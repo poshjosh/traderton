@@ -47,7 +47,7 @@ import {
 import type { RedisEvalClient } from '@traderton/market-data';
 import { createBoundaryApp } from './app.js';
 import { BoundaryConfigSchema, type BoundaryConfig } from './config.js';
-import { resolveMcpSurfaceConfig } from './mcp/surface-config.js';
+import { buildMcpSurfaceConfig } from './mcp/surface-config.js';
 import type {
   ContextFactoryRequest,
   TradingToolContextFactory,
@@ -600,17 +600,16 @@ async function main(): Promise<void> {
     };
   };
 
-  // The additive MCP binding (Phase 3 T2.2; Phase 4 T2 — tools/list from the
-  // registry) — off unless the operator opts in. `resolveMcpSurfaceConfig` fails
-  // fast on a bad env or an unserviceable tool surface so a misconfig crashes the
-  // process at start rather than mounting a broken surface.
-  const mcp = resolveMcpSurfaceConfig(
-    { enabled: process.env['BOUNDARY_MCP_ENABLED'] },
-    registry,
-  );
-  if (mcp) {
+  // The MCP binding (Phase 3 T2.2; Phase 4 T2 — tools/list from the registry)
+  // is always mounted: consumers discover their skills' tools over tools/list.
+  // `buildMcpSurfaceConfig` fails fast on an unserviceable tool surface so a
+  // misconfig crashes the process at start rather than mounting a broken one.
+  const mcp = buildMcpSurfaceConfig(registry);
+  // eslint-disable-next-line no-console
+  console.info(`MCP binding mounted at /internal/v1/mcp (${mcp.tools.length} tool(s) in tools/list)`);
+  if (process.env['BOUNDARY_MCP_ENABLED'] !== undefined) {
     // eslint-disable-next-line no-console
-    console.info(`MCP binding mounted at /internal/v1/mcp (${mcp.tools.length} tool(s) in tools/list)`);
+    console.warn('BOUNDARY_MCP_ENABLED is no longer read — the MCP route is always mounted; remove it from the env');
   }
 
   const app = createBoundaryApp({
@@ -620,7 +619,7 @@ async function main(): Promise<void> {
     invocationStore,
     computeRequestFingerprint,
     retentionMs,
-    ...(mcp ? { mcp } : {}),
+    mcp,
   });
 
   // Graceful shutdown (E2 F3): on SIGTERM/SIGINT close the listener, shut the
