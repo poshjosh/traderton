@@ -349,45 +349,40 @@ describe.skipIf(SKIP)('agent actor multi-replica owner routing + takeover (integ
     expect(cmdLen).toBe(0);
   }, 60_000);
 
-  it('CASE 1b: B\'s sender serializes the forwarded envelope onto A\'s command list', async () => {
+  it('CASE 1b: the sender serializes the forwarded envelope onto the owner\'s command list', async () => {
     // Locks the S3 sender contract against future drift (CodeReviewer MEDIUM):
     // CASE 1 proves A executed by observing the reply, but the reply-writer
     // attribution rests on "the remote branch writes nothing locally". Here we
-    // run the sender with NO consumer draining, so we can inspect the RAW
-    // envelope the sender RPUSH-ed and assert it carries the unchanged payload +
-    // the resolved injection the owner rebuilds its drive target from.
-    const a = buildReplica('A');
-    const b = buildReplica('B');
-    // Stop A's consumer so the forwarded envelope stays on the list for inspection.
-    a.consumer.stop();
-
-    await a.ops.recordRunning({
-      ownerId: OWNER_ID,
-      actorId: AGENT_ID,
-      venueAccountId: VENUE_ACCOUNT_ID,
-      venue: VENUE,
-      venueType: VENUE_TYPE,
-    });
-    expect((await a.ensure(INJECTION)).owner).toBe('local');
-    const ensuredOnB = await b.ensure(INJECTION);
-    expect(ensuredOnB.owner).toBe('remote');
-
-    // Drive only the sender (no reply awaited — the consumer is stopped).
+    // inspect the RAW envelope the sender RPUSH-es, so a future change to the
+    // remote branch cannot silently stop forwarding the correct payload/injection.
+    //
+    // This is a PURE sender-contract test: it drives `wrapPublishToInbound` with a
+    // synthetic `{owner:'remote', workerId}` pointing at a worker id NO consumer
+    // listens on (there is no replica for it), so the envelope stays on the list
+    // for inspection — no live BLPOP can race-drain it (the flaky failure mode of
+    // the earlier "stop A's consumer then inspect" approach). It needs no runtime,
+    // actor, or lease — just real Redis.
+    const ownerWorkerId = `worker-noconsumer-${Date.now().toString(36)}`;
     const senderRedis = openRedis();
     const sender = wrapPublishToInbound({
-      local: b.trading.createDriveTarget(INJECTION),
-      ensureResult: ensuredOnB,
+      // The local drive target must never be invoked on the remote branch; a
+      // throwing stub proves it is not called for a forwarded decision.
+      local: async () => {
+        throw new Error('local drive target must not run for a remotely-owned decision');
+      },
+      ensureResult: { owner: 'remote', workerId: ownerWorkerId },
       injection: INJECTION,
       redis: senderRedis as unknown as AgentCommandSenderRedis,
-      logger: createLogger('s5-B-sender-contract'),
+      logger: createLogger('s5-sender-contract'),
     });
     const decisionId = 'd-case1b';
     await sender(AGENT_MESSAGE_TYPES.DECISION_SUBMIT, decisionPayload(decisionId));
 
-    // Exactly one envelope landed on A's command list, carrying the unchanged
-    // decision payload + the resolved injection (so A can rebuild its drive target).
+    // Exactly one envelope landed on the owner's command list, carrying the
+    // unchanged decision payload + the resolved injection (so the owner can
+    // rebuild its drive target).
     const inspector = openRedis();
-    const listKey = agentCmdListKey(a.trading.workerId);
+    const listKey = agentCmdListKey(ownerWorkerId);
     expect(await inspector.llen(listKey)).toBe(1);
     const raw = await inspector.lindex(listKey, 0);
     expect(raw).not.toBeNull();
@@ -402,6 +397,9 @@ describe.skipIf(SKIP)('agent actor multi-replica owner routing + takeover (integ
     expect(envelope.injection).toEqual(INJECTION);
     // The sender did NOT write a reply itself (the owner is the sole reply writer).
     expect(await inspector.exists(decisionReplyKey(decisionId))).toBe(0);
+    // Clean up the key we parked on the shared Redis (beforeEach only truncates
+    // the DB + the agent lease, not arbitrary command lists).
+    await inspector.del(listKey);
   }, 60_000);
 
   it('CASE 2: after A dies without releasing, B\'s sweep takes over and a new decision executes on B', async () => {
