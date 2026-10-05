@@ -209,13 +209,14 @@ async function main(): Promise<void> {
 
   // Wave E / E1-T T5: the periodic agent-actor orphan sweep. Self-rescheduling
   // (reschedules on failure per AGENTS); operator config drives the cadence. It
-  // stops running bots whose creator agent is no longer running and re-ensures
+  // stops running bots whose creator agent is explicitly stopped (a `stopped` run
+  // row — never mere absence, bug 2026-10-05/004) and re-ensures
   // running agents whose actor died — both through the single ensure entry point
   // (so E4 can make them lease-aware).
   const agentOrphanSweep = startAgentOrphanSweep({
     ports: {
       listRunningAgentRuns: () => agentActorRunRepo.listRunning(),
-      listRunningAgentBots: () => botRepo.listRunningAgentBots(),
+      listRunningBotsOfStoppedAgents: () => botRepo.listRunningBotsOfStoppedAgents(),
       isActorAlive: (actorId) => agentActorLifecycleOps.isActorAlive(actorId),
       // 001 S4: return the ownership outcome so the sweep logs local-vs-remote
       // honestly. A `remote` outcome is a no-op success (the actor runs on another

@@ -32,7 +32,7 @@ function makePorts(overrides: Partial<AgentOrphanSweepPorts> = {}): {
   const reEnsureAgent = vi.fn(async () => ({ owner: 'local' as const }));
   const ports: AgentOrphanSweepPorts = {
     listRunningAgentRuns: async () => [],
-    listRunningAgentBots: async () => [],
+    listRunningBotsOfStoppedAgents: async () => [],
     isActorAlive: () => true,
     reEnsureAgent,
     stopBot,
@@ -42,27 +42,38 @@ function makePorts(overrides: Partial<AgentOrphanSweepPorts> = {}): {
 }
 
 describe('runAgentOrphanSweep', () => {
-  it('stops running bots of a stopped/absent agent and leaves bots of a running agent alone', async () => {
+  it('stops every bot the listing reports as belonging to a stopped agent', async () => {
     const { ports, stopBot } = makePorts({
-      // Only agent "live" is running.
-      listRunningAgentRuns: async () => [runRow('live')],
-      listRunningAgentBots: async () => [
-        { id: 'bot-of-live', creatorId: 'live' },     // creator running → keep
-        { id: 'bot-of-dead', creatorId: 'dead' },     // creator absent from runs → stop
+      listRunningBotsOfStoppedAgents: async () => [
+        { id: 'bot-a', creatorId: 'stopped-1' },
+        { id: 'bot-b', creatorId: 'stopped-2' },
       ],
-      isActorAlive: () => true,
     });
 
     await runAgentOrphanSweep(ports, buildLogger());
 
-    expect(stopBot).toHaveBeenCalledTimes(1);
-    expect(stopBot).toHaveBeenCalledWith('bot-of-dead');
+    expect(stopBot).toHaveBeenCalledTimes(2);
+    expect(stopBot).toHaveBeenCalledWith('bot-a');
+    expect(stopBot).toHaveBeenCalledWith('bot-b');
+  });
+
+  it('stops no bots when no agent is explicitly stopped, even with no running agents', async () => {
+    // Regression for bug 2026-10-05/004: an empty agent_actor_runs table (herobids
+    // writes no run state) must not make every agent bot look orphaned.
+    const { ports, stopBot } = makePorts({
+      listRunningAgentRuns: async () => [],
+      listRunningBotsOfStoppedAgents: async () => [],
+    });
+
+    await runAgentOrphanSweep(ports, buildLogger());
+
+    expect(stopBot).not.toHaveBeenCalled();
   });
 
   it('re-ensures a running agent whose actor is not alive, and skips live ones', async () => {
     const { ports, reEnsureAgent } = makePorts({
       listRunningAgentRuns: async () => [runRow('alive'), runRow('dead')],
-      listRunningAgentBots: async () => [],
+      listRunningBotsOfStoppedAgents: async () => [],
       isActorAlive: (actorId) => actorId === 'alive',
     });
 
@@ -76,7 +87,7 @@ describe('runAgentOrphanSweep', () => {
     const logger = buildLogger();
     const { ports } = makePorts({
       listRunningAgentRuns: async () => [runRow('dead')],
-      listRunningAgentBots: async () => [],
+      listRunningBotsOfStoppedAgents: async () => [],
       isActorAlive: () => false,
       // 001 S4: another replica owns the lease and runs the actor.
       reEnsureAgent: vi.fn(async () => ({ owner: 'remote' as const, workerId: 'worker-other' })),
@@ -96,7 +107,7 @@ describe('runAgentOrphanSweep', () => {
     const reEnsureAgent = vi.fn(async () => ({ owner: 'local' as const }));
     const ports: AgentOrphanSweepPorts = {
       listRunningAgentRuns: async () => [runRow('dead')],
-      listRunningAgentBots: async () => [{ id: 'orphan-bot', creatorId: 'gone' }],
+      listRunningBotsOfStoppedAgents: async () => [{ id: 'orphan-bot', creatorId: 'gone' }],
       isActorAlive: () => false,
       reEnsureAgent,
       stopBot,

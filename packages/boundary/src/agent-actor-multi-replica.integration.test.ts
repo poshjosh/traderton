@@ -437,7 +437,7 @@ describe.skipIf(SKIP)('agent actor multi-replica owner routing + takeover (integ
     await runAgentOrphanSweep(
       {
         listRunningAgentRuns: () => runRepo.listRunning(),
-        listRunningAgentBots: () => botRepo.listRunningAgentBots(),
+        listRunningBotsOfStoppedAgents: () => botRepo.listRunningBotsOfStoppedAgents(),
         isActorAlive: (actorId) => b.ops.isActorAlive(actorId),
         reEnsureAgent: (run) => b.ops.ensureFromRun(run),
         stopBot: async (botId) => {

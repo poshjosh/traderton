@@ -11,10 +11,13 @@
 // `remote` result means a surviving/other worker already owns the agent lease
 // and runs the actor, so this replica constructed nothing (a no-op success, not
 // a failure, and not a local re-ensure).
-//   1. Stop running bots whose creator agent is NOT running (run state `stopped`
-//      or absent) — the Traderton replacement for the removed source
-//      `listRunningBotsForInactiveAgents` (which joined the dropped platform
-//      `agents` table). Per-bot failures log + continue.
+//   1. Stop running bots whose creator agent's run state is explicitly `stopped`
+//      — the Traderton replacement for the removed source
+//      `listRunningBotsForInactiveAgents` (which inner-joined the dropped platform
+//      `agents` table, so it too only acted on agents known to be stopped/crashed).
+//      An ABSENT run row is unknown, not dead: herobids does not write run state
+//      until E1-H, so treating absence as dead stopped every agent bot within a
+//      sweep interval (bug 2026-10-05/004). Per-bot failures log + continue.
 //   2. Re-ensure `running` agents whose actor is not alive in THIS process (dead
 //      after a crash, or never rehydrated) — through the SAME single ensure entry
 //      point boot-rehydrate uses, so E4 can make both lease-aware later.
@@ -37,8 +40,12 @@ export interface AgentRunRecord {
 export interface AgentOrphanSweepPorts {
   /** All `desired_state='running'` rows (the liveness source). */
   listRunningAgentRuns(): Promise<AgentRunRecord[]>;
-  /** Every RUNNING agent-created bot: its id + creator agent id. */
-  listRunningAgentBots(): Promise<Array<{ id: string; creatorId: string }>>;
+  /**
+   * Every RUNNING agent-created bot whose creator agent has an explicit
+   * `desired_state='stopped'` run row: its id + creator agent id. Bots of agents
+   * with no run row are NOT included (no row = unknown, not dead).
+   */
+  listRunningBotsOfStoppedAgents(): Promise<Array<{ id: string; creatorId: string }>>;
   /** True when the agent's actor is alive (registered + running) in this process. */
   isActorAlive(actorId: string): boolean;
   /**
@@ -87,16 +94,14 @@ export async function runAgentOrphanSweep(
   ports: AgentOrphanSweepPorts,
   logger: SweepLogger,
 ): Promise<void> {
-  const runs = await ports.listRunningAgentRuns();
-  const runningActorIds = new Set(runs.map((r) => r.actorId));
-
-  // Pass 1 — stop running bots whose creator agent is not running.
-  const runningBots = await ports.listRunningAgentBots();
-  for (const bot of runningBots) {
-    if (runningActorIds.has(bot.creatorId)) continue;
+  // Pass 1 — stop running bots whose creator agent is explicitly stopped. The
+  // listing only returns bots with positive evidence (a `stopped` run row); an
+  // agent with no run row is unknown and its bots are left alone.
+  const orphanedBots = await ports.listRunningBotsOfStoppedAgents();
+  for (const bot of orphanedBots) {
     try {
       await ports.stopBot(bot.id);
-      logger.info({ botId: bot.id, creatorId: bot.creatorId }, 'orphan sweep: stopped bot of non-running agent');
+      logger.info({ botId: bot.id, creatorId: bot.creatorId }, 'orphan sweep: stopped bot of stopped agent');
     } catch (err) {
       // Best-effort: log + continue so one bad bot never stalls the sweep.
       logger.error({ err, botId: bot.id, creatorId: bot.creatorId }, 'orphan sweep: failed to stop orphaned bot; continuing');
@@ -107,6 +112,7 @@ export async function runAgentOrphanSweep(
   // re-ensure is lease-aware (001 S4): it reconstructs here only if THIS worker
   // wins the agent lease; if another worker already owns it, the ensure is a
   // `remote` no-op success and no duplicate actor is created.
+  const runs = await ports.listRunningAgentRuns();
   for (const run of runs) {
     if (ports.isActorAlive(run.actorId)) continue;
     try {

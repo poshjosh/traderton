@@ -20,7 +20,8 @@ export type AgentActorRunRow = typeof agentActorRuns.$inferSelect;
  *
  * `start_agent_actor` upserts `running`; `stop_agent_actor` marks `stopped`. The
  * boundary reads `listRunning()` on boot (rehydrate) and in the orphan sweep
- * (re-ensure dead actors + stop bots of non-running agents); `getByOwnerActor`
+ * (re-ensure dead actors); the sweep's bot pass joins `stopped` rows via
+ * `BotRepository.listRunningBotsOfStoppedAgents`; `getByOwnerActor`
  * backs liveness checks. The write effects are naturally idempotent (upsert the
  * same running row; stop stays stopped), so the tools satisfy 005 idempotency
  * without any per-tool dedup of their own.

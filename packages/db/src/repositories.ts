@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { eq, ne, and, isNull, desc, or, gte, lte, inArray, notInArray, sql } from 'drizzle-orm';
 import type { Database } from './index.js';
-import { fills, positions, bots, executionPlans, orders, balanceSnapshots, decisions, venueAccounts } from './schema/index.js';
+import { fills, positions, bots, executionPlans, orders, balanceSnapshots, decisions, venueAccounts, agentActorRuns } from './schema/index.js';
 
 export interface InsertFill {
   orderId: string;
@@ -1111,26 +1111,35 @@ export class BotRepository {
   // table for the agent-orphan reconcile sweep; only the platform worker called it.
 
   /**
-   * List every RUNNING bot created by an agent (creatorType='agent'), returning
-   * each bot's id + creator agent id. Backs the Wave E / E1-T T5 orphan sweep,
-   * which stops bots whose creator agent's run state is `stopped`/absent — the
-   * Traderton replacement for the removed `listRunningBotsForInactiveAgents`
-   * (liveness now = `agent_actor_runs`, not the dropped platform `agents` join).
+   * List every RUNNING agent-created bot whose creator agent has an explicit
+   * `agent_actor_runs` row with `desired_state='stopped'` (same owner). Backs
+   * pass 1 of the boundary orphan sweep — the Traderton replacement for the
+   * removed source `listRunningBotsForInactiveAgents`.
    *
-   * Excludes user-created bots. The drive target stamps EVERY bot
-   * creatorType='agent' (its start/stop guards require that stamp), so a bot the
-   * user created via herobids carries creatorId = the user's own ownerId. No
-   * agent can be one of these, so the sweep must not treat it as an orphan
-   * (bug 2026-10-05/003).
+   * Positive evidence only (bug 2026-10-05/004). The source inner-joined the
+   * platform `agents` table and matched only stopped/crashed agents, so a bot
+   * with no matching agent row was never touched. Likewise here: a bot whose
+   * creator has NO run row is not listed. "No row" means unknown (herobids does
+   * not write run state today), not "agent dead", and stopping a bot is
+   * destructive.
+   *
+   * Also excludes user-created bots. The drive target stamps EVERY bot
+   * creatorType='agent', so a bot the user created via herobids carries
+   * creatorId = the user's own ownerId (bug 2026-10-05/003).
    */
-  async listRunningAgentBots(): Promise<Array<{ id: string; creatorId: string }>> {
+  async listRunningBotsOfStoppedAgents(): Promise<Array<{ id: string; creatorId: string }>> {
     const rows = await this.db
       .select({ id: bots.id, creatorId: bots.creatorId })
       .from(bots)
+      .innerJoin(agentActorRuns, and(
+        eq(agentActorRuns.actorId, bots.creatorId),
+        eq(agentActorRuns.ownerId, bots.ownerId),
+      ))
       .where(and(
         eq(bots.creatorType, 'agent'),
         eq(bots.status, 'running'),
         ne(bots.creatorId, bots.ownerId),
+        eq(agentActorRuns.desiredState, 'stopped'),
       ));
     // creatorId is non-null for agent-created bots (set at creation); filter
     // defensively so the return type is clean (no null creatorId).
