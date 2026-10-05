@@ -607,10 +607,6 @@ async function main(): Promise<void> {
   const mcp = buildMcpSurfaceConfig(registry);
   // eslint-disable-next-line no-console
   console.info(`MCP binding mounted at /internal/v1/mcp (${mcp.tools.length} tool(s) in tools/list)`);
-  if (process.env['BOUNDARY_MCP_ENABLED'] !== undefined) {
-    // eslint-disable-next-line no-console
-    console.warn('BOUNDARY_MCP_ENABLED is no longer read — the MCP route is always mounted; remove it from the env');
-  }
 
   const app = createBoundaryApp({
     config: boundaryConfig,
