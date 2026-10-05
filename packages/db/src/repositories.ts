@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { eq, and, isNull, desc, or, gte, lte, inArray, notInArray, sql } from 'drizzle-orm';
+import { eq, ne, and, isNull, desc, or, gte, lte, inArray, notInArray, sql } from 'drizzle-orm';
 import type { Database } from './index.js';
 import { fills, positions, bots, executionPlans, orders, balanceSnapshots, decisions, venueAccounts } from './schema/index.js';
 
@@ -1116,12 +1116,22 @@ export class BotRepository {
    * which stops bots whose creator agent's run state is `stopped`/absent — the
    * Traderton replacement for the removed `listRunningBotsForInactiveAgents`
    * (liveness now = `agent_actor_runs`, not the dropped platform `agents` join).
+   *
+   * Excludes user-created bots. The drive target stamps EVERY bot
+   * creatorType='agent' (its start/stop guards require that stamp), so a bot the
+   * user created via herobids carries creatorId = the user's own ownerId. No
+   * agent can be one of these, so the sweep must not treat it as an orphan
+   * (bug 2026-10-05/003).
    */
   async listRunningAgentBots(): Promise<Array<{ id: string; creatorId: string }>> {
     const rows = await this.db
       .select({ id: bots.id, creatorId: bots.creatorId })
       .from(bots)
-      .where(and(eq(bots.creatorType, 'agent'), eq(bots.status, 'running')));
+      .where(and(
+        eq(bots.creatorType, 'agent'),
+        eq(bots.status, 'running'),
+        ne(bots.creatorId, bots.ownerId),
+      ));
     // creatorId is non-null for agent-created bots (set at creation); filter
     // defensively so the return type is clean (no null creatorId).
     return rows.flatMap((r) => (r.creatorId ? [{ id: r.id, creatorId: r.creatorId }] : []));

@@ -104,6 +104,9 @@ echo "==> running the gated integration tests"
 # expiry), B's orphan sweep takes over the still-running agent and a new decision
 # executes locally on B. Paper agent → fully offline (no venue/network). Truncates
 # agent_actor_runs/bots/venue_accounts in beforeEach + clears the agent lease key.
+# running-agent-bots: bug 2026-10-05/003 — the orphan-sweep listing excludes
+# user-created bots (stamped 'agent' with creatorId = ownerId). Truncates
+# bots/venue_accounts in beforeEach.
 pnpm exec vitest run --no-file-parallelism \
   packages/boundary/src/boundary.verification.integration.test.ts \
   packages/boundary/src/boundary.mcp.verification.integration.test.ts \
@@ -115,6 +118,7 @@ pnpm exec vitest run --no-file-parallelism \
   packages/db/src/agent-actor-run-repository.integration.test.ts \
   packages/db/src/journal-partitioning.integration.test.ts \
   packages/db/src/journal-partition-maintenance.integration.test.ts \
+  packages/db/src/running-agent-bots.integration.test.ts \
   "$@"
 
 echo "==> integration run complete"
