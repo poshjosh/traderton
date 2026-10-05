@@ -51,6 +51,18 @@ describe('start_agent_actor', () => {
     expect(result.success).toBe(false);
     expect(result.fault).toBe(false);
   });
+
+  it('keeps venueAccountId in the parsed payload', () => {
+    // The boundary subject resolver reads venueAccountId from the Zod-parsed
+    // payload to pick the actor's venue account for an owner with several
+    // accounts; z.object({}) would strip it (precondition.not_ready).
+    const parsed = startAgentActorTool.parametersSchema!.parse({ venueAccountId: 'venue-7' });
+    expect(parsed).toEqual({ venueAccountId: 'venue-7' });
+  });
+
+  it('parses an empty payload (venueAccountId optional)', () => {
+    expect(startAgentActorTool.parametersSchema!.parse({})).toEqual({});
+  });
 });
 
 describe('stop_agent_actor', () => {

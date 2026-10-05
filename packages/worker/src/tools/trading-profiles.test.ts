@@ -203,15 +203,101 @@ describe('set_agent_trading_profile scan configuration', () => {
     expect(applyOperation).not.toHaveBeenCalled();
   });
 
-  it('keeps existing profiles valid when scan fields are absent', async () => {
+  it('omitted scanMode and creatorStrategy preserve the stored values', async () => {
     // Old caller: no scanMode/creatorStrategy. No scan validation runs; the
-    // forward action carries nulls so the repo preserves any stored strategy.
+    // forward action OMITS the keys (absent = unchanged) so the repo preserves
+    // any stored strategy rather than clearing it.
     const result = await setProfile.execute(params, context());
 
     expect(result).toMatchObject({ success: true });
-    expect(applyOperation).toHaveBeenCalledWith(expect.objectContaining({
-      actions: [expect.objectContaining({ scanMode: null, creatorStrategy: null })],
-    }));
+    const action = applyOperation.mock.calls[0]![0].actions[0];
+    expect(action).not.toHaveProperty('scanMode');
+    expect(action).not.toHaveProperty('creatorStrategy');
+  });
+
+  it('explicit null scanMode clears the stored scan mode', async () => {
+    // A scanner-gated profile is stored; an explicit null scanMode turns the
+    // scan loop off. Effective scanMode is null → no scan validation runs.
+    getByOwnerActorVenueAccount.mockResolvedValue({
+      scanMode: 'scanner_gated',
+      creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' },
+      activeStrategy: { technical: customTechnical() },
+    });
+
+    const result = await setProfile.execute({ ...params, scanMode: null }, context());
+
+    expect(result).toMatchObject({ success: true });
+    const action = applyOperation.mock.calls[0]![0].actions[0];
+    expect(action.scanMode).toBeNull();
+    expect(action).not.toHaveProperty('creatorStrategy');
+  });
+
+  it('explicit null creatorStrategy clears creator and active strategy', async () => {
+    getByOwnerActorVenueAccount.mockResolvedValue({
+      scanMode: 'mixed',
+      creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' },
+      activeStrategy: { technical: customTechnical() },
+    });
+
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'mixed', creatorStrategy: null },
+      context(),
+    );
+
+    expect(result).toMatchObject({ success: true });
+    const action = applyOperation.mock.calls[0]![0].actions[0];
+    expect(action.scanMode).toBe('mixed');
+    expect(action.creatorStrategy).toBeNull();
+  });
+
+  it('rejects scanner_gated with an explicit null creatorStrategy even when an active strategy is stored', async () => {
+    // An explicit null clears the strategy, so the stored active config no
+    // longer backs the scan loop: scanner_gated must be rejected.
+    getByOwnerActorVenueAccount.mockResolvedValue({
+      scanMode: 'scanner_gated',
+      creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' },
+      activeStrategy: { technical: customTechnical() },
+    });
+
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated', creatorStrategy: null },
+      context(),
+    );
+
+    expect(result).toMatchObject({ success: false, fault: false, errorCode: 'validation.strategy_required' });
+    expect(applyOperation).not.toHaveBeenCalled();
+  });
+
+  it('rejects a preset creatorStrategy with scanner_gated on a swap venue (swap.network_unresolved)', async () => {
+    // D3 premise: traderton's preset branch emits no filters.networks, so a
+    // preset + scanner_gated on a swap venue cannot resolve a network.
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated', creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' } },
+      context('owner-1', 'agent-1', 'jupiter', { tokenSafety: { canonicalTokens: {} } }),
+    );
+
+    expect(result).toMatchObject({ success: false, fault: false });
+    expect(String(result.errorCode)).toBe('swap.network_unresolved');
+    expect(applyOperation).not.toHaveBeenCalled();
+  });
+
+  it('accepts customTechnical with filters.networks solana on jupiter', async () => {
+    // D3 premise: customTechnical keeps the connection-merged filters including
+    // networks, so a swap scanner config can resolve its network.
+    const technical = customTechnical({ filters: { venue: 'placeholder', venueType: 'swap', networks: ['solana'] } });
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated', creatorStrategy: { customTechnical: technical } },
+      context('owner-1', 'agent-1', 'jupiter', {
+        tokenSafety: {
+          canonicalTokens: {
+            solana: { USDC: { address: 'EPjF...USDC', name: 'USD Coin', aliases: [] } },
+          },
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(applyOperation).toHaveBeenCalled();
   });
 
   it('accepts a scanner-gated resend that relies on the stored active strategy', async () => {

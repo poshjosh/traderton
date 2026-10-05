@@ -47,9 +47,9 @@ const ForwardSetActionSchema = z.object({
   capital: z.string().regex(/^\d+(\.\d+)?$/).nullable(),
   riskPosture: RiskPostureSchema.nullable(),
   executionDefaults: ExecutionDefaultsSchema.nullable(),
-  // Creator inputs (004 ownership rule). null = unchanged for old callers.
-  scanMode: ScanModeSchema.nullable().default(null),
-  creatorStrategy: CreatorStrategySchema.nullable().default(null),
+  // Creator inputs (004 ownership rule). Absent = unchanged; explicit null = clear.
+  scanMode: ScanModeSchema.nullable().optional(),
+  creatorStrategy: CreatorStrategySchema.nullable().optional(),
 });
 const ForwardClearActionSchema = z.object({
   actionId: z.string().min(1),
@@ -246,15 +246,18 @@ async function authorizeActions(
 }
 
 function setActions(params: z.infer<typeof SetProfileSchema>): z.infer<typeof ForwardActionSchema>[] {
-  const current = {
+  // Absent (undefined) scan fields mean "unchanged" and are OMITTED from the
+  // action object so JSON.stringify matches a manifest entry that also omitted
+  // them (validateCurrentAction). An explicit null means "clear".
+  const current: z.infer<typeof ForwardSetActionSchema> = {
     actionId: params.actionId,
     kind: 'set' as const,
     venueAccountId: params.venueAccountId,
     capital: params.capital,
     riskPosture: params.riskPosture,
     executionDefaults: params.executionDefaults,
-    scanMode: params.scanMode ?? null,
-    creatorStrategy: params.creatorStrategy ?? null,
+    ...(params.scanMode === undefined ? {} : { scanMode: params.scanMode }),
+    ...(params.creatorStrategy === undefined ? {} : { creatorStrategy: params.creatorStrategy }),
   };
   return validateCurrentAction(params.actions ?? [current], current);
 }
@@ -322,7 +325,14 @@ const setAgentTradingProfileTool: AgentTool<TradingToolContext> = {
     // accepted here is the one the actor runs.
     const db = ctx.db as Database;
     for (const action of actions) {
-      if (action.kind !== 'set' || action.scanMode == null) continue;
+      if (action.kind !== 'set') continue;
+      // Resolve the EFFECTIVE scan config with the same absent=unchanged /
+      // null=clear rule the repository applies, so validation matches what will
+      // be persisted. Skip validation entirely when the effective scanMode is
+      // non-set (no scan loop to validate).
+      const existing = await repo.getByOwnerActorVenueAccount(ctx.ownerId!, params.actorId, action.venueAccountId);
+      const effectiveScanMode = action.scanMode === undefined ? (existing?.scanMode ?? null) : action.scanMode;
+      if (effectiveScanMode == null) continue;
       const [venueAccount] = await db.select({ venue: venueAccounts.venue }).from(venueAccounts).where(and(
         eq(venueAccounts.id, action.venueAccountId),
         eq(venueAccounts.ownerId, ctx.ownerId!),
@@ -330,11 +340,18 @@ const setAgentTradingProfileTool: AgentTool<TradingToolContext> = {
       if (!venueAccount) {
         return { success: false, fault: false, error: 'Venue account not owned by signed owner', errorCode: 'authorization.denied' };
       }
-      const existing = await repo.getByOwnerActorVenueAccount(ctx.ownerId!, params.actorId, action.venueAccountId);
+      const effectiveCreatorStrategy = action.creatorStrategy === undefined
+        ? (existing?.creatorStrategy ?? null)
+        : action.creatorStrategy;
+      // An explicit null creatorStrategy clears the strategy, so the stored
+      // active config no longer backs the scan loop: pass existingActive = null.
+      const existingActive = action.creatorStrategy === null
+        ? null
+        : existing?.activeStrategy?.technical ?? null;
       const invalid = validateScanConfiguration({
-        scanMode: action.scanMode,
-        creatorStrategy: action.creatorStrategy,
-        existingActive: existing?.activeStrategy?.technical ?? null,
+        scanMode: effectiveScanMode,
+        creatorStrategy: effectiveCreatorStrategy,
+        existingActive,
         venue: venueAccount.venue,
         marketDataConfig: ctx.marketDataConfig,
       });

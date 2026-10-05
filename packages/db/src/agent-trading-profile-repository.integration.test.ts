@@ -16,6 +16,9 @@ describe.skipIf(SKIP)('AgentTradingProfileRepository (integration)', () => {
   let db: TestDb;
   let repo: AgentTradingProfileRepository;
 
+  // A forward action. Scan fields follow the T1 encoding: a key ABSENT from
+  // `extra` is OMITTED (meaning "unchanged"); an explicit value (including null,
+  // meaning "clear") is passed through. A `clear` action carries explicit nulls.
   const action = (
     actionId: string,
     venueAccountId: string,
@@ -29,8 +32,12 @@ describe.skipIf(SKIP)('AgentTradingProfileRepository (integration)', () => {
     capital,
     riskPosture: null,
     executionDefaults: kind === 'set' ? { mode: 'paper' as const } : null,
-    scanMode: kind === 'set' ? (extra.scanMode ?? null) : null,
-    creatorStrategy: kind === 'set' ? (extra.creatorStrategy ?? null) : null,
+    ...(kind === 'clear'
+      ? { scanMode: null, creatorStrategy: null }
+      : {
+          ...('scanMode' in extra ? { scanMode: extra.scanMode } : {}),
+          ...('creatorStrategy' in extra ? { creatorStrategy: extra.creatorStrategy } : {}),
+        }),
   });
 
   const seedVenueAccount = async (id: string, ownerId: string, venue = 'hyperliquid') =>
@@ -153,5 +160,79 @@ describe.skipIf(SKIP)('AgentTradingProfileRepository (integration)', () => {
     expect(afterBare?.scanMode).toBe('scanner_gated');
     expect(afterBare?.creatorStrategy).toEqual({ presetKey: 'momentum', styleTier: 'standard' });
     expect(afterBare?.activeStrategy).toEqual(afterFirst?.activeStrategy);
+  });
+
+  it('omitted scanMode and creatorStrategy preserve the stored values', async () => {
+    await seedVenueAccount('venue-om', 'owner-a');
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'seed',
+      actions: [action('seed', 'venue-om', '100', 'set', {
+        scanMode: 'mixed', creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' },
+      })],
+    });
+
+    // Keys omitted → unchanged.
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'bare',
+      actions: [action('bare', 'venue-om', '200')],
+    });
+    const after = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-om');
+
+    expect(after?.capital).toBe('200');
+    expect(after?.scanMode).toBe('mixed');
+    expect(after?.creatorStrategy).toEqual({ presetKey: 'momentum', styleTier: 'standard' });
+  });
+
+  it('explicit null scanMode clears the stored scan mode', async () => {
+    await seedVenueAccount('venue-ns', 'owner-a');
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'seed',
+      actions: [action('seed', 'venue-ns', '100', 'set', {
+        scanMode: 'mixed', creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' },
+      })],
+    });
+
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'clear-scan',
+      actions: [action('clear-scan', 'venue-ns', '100', 'set', { scanMode: null })],
+    });
+    const after = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-ns');
+
+    expect(after?.scanMode).toBeNull();
+    // creatorStrategy was omitted → unchanged.
+    expect(after?.creatorStrategy).toEqual({ presetKey: 'momentum', styleTier: 'standard' });
+  });
+
+  it('explicit null creatorStrategy clears creator and active strategy', async () => {
+    await seedVenueAccount('venue-nc', 'owner-a');
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'seed',
+      actions: [action('seed', 'venue-nc', '100', 'set', {
+        scanMode: 'mixed', creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' },
+      })],
+    });
+
+    await repo.applyOperation({
+      ownerId: 'owner-a', actorId: 'agent-a', operationId: 'clear-creator',
+      actions: [action('clear-creator', 'venue-nc', '100', 'set', { creatorStrategy: null })],
+    });
+    const after = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-nc');
+
+    expect(after?.creatorStrategy).toBeNull();
+    expect(after?.activeStrategy).toBeNull();
+    // scanMode omitted → unchanged.
+    expect(after?.scanMode).toBe('mixed');
+  });
+
+  it('a replayed manifest with omitted scan fields does not raise an operation conflict', async () => {
+    await seedVenueAccount('venue-rp', 'owner-a');
+    const bare = [action('bare', 'venue-rp', '100')];
+
+    // First apply persists the forward action (scan keys omitted → dropped by
+    // jsonb). A replay reads it back and must compare equal.
+    await repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'rp', actions: bare });
+    await expect(
+      repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'rp', actions: bare }),
+    ).resolves.toBeInstanceOf(Map);
   });
 });

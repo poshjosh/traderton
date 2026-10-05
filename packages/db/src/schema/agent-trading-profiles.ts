@@ -70,8 +70,10 @@ export interface AgentTradingProfileForwardAction {
   capital: string | null;
   riskPosture: RiskPosture | null;
   executionDefaults: ExecutionDefaults | null;
-  scanMode: ScanMode | null;
-  creatorStrategy: CreatorStrategy | null;
+  // Absent (key omitted) = unchanged; explicit null = clear. Only valid on a
+  // `set` action; a `clear` action always carries null (removes the row).
+  scanMode?: ScanMode | null;
+  creatorStrategy?: CreatorStrategy | null;
 }
 
 /** Durable preimages for reversible cross-service profile changes. */

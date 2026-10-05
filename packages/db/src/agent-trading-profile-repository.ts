@@ -85,8 +85,10 @@ export class AgentTradingProfileRepository {
         capital: input.capital,
         riskPosture: input.riskPosture,
         executionDefaults: input.executionDefaults,
-        scanMode: input.scanMode ?? null,
-        creatorStrategy: input.creatorStrategy ?? null,
+        // Absent (undefined) = unchanged; explicit null = clear. Preserve the
+        // distinction rather than coercing undefined to null.
+        ...(input.scanMode === undefined ? {} : { scanMode: input.scanMode }),
+        ...(input.creatorStrategy === undefined ? {} : { creatorStrategy: input.creatorStrategy }),
       }],
     });
     return { operationId: input.operationId, actionId: input.actionId, revision: results.get(input.actionId) ?? null };
@@ -131,7 +133,11 @@ export class AgentTradingProfileRepository {
           actorId: input.actorId,
           venueAccountId: action.venueAccountId,
           preimage: profile ? serializePreimage(profile) : null,
-          forwardAction: action,
+          // Drop keys whose value is `undefined` ("unchanged") before persisting:
+          // jsonb would drop them on write anyway, and keeping them in memory
+          // would make a replayed manifest (read back from jsonb without the key)
+          // compare unequal and raise a spurious operation conflict.
+          forwardAction: stripUndefined(action),
           appliedRevision: revision,
         });
         revisions.set(action.actionId, revision);
@@ -168,11 +174,13 @@ export class AgentTradingProfileRepository {
 
     const revision = (profile?.revision ?? 0n) + 1n;
     const now = new Date();
-    // `scanMode`/`creatorStrategy` null on a set action means "unchanged"
-    // (absent for old callers): preserve the stored creator inputs rather than
-    // wiping them. Only a `clear` action removes the profile entirely.
-    const scanMode = action.scanMode ?? profile?.scanMode ?? null;
-    const creatorStrategy = action.creatorStrategy ?? profile?.creatorStrategy ?? null;
+    // Absent (undefined) scan fields on a set action mean "unchanged": preserve
+    // the stored creator inputs. An explicit null means "clear". Only a `clear`
+    // action removes the profile row entirely.
+    const scanMode = action.scanMode === undefined ? (profile?.scanMode ?? null) : action.scanMode;
+    const creatorStrategy = action.creatorStrategy === undefined
+      ? (profile?.creatorStrategy ?? null)
+      : action.creatorStrategy;
     const activeStrategy = await this.deriveActiveStrategy(tx, ownerId, action, profile, now);
     if (profile) {
       await tx.update(agentTradingProfiles).set({
@@ -209,11 +217,10 @@ export class AgentTradingProfileRepository {
   /**
    * Derive `activeStrategy` per the 004 ownership rule. First set, or a changed
    * `creatorStrategy` (compared by canonical JSON to the stored value), resolves
-   * a fresh active strategy with `source:'creator'`. An unchanged
-   * `creatorStrategy` (a resend while saving capital, or an old caller that
-   * omits it → null) leaves the stored active strategy untouched. There is no
-   * explicit "clear creatorStrategy" set action in T1 — the `clear` action
-   * removes the whole profile row.
+   * a fresh active strategy with `source:'creator'`. An absent `creatorStrategy`
+   * (key omitted — a resend while saving capital, or an old caller) leaves the
+   * stored active strategy untouched. An explicit null clears it. A `clear`
+   * action removes the whole profile row (handled before this is reached).
    */
   private async deriveActiveStrategy(
     tx: Pick<Database, 'select'>,
@@ -222,8 +229,11 @@ export class AgentTradingProfileRepository {
     profile: AgentTradingProfile | null,
     now: Date,
   ): Promise<ActiveStrategy | null> {
-    // Absent creator input → unchanged: keep whatever the actor already runs.
-    if (action.creatorStrategy === null) return profile?.activeStrategy ?? null;
+    // Absent creator input (key omitted) → unchanged: keep whatever the actor
+    // already runs.
+    if (action.creatorStrategy === undefined) return profile?.activeStrategy ?? null;
+    // Explicit null → clear the resolved active strategy.
+    if (action.creatorStrategy === null) return null;
 
     const unchanged = profile != null
       && canonicalJson(profile.creatorStrategy ?? null) === canonicalJson(action.creatorStrategy);
@@ -340,7 +350,25 @@ function sameManifest(
 ): boolean {
   if (existing.length !== requested.length) return false;
   const byActionId = new Map(existing.map((action) => [action.actionId, action]));
-  return requested.every((action) => canonicalJson(byActionId.get(action.actionId)) === canonicalJson(action));
+  // Strip `undefined` ("unchanged") keys on both sides: a persisted manifest is
+  // read back from jsonb without them, so an in-memory requested action that
+  // still carries `undefined` must be normalised to compare equal on replay.
+  return requested.every((action) =>
+    canonicalJson(stripUndefined(byActionId.get(action.actionId))) === canonicalJson(stripUndefined(action)));
+}
+
+/**
+ * Return a shallow copy of a forward action with any `undefined`-valued keys
+ * removed. jsonb drops them on write; stripping them in memory keeps replay
+ * comparisons and persisted rows consistent.
+ */
+function stripUndefined(action: AgentTradingProfileForwardAction | undefined): AgentTradingProfileForwardAction | undefined {
+  if (!action) return action;
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(action)) {
+    if (value !== undefined) result[key] = value;
+  }
+  return result as unknown as AgentTradingProfileForwardAction;
 }
 
 /**

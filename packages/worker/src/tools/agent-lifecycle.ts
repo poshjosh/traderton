@@ -25,7 +25,13 @@ import { convertZodToJsonSchema } from './registry.js';
 
 // --- start_agent_actor ---
 
-const StartAgentActorParamsSchema = z.object({});
+const StartAgentActorParamsSchema = z.object({
+  venueAccountId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Venue account to start the actor on; defaults to the owner default'),
+});
 
 const startAgentActorTool: AgentTool<TradingToolContext> = {
   name: 'start_agent_actor',
