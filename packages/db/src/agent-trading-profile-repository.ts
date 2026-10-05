@@ -362,6 +362,8 @@ function sameManifest(
  * removed. jsonb drops them on write; stripping them in memory keeps replay
  * comparisons and persisted rows consistent.
  */
+function stripUndefined(action: AgentTradingProfileForwardAction): AgentTradingProfileForwardAction;
+function stripUndefined(action: AgentTradingProfileForwardAction | undefined): AgentTradingProfileForwardAction | undefined;
 function stripUndefined(action: AgentTradingProfileForwardAction | undefined): AgentTradingProfileForwardAction | undefined {
   if (!action) return action;
   const result: Record<string, unknown> = {};
