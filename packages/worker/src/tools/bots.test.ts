@@ -582,6 +582,89 @@ describe('delete_bot — owner-scoped hard delete', () => {
   });
 });
 
+// ── stop_bot — who may stop a bot (bug 2026-10-05/004 gap 2) ────────────────
+//
+// An agent subject may stop only a bot it created (unchanged). A user subject may
+// stop any bot it owns, including its agent's bots (owner-scoped, as delete_bot).
+
+describe('stop_bot — caller authorization', () => {
+  const stopBotTool = botManagementTools.find((t) => t.name === 'stop_bot')!;
+
+  function stopRepo(bot: ReturnType<typeof makeBotRecord> | null) {
+    return {
+      getBotById: vi.fn(async () => bot),
+      getBotByIdForOwner: vi.fn(async (_id: string, ownerId: string) => (bot && bot.ownerId === ownerId ? bot : null)),
+      markBotStopped: vi.fn(async () => undefined),
+    };
+  }
+
+  it('lets an agent stop a bot it created', async () => {
+    const repo = stopRepo(makeBotRecord({ creatorId: 'agent-1' }));
+    const ctx = makeCtx({ agentId: 'agent-1', actorType: 'agent', ownerId: 'owner-1', botRepo: repo as unknown as ToolContext['botRepo'] });
+
+    const result = await stopBotTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(repo.markBotStopped).toHaveBeenCalledWith('bot-1');
+    expect(ctx.redis.publish).toHaveBeenCalledWith('bot:stop:bot-1', '1');
+  });
+
+  it("refuses an agent stopping another agent's bot, even under the same owner", async () => {
+    const repo = stopRepo(makeBotRecord({ creatorId: 'agent-2', ownerId: 'owner-1' }));
+    const ctx = makeCtx({ agentId: 'agent-1', actorType: 'agent', ownerId: 'owner-1', botRepo: repo as unknown as ToolContext['botRepo'] });
+
+    const result = await stopBotTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(repo.markBotStopped).not.toHaveBeenCalled();
+  });
+
+  it("lets a user stop their own agent's running bot", async () => {
+    const repo = stopRepo(makeBotRecord({ creatorId: 'agent-1', ownerId: 'owner-1' }));
+    const ctx = makeCtx({ agentId: 'owner-1', actorType: 'user', ownerId: 'owner-1', botRepo: repo as unknown as ToolContext['botRepo'] });
+
+    const result = await stopBotTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(repo.getBotByIdForOwner).toHaveBeenCalledWith('bot-1', 'owner-1');
+    expect(repo.markBotStopped).toHaveBeenCalledWith('bot-1');
+    expect(ctx.redis.publish).toHaveBeenCalledWith('bot:stop:bot-1', '1');
+  });
+
+  it("refuses a user stopping another owner's bot", async () => {
+    const repo = stopRepo(makeBotRecord({ creatorId: 'agent-9', ownerId: 'owner-2' }));
+    const ctx = makeCtx({ agentId: 'owner-1', actorType: 'user', ownerId: 'owner-1', botRepo: repo as unknown as ToolContext['botRepo'] });
+
+    const result = await stopBotTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(repo.markBotStopped).not.toHaveBeenCalled();
+  });
+
+  it('refuses a user subject with no owner scope', async () => {
+    const repo = stopRepo(makeBotRecord({ ownerId: 'owner-1' }));
+    const ctx = makeCtx({ agentId: 'owner-1', actorType: 'user', botRepo: repo as unknown as ToolContext['botRepo'] });
+
+    const result = await stopBotTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(repo.markBotStopped).not.toHaveBeenCalled();
+  });
+
+  it('keeps the agent-only rule when the actor type is unset (in-process contexts)', async () => {
+    const repo = stopRepo(makeBotRecord({ creatorId: 'agent-2', ownerId: 'owner-1' }));
+    const ctx = makeCtx({ agentId: 'owner-1', ownerId: 'owner-1', botRepo: repo as unknown as ToolContext['botRepo'] });
+
+    const result = await stopBotTool.execute({ botId: 'bot-1' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(repo.getBotByIdForOwner).not.toHaveBeenCalled();
+    expect(repo.markBotStopped).not.toHaveBeenCalled();
+  });
+});
+
 // ── Owner-scoped bot read-wave (Wave A2) ────────────────────────────────────
 //
 // The 4 read tools UN-QUARANTINE + adapt the herobids aggregation into

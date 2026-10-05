@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, inArray, lte, or, sql, sum } from 'drizzle-orm';
-import type { AgentTool, ManageBotResult, ToolResult, TradingToolContext } from '@traderton/domain';
+import type { AgentTool, ManageBotResult, ToolBotRecord, ToolResult, TradingToolContext } from '@traderton/domain';
 import { AGENT_MESSAGE_TYPES, BotConfigSchema, checkModeEscalation, deriveStrategyPreset, extractStrategyFromConfig, validateExecutionCapability } from '@traderton/domain';
 import type { Database } from '@traderton/db';
 import { fills, journalEvents, positions, bots, venueAccounts, FillRepository, PositionRepository, PgJournal, ReconciliationEventRepository, DecisionRepository, DecisionFailureRepository, ConsumerNotificationRepository } from '@traderton/db';
@@ -781,6 +781,29 @@ const StopBotParamsSchema = z.object({
   botId: z.string().min(1).describe('ID of the bot to stop'),
 });
 
+/**
+ * Who may stop a bot:
+ *  - an AGENT subject: only a bot it created (creatorType='agent', creatorId =
+ *    the calling agent). Unchanged — an agent never stops another agent's bot.
+ *  - a USER subject: any bot the user OWNS (owner-scoped, same tenancy rule as
+ *    delete_bot). Lets an owner stop their own agent's bot — e.g. herobids
+ *    `DELETE /agents/:id` stopping a running agent bot (bug 2026-10-05/004 gap 2).
+ * Returns the bot, or null when the caller may not stop it (reported as not found).
+ */
+async function resolveStopTarget(
+  botId: string,
+  ctx: TradingToolContext,
+  botRepo: NonNullable<TradingToolContext['botRepo']>,
+): Promise<ToolBotRecord | null> {
+  if (ctx.actorType === 'user') {
+    if (!ctx.ownerId) return null;
+    return botRepo.getBotByIdForOwner(botId, ctx.ownerId);
+  }
+  const bot = await botRepo.getBotById(botId);
+  if (!bot || bot.creatorType !== 'agent' || bot.creatorId !== ctx.agentId) return null;
+  return bot;
+}
+
 const stopBotTool: AgentTool<TradingToolContext> = {
   name: 'stop_bot',
   description: 'Stop a running bot. The bot will cease trading and its positions will remain open unless manually closed. Only works for bots owned by this agent.',
@@ -794,8 +817,8 @@ const stopBotTool: AgentTool<TradingToolContext> = {
       return { success: false, error: 'direct db access not available', fault: false };
     }
 
-    const stopTarget = await ctx.botRepo.getBotById(botId);
-    if (!stopTarget || stopTarget.creatorType !== 'agent' || stopTarget.creatorId !== ctx.agentId) {
+    const stopTarget = await resolveStopTarget(botId, ctx, ctx.botRepo);
+    if (!stopTarget) {
       return { success: false, error: `bot ${botId} not found or not owned by this agent`, fault: false };
     }
 

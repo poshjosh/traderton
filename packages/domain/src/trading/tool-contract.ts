@@ -149,6 +149,12 @@ export interface TradingToolContext {
    * most tools operate on already-owner-scoped repos and never need it.
    */
   ownerId?: string;
+  /**
+   * The signed subject's actor type, set by the boundary from `subject.actor.type`
+   * (`agentId` carries `subject.actor.id`). Optional: in-process contexts leave it
+   * unset, and tools must treat unset as "not a user" (no owner-scoped widening).
+   */
+  actorType?: 'agent' | 'bot' | 'user' | 'system';
   /** The agent's own execution mode. Used by tools that enforce mode-rank constraints. */
   executionMode: 'paper' | 'shadow' | 'live';
   /** Authorization mode for agent-direct trade decisions: 'direct' (execute immediately) or 'approval_required' (require user approval). */

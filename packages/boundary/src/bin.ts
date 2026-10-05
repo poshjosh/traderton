@@ -510,6 +510,9 @@ async function main(): Promise<void> {
 
     return {
       agentId: request.actor.id,
+      // The signed actor type — lets owner-scoped tools (stop_bot's owner path)
+      // tell a user subject from an agent subject (bug 2026-10-05/004 gap 2).
+      actorType: request.actor.type,
       sessionId: `boundary:${request.ownerId}`,
       // The signed owner id — owner-scoped write tools (provision_venue_account)
       // write it to the soft `ownerId` columns (L3-P1).
