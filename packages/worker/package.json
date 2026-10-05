@@ -21,7 +21,7 @@
     "@traderton/market-data": "workspace:*",
     "@traderton/strategy": "workspace:*",
     "@traderton/venues": "workspace:*",
-    "bullmq": "^5.34.0",
+    "bullmq": "^5.81.0",
     "drizzle-orm": "^0.44.0",
     "ioredis": "^5.6.0",
     "pino": "^9.6.0",

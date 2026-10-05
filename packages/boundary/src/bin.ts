@@ -100,7 +100,13 @@ async function main(): Promise<void> {
 
   // ── Real trading runtime (needs live Postgres + Redis + AppConfig) ──
   const appConfig = loadConfig();
-  const redis = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379', {
+  // Source every Redis connection from the SAME resolved operator config value
+  // (`appConfig.redis.url`, which already folds in the REDIS_URL env override via
+  // loadConfig) so the boundary's shared/subscriber connections and the BullMQ
+  // lifecycle connection (createTradingRuntime, which reads config.redis.url)
+  // can never point at different servers (bug 2026-10-05/001 follow-up).
+  const redisUrl = appConfig.redis.url;
+  const redis = new Redis(redisUrl, {
     maxRetriesPerRequest: null,
   });
   const db = createDatabase(appConfig.database.url);
@@ -159,7 +165,7 @@ async function main(): Promise<void> {
   // E0 hotfix: the copied `stop_bot` tool publishes `bot:stop:{botId}`; stop the
   // in-process actor when it does. Dedicated connection — a Redis connection in
   // subscriber mode cannot issue other commands.
-  const botStopSubscriber = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
+  const botStopSubscriber = new Redis(redisUrl);
   subscribeBotStopSignals(
     botStopSubscriber,
     (botId) => runtime.runtime.stopInstanceDirect(botId),
@@ -231,7 +237,7 @@ async function main(): Promise<void> {
   // A decision forwarded here by a remote sender runs on the LOCAL drive target
   // (rebuilt from the envelope's injection) after re-checking we still hold the
   // agent lease; the owner writes the reply the sender's tool BLPOPs.
-  const agentCommandConsumerConn = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379', {
+  const agentCommandConsumerConn = new Redis(redisUrl, {
     maxRetriesPerRequest: null,
   });
   const agentCommandConsumer = startAgentCommandConsumer({
@@ -248,7 +254,7 @@ async function main(): Promise<void> {
   // signal (same shape as `bot:stop:*`). Dedicated connection — subscriber mode
   // cannot issue other commands. The stop is a no-op on a non-owner (the registry
   // stop is keyed on the actor id, and evict releases only a lease we hold).
-  const agentActorStopSubscriber = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
+  const agentActorStopSubscriber = new Redis(redisUrl);
   subscribeAgentActorStopSignals(
     agentActorStopSubscriber,
     async (agentId) => {

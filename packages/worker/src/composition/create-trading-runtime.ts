@@ -102,7 +102,11 @@ const logger = createLogger('create-trading-runtime');
 export interface TradingRuntimePorts {
   /** Operator config — the Traderton-owned AppConfig (item A). */
   config: AppConfig;
-  /** Redis client (BullMQ lifecycle-job connection + instance lease). */
+  /**
+   * Shared Redis client for the instance lease, the market-data provider
+   * registry, and the drive target. BullMQ does NOT use this instance — it gets
+   * its own connection options (see the `runtimeConfig` wiring, bug 2026-10-05/001).
+   */
   redis: Redis;
   /**
    * Loads bots to rehydrate (status='running'). Each PersistedInstance.config
@@ -309,6 +313,16 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
   // ── Once-per-process singletons (traced to herobids index.ts ~209–334, 771–791) ──
   const workerId = `worker-${crypto.randomUUID().slice(0, 8)}`;
   const lease = new InstanceLease(redis, workerId, 30);
+
+  // BullMQ connection OPTIONS (bug 2026-10-05/001; rationale at `runtimeConfig`).
+  // BullMQ's `url` option is parsed by its own `new IORedis(url, rest)`, exactly
+  // as the bins build the shared client (`new Redis(config.redis.url, …)`), so the
+  // two never disagree. `maxRetriesPerRequest: null` is required by the blocking
+  // Worker. `config.redis.url` is schema-validated operator config.
+  const bullmqConnectionOptions = {
+    url: config.redis.url,
+    maxRetriesPerRequest: null,
+  } as const;
 
   const db = createDatabase(config.database.url);
   const journal = new PgJournal(db);
@@ -904,10 +918,21 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
   };
 
   // ── WorkerRuntime (the BullMQ lifecycle-job consumer) ──
-  // Status callbacks (Wave E E2). onCrashed/onHalted live on TradingActorDeps
-  // above; these three are the runtime-level lifecycle hooks.
+  // BullMQ gets CONNECTION OPTIONS, not the shared ioredis INSTANCE (bug
+  // 2026-10-05/001). When BullMQ is handed a live instance it treats it as
+  // *shared*: it never owns or closes it, so its still-pending connection-setup
+  // commands stay queued on that client, and whoever later quits the client (a
+  // fast test teardown, process shutdown) rejects them with `Connection is
+  // closed` as an UNHANDLED rejection. Given plain options instead, BullMQ
+  // CREATES and OWNS its own Queue/Worker connections and drains + closes them in
+  // `worker.close()`/`queue.close()` (run by `runtime.shutdown()`), so there is no
+  // externally-owned client to race. This restores the pre-extraction herobids
+  // separation (BullMQ's own connection ≠ the lease/provider/drive-target
+  // connection), traced to herobids index.ts:195-203 + :1788 (`redisConnection`
+  // options object parsed from the URL). The shared `redis` instance stays the
+  // lease + market-data provider + drive-target connection.
   const runtimeConfig: WorkerRuntimeConfig = {
-    redis,
+    redis: bullmqConnectionOptions,
     ...(ports.scanIntervalMs != null ? { scanIntervalMs: ports.scanIntervalMs } : {}),
     ...(ports.concurrency != null ? { concurrency: ports.concurrency } : {}),
     // A start failure (factory or actor.start threw) means the bot never ran.
@@ -1110,6 +1135,9 @@ export function createTradingRuntime(ports: TradingRuntimePorts): TradingRuntime
       // runtime (the copied stop() is idempotent).
       instrumentCache.stop();
       await runtime.shutdown();
+      // No BullMQ connection to quit here: BullMQ owns the connections it created
+      // from `bullmqConnectionOptions` and closed them in `runtime.shutdown()`
+      // (bug 2026-10-05/001). The caller still owns the shared `redis` instance.
     },
     workerId,
     // Shares the runtime's Redis connection + workerId (001 S1). Bot leases use

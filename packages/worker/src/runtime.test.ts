@@ -4,11 +4,13 @@ import type { LifecycleJob } from './runtime.js';
 
 vi.mock('bullmq', () => {
   class Queue {
+    async waitUntilReady(): Promise<void> {}
     async close(): Promise<void> {}
   }
 
   class Worker {
     on(): void {}
+    async waitUntilReady(): Promise<void> {}
     async close(): Promise<void> {}
   }
 

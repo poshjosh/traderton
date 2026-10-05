@@ -104,6 +104,16 @@ export class WorkerRuntime {
 
   /** Start the runtime — rehydrate running instances, begin reclaim loop, then process lifecycle jobs */
   async start(): Promise<void> {
+    // Wait for the BullMQ queue + worker connections to finish connecting before
+    // the runtime is considered started (bug 2026-10-05/001). BullMQ connects
+    // asynchronously; a runtime that starts and stops within milliseconds (e.g. a
+    // fast integration test) could otherwise reach `shutdown()` → `close()` while
+    // setup is still in flight, and the half-open connection would reject its
+    // pending setup command with `Connection is closed` as an UNHANDLED rejection.
+    // Awaiting readiness here guarantees `close()` runs only after setup settled.
+    // Returns immediately once connected, so there is no post-boot cost.
+    await Promise.all([this.queue.waitUntilReady(), this.worker.waitUntilReady()]);
+
     this.logger.info('Worker runtime started');
 
     // Initial rehydration: attempt to claim all instances marked 'running'
@@ -130,6 +140,7 @@ export class WorkerRuntime {
     await Promise.allSettled(stopPromises);
 
     if (this.lease) this.lease.shutdown();
+
     await this.worker.close();
     await this.queue.close();
     this.logger.info('Worker runtime shut down');

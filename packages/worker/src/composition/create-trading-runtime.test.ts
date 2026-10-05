@@ -17,12 +17,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '@traderton/domain';
 
 // ── Edge I/O stubs (no real network) ─────────────────────────────────────────
+// Capture the `connection` option BullMQ's Queue/Worker are constructed with, so
+// a regression test can assert the runtime is given connection SETTINGS (BullMQ
+// owns the connection) rather than the shared ioredis instance (bug 2026-10-05/001).
+const { bullmqConnections } = vi.hoisted(() => ({ bullmqConnections: [] as unknown[] }));
 vi.mock('bullmq', () => {
   class Queue {
+    constructor(_name: string, opts: { connection: unknown }) {
+      bullmqConnections.push(opts.connection);
+    }
+    async waitUntilReady(): Promise<void> {}
     async close(): Promise<void> {}
   }
   class Worker {
+    constructor(_name: string, _processor: unknown, opts: { connection: unknown }) {
+      bullmqConnections.push(opts.connection);
+    }
     on(): void {}
+    async waitUntilReady(): Promise<void> {}
     async close(): Promise<void> {}
   }
   return { Queue, Worker };
@@ -106,7 +118,9 @@ import { VenueAdapterFactory } from '../venue-adapter-factory.js';
 import type { InstanceActor } from '../runtime.js';
 
 /** Fake ioredis client — only the lease's set/quit are ever touched, and only
- *  when an instance is claimed (this test claims none via the runtime). */
+ *  when an instance is claimed (this test claims none via the runtime). BullMQ
+ *  gets connection OPTIONS parsed from config.redis.url (bug 2026-10-05/001), not
+ *  this instance, and BullMQ is mocked here, so no `duplicate()` is needed. */
 function fakeRedis() {
   return {
     set: async () => 'OK',
@@ -273,6 +287,29 @@ function swapBotConfig() {
 describe('createTradingRuntime (AUTHORED smoke test — Phase 9b item B)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    bullmqConnections.length = 0;
+  });
+
+  it('gives BullMQ connection settings, not the shared ioredis instance (bug 2026-10-05/001)', () => {
+    const redis = fakeRedis();
+    createTradingRuntime({
+      config: paperConfig(),
+      redis,
+      instanceLoader: async () => [],
+    });
+
+    // BullMQ's Queue + Worker must each be constructed with connection OPTIONS
+    // (so BullMQ creates/owns/closes its own connection), NOT the shared `redis`
+    // instance — handing it the shared instance is what let a caller's quit()
+    // reject BullMQ's in-flight setup as an unhandled rejection.
+    expect(bullmqConnections.length).toBe(2); // Queue + Worker
+    for (const connection of bullmqConnections) {
+      expect(connection).not.toBe(redis);
+      expect(connection).toMatchObject({
+        url: paperConfig().redis.url,
+        maxRetriesPerRequest: null,
+      });
+    }
   });
 
   it('returns a TradingRuntime with start/shutdown/runtime', () => {
