@@ -31,7 +31,7 @@ First time setup
 Routine flow
 
 - **Image** — pushed to ghcr.io automatically on push to `main` (`.github/workflows/build-push.yml`). No manual build.
-- **Deploy** — `bash scripts/deploy.sh --env staging --release-sha <sha>` (`docs/setup.md` "Phase 5").
+- **Deploy** — `bash scripts/deploy.sh --env staging` (`docs/setup.md` "Phase 5"). With no `--release-sha`, the script waits for CI to build-and-push `origin/main`, then deploys that SHA; pass `--release-sha <sha>` to skip the wait and re-deploy an already-built commit.
 - **Wire Herobids** — set `TRADERTON_BOUNDARY_URL` + matching HMAC creds (`docs/setup.md` "Phase 3 — Wire them together").
 
 ## Environment model

@@ -119,6 +119,47 @@ class FirewallProxyTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.directory / "release-sha").read_text().strip(), "failed")
         self.assertEqual((self.directory / "image-digest").read_text().strip(), "failed")
+        # A failed deploy must say so explicitly, never exit silently.
+        self.assertIn("Boundary did not become ready", result.stderr)
+        self.assertNotIn("on-host deploy complete", result.stdout)
+
+    def test_successful_deploy_prints_completion_banner(self):
+        marker = self.directory / "host-marker"
+        marker.touch()
+        mount = self.directory / "mount-data.sh"
+        mount.write_text("#!/bin/bash\nexit 0\n")
+        mount.chmod(0o700)
+        sha = "a" * 40
+        (self.directory / ".env.staging").write_text(
+            "POSTGRES_PASSWORD=fixture\n"
+            "REDIS_URL=redis://fixture\nBOUNDARY_CONSUMER_ID=fixture\n"
+            "BOUNDARY_KEY_ID=fixture\nBOUNDARY_SIGNING_SECRET=fixture\n"
+            f"CREDENTIAL_ENCRYPTION_KEY={'e' * 64}\n"
+            "GHCR_USERNAME=fixture\nGHCR_TOKEN=fixture\n")
+        deploy = (ROOT / "deploy-on-host.sh").read_text().replace(
+            "/etc/traderton-staging/host-marker", str(marker)).replace(
+            "/etc/traderton-staging/release-sha", str(self.directory / "release-sha")).replace(
+            "/etc/traderton-staging/image-digest", str(self.directory / "image-digest"))
+        (self.directory / "deploy.sh").write_text(deploy)
+        # docker exits 0 for everything, including the readiness `exec`, so the
+        # boundary is observed ready on the first attempt.
+        self.mock("docker", "exit 0\n")
+        for command, body in {
+            "hostname": "echo traderton-staging\n",
+            "id": "echo 0\n",
+            "stat": "if [[ \"$2\" == %a ]]; then echo 600; else echo 0; fi\n",
+            "ufw": "printf '22/tcp\\tALLOW\\n80/tcp\\tALLOW\\n443/tcp\\tALLOW\\n'\n",
+            "install": "exit 0\n",
+            "systemctl": "exit 0\n",
+            "sleep": "exit 0\n",
+        }.items():
+            self.mock(command, body)
+        result = subprocess.run(["bash", str(self.directory / "deploy.sh"), "--confirm-staging", sha],
+                                cwd=self.directory, env=self.environment, capture_output=True, text=True,
+                                check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("on-host deploy complete", result.stdout)
+        self.assertEqual((self.directory / "release-sha").read_text().strip(), sha)
 
 
 if __name__ == "__main__":

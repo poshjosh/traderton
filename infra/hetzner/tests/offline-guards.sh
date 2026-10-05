@@ -44,6 +44,13 @@ grep -Fq 'terraform_output -raw public_ip' scripts/deploy.sh
 grep -Fq 'scp ' scripts/deploy.sh
 grep -Fq '_ssh_opts.sh' scripts/deploy.sh
 grep -Fq './deploy-on-host.sh --confirm-staging' scripts/deploy.sh
+# The deploy outcome must be unmistakable: an explicit success banner, plus an
+# ERR trap so a failed/partial deploy never looks like a silent clean exit.
+grep -Fq '==> Deploy succeeded' scripts/deploy.sh
+grep -Fq '==> Deploy FAILED' scripts/deploy.sh
+grep -Fq 'trap - ERR' scripts/deploy.sh
+# The on-host script must print a success marker once boundary/site/caddy are up.
+grep -Fq '[✓] on-host deploy complete' deploy-on-host.sh
 # The uploaded runtime list must never include Terraform state, tfvars, or real env files.
 if awk '/RUNTIME_FILES=\(/{f=1} f{print} f&&/\)/{exit}' scripts/deploy.sh | grep -Eq '\.env\.(staging|backup)|staging\.tfvars|\.tfstate|\.terraform'; then
   echo 'Deploy helper must not upload Terraform state, tfvars, or real env files' >&2

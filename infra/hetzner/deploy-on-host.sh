@@ -99,3 +99,5 @@ install -m 0644 traderton-backup.service traderton-backup-alert.service traderto
 systemctl daemon-reload
 systemctl enable --now traderton-backup.timer
 systemctl enable --now traderton-backup-health.timer
+
+echo "[✓] on-host deploy complete — boundary ready, site + caddy up, backups enabled (release ${release_sha})"

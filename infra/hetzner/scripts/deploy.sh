@@ -13,10 +13,15 @@
 # their default paths; the directory of runtime files is copied from
 # infra/hetzner/, excluding anything with secrets or Terraform state.
 set -euo pipefail
-cd "$(dirname "$0")/.."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}/.."
 source "${SCRIPT_DIR}/_ssh_opts.sh"
+
+# Make failure unmistakable: on any non-zero exit, print an explicit banner
+# naming the failing line so a half-finished deploy is never mistaken for a
+# success. The success banner at the end clears the trap.
+trap 'echo "==> Deploy FAILED (exit $? at line $LINENO) — staging may be in a partial state; re-run after fixing" >&2' ERR
 
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-${PWD}/.env.terraform}"
 ENV_FILE="${PWD}/.env.staging"
@@ -90,3 +95,7 @@ fi
 echo "==> Running on-host deploy (--confirm-staging ${RELEASE_SHA})"
 ssh "${scp_args[@]}" "root@${IP}" \
   "cd /opt/traderton/staging && chmod 600 .env.staging && ./deploy-on-host.sh --confirm-staging ${RELEASE_SHA}"
+
+# Reached only when the SSH on-host deploy exited 0 (set -e aborts otherwise).
+trap - ERR
+echo "==> Deploy succeeded: ${TRADERTON_ENV:-staging} is running release ${RELEASE_SHA} at https://${IP}"
