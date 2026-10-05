@@ -1,6 +1,6 @@
 # Bug Report: `InstanceLease` renew callback has no rejection handling and no in-flight guard
 
-- **Status:** OPEN (latent; not observed; not fixed)
+- **Status:** FIXED (2026-10-05) — see "Fix (applied)" below.
 - **Severity:** Low–Medium. Defence in depth. No observed failure.
 - **Date:** 2026-10-05
 - **Component:** `packages/worker/src/instance-lease.ts` (`InstanceLease.startRenewal`)
@@ -81,9 +81,48 @@ Add unit tests with a fake Redis whose `eval` (a) rejects, and (b) never resolve
 - (a) Assert no unhandled rejection, and that the timer is removed from `renewTimers`.
 - (b) Advance fake timers past several intervals and assert that only one `eval` is in flight.
 
+## Fix (applied 2026-10-05)
+
+Implemented the candidate fix above in `packages/worker/src/instance-lease.ts` `startRenewal`.
+Recorded as an Intentional Divergence in `docs/features/initial/003-anomalies-and-deviations.md`
+(the file was byte-identical to herobids; a herobids source-fix request + re-copy remains the
+parity-correct long-term path, and the defect exists there too).
+
+- The timer callback is no longer `async`: it dispatches `this.renew()` and attaches
+  `.then/.catch/.finally`, so a **rejected** renew can never become an unhandled rejection.
+- A rejected renew is **logged (`warn`) and retried on the next tick**; the timer is kept. Only
+  `renewed === false` (another worker owns the key) stops renewal.
+- An `inFlight` flag skips a tick while a prior renew is still pending, so a stalled renew (ioredis
+  offline-queueing during an outage) no longer stacks.
+- A late `false` from a timer that was already replaced (release → re-acquire while a renew was in
+  flight) no longer stops the newer timer: `stopRenewal` runs only if the timer is still current.
+  Covered by its own test, which fails without the guard.
+- **Resolved open questions:**
+  - _Stop vs retry_ → **retry**. This reverses the candidate fix above. A rejection (e.g. a one-off
+    `BUSY`/ACL error) does not mean the lease was lost; we most likely still own it. Stopping would
+    let the key expire under a still-running actor, and in a multi-worker deployment a peer's 15s
+    reclaim sweep would then start a second actor for the same bot (dual ownership). Before the
+    fix, the same rejection crashed the process, which at least took the actor down with it.
+    Retrying keeps the lease alive through transient errors. A permanently closed connection just
+    rejects (cheaply, handled) each tick until `shutdown()`/`release()` clears the timer.
+  - _Log_ → **added**, via a module-level `createLogger('instance-lease')` (the pattern used by
+    `runtime.ts`), so no constructor-signature change.
+  - _Parity_ → recorded as a Traderton divergence (per the option in the open question).
+- **Still out of scope (unchanged):** no `onLeaseLost` owner-notification, no lease fencing — the
+  actor still keeps running unleased after a `false` renew, exactly as before the fix.
+
+**Verification (implemented in `packages/worker/src/instance-lease.test.ts`):** `pnpm lint` and the
+`@traderton/worker` build are clean; 6 tests pass:
+(a) a rejecting `eval` leaks no `unhandledRejection` (asserted via a `process.on('unhandledRejection')`
+listener) and is retried every tick; (a2) a single transient rejection is followed by normal
+renewing; (a3) `shutdown()` stops the retries; (b) a never-resolving `eval` dispatches exactly once
+across many intervals (in-flight guard); plus happy-path (keeps renewing) and lost-lease
+(`renewed === false` → stops) regressions. Against the pre-fix `startRenewal`, the
+unhandled-rejection assertion fails (4 captured `Connection is closed` errors), so the test pins the
+defect. The `packages/worker` + `packages/boundary` unit suites pass (82 files, 1560 tests).
+
 ## Scope / Non-goals
 
-- Documentation only. No code was changed.
 - Not the cause of the CI flake in 001.
 - Lease fencing and notifying the owner on lease loss are out of scope.
 
@@ -92,4 +131,6 @@ Add unit tests with a fake Redis whose `eval` (a) rejects, and (b) never resolve
 - `packages/worker/src/instance-lease.ts` (`startRenewal`, `renew`, `shutdown`).
 - `packages/worker/src/runtime.ts` `WorkerRuntime.shutdown()` (`this.lease.shutdown()` before `worker.close()`).
 - `packages/worker/src/bin/worker.ts` L20 and `packages/boundary/src/bin.ts` L103–104 (`maxRetriesPerRequest: null`).
-- herobids `apps/worker/src/instance-lease.ts` (identical source).
+- herobids `apps/worker/src/instance-lease.ts` (was identical before this fix; the same defect
+  remains there — a source-fix request + re-copy is the parity-correct long-term path).
+- `packages/worker/src/instance-lease.test.ts` (the fix's regression tests, added 2026-10-05).

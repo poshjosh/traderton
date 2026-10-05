@@ -1,6 +1,8 @@
 import type { Redis } from 'ioredis';
+import { createLogger } from './logger.js';
 
 const LEASE_PREFIX = 'lease:instance:';
+const logger = createLogger('instance-lease');
 
 /**
  * InstanceLease — distributed lock for trading instance ownership.
@@ -94,12 +96,30 @@ export class InstanceLease {
   private startRenewal(instanceId: string): void {
     this.stopRenewal(instanceId); // Idempotent
     const interval = Math.floor(this.ttlSeconds * 1000 / 2);
-    const timer = setInterval(async () => {
-      const renewed = await this.renew(instanceId);
-      if (!renewed) {
-        // We lost the lease — stop renewal
-        this.stopRenewal(instanceId);
-      }
+    // Bug 2026-10-05/002. Not `async`, so a renew rejection can never become an
+    // unhandled (process-fatal) rejection. `inFlight` stops a stalled renew from
+    // stacking another one on every tick.
+    let inFlight = false;
+    const timer = setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
+      this.renew(instanceId)
+        .then((renewed) => {
+          // Another worker owns the key now — stop renewal. Only if this timer is
+          // still the current one: a late result from a timer replaced by a
+          // release → re-acquire must not stop the newer timer.
+          if (!renewed && this.renewTimers.get(instanceId) === timer) this.stopRenewal(instanceId);
+        })
+        .catch((err: unknown) => {
+          // A rejection does NOT mean we lost the lease (we most likely still own
+          // it). Keep the timer so the next tick retries; stopping here would let
+          // the key expire under a still-running actor and a peer's reclaim sweep
+          // would start a second owner. Shutdown/release clear the timer.
+          logger.warn({ err, instanceId, workerId: this.workerId }, 'Lease renew failed — will retry next interval');
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     }, interval);
     this.renewTimers.set(instanceId, timer);
   }
