@@ -26,6 +26,7 @@ import {
   type ToolResult,
   type TradingToolContext,
 } from '@traderton/domain';
+import { resolveSwapNetwork } from '../resolve-swap-assets.js';
 import { validateSwapScannerConfig } from '../swap-startup-validation.js';
 import { convertZodToJsonSchema } from './registry.js';
 
@@ -149,7 +150,10 @@ function canonicalTokensFrom(
  * - `scanner_gated`: reject when no strategy is given (neither a new
  *   `creatorStrategy` nor a stored `activeStrategy`); otherwise parse the
  *   resolved technical config strictly then leniently; a swap venue additionally
- *   runs `validateSwapScannerConfig`.
+ *   runs `validateSwapScannerConfig` against the binding network resolved the
+ *   same way the runtime scan wiring resolves it (`resolveSwapNetwork` with the
+ *   operator 1inch config — see `wireScanDeps` in composition/decision-intake.ts).
+ *   `filters.networks` is a creator scan filter, NOT the network source.
  * - `mixed`: lenient parse only.
  * - absent `scanMode` with no scan loop: nothing to validate.
  */
@@ -159,6 +163,7 @@ function validateScanConfiguration(params: {
   existingActive: TechnicalConfig | null;
   venue: string;
   marketDataConfig: Record<string, unknown> | undefined;
+  oneInchConfig: { tokenSafetyNetwork?: string; chainId?: number } | undefined;
 }): ToolResult | undefined {
   const { scanMode, creatorStrategy, existingActive, venue } = params;
   if (scanMode == null) return undefined;
@@ -202,7 +207,10 @@ function validateScanConfiguration(params: {
     return scanValidationError(lenient.error.issues[0]?.message ?? 'Invalid technical config', 'validation.technical_config');
   }
   if (venueType === 'swap') {
-    const network = resolved.filters.networks?.[0] as SupportedTokenSafetyNetwork | undefined;
+    // Binding network comes from the venue + operator config (Jupiter → solana;
+    // 1inch → venues.1inch tokenSafetyNetwork/chainId), matching the runtime.
+    // validateSwapScannerConfig then checks filters.networks does not exclude it.
+    const network = resolveSwapNetwork(venue, undefined, params.oneInchConfig);
     const swap = validateSwapScannerConfig(network, venue, lenient.data, canonicalTokensFrom(params.marketDataConfig));
     if (!swap.ok) return scanValidationError(swap.error.message, swap.error.code);
   }
@@ -354,6 +362,7 @@ const setAgentTradingProfileTool: AgentTool<TradingToolContext> = {
         existingActive,
         venue: venueAccount.venue,
         marketDataConfig: ctx.marketDataConfig,
+        oneInchConfig: ctx.oneInchPriceChainConfig,
       });
       if (invalid) return invalid;
     }

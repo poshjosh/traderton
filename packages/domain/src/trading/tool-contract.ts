@@ -266,6 +266,10 @@ export interface TradingToolContext {
    * `resolveSwapNetwork('1inch', undefined, oneInchPriceChainConfig)` when marking
    * open positions in `get_agent_positions`. Undefined → 1inch rows cannot be
    * marked (mark fields are null), never an error.
+   *
+   * Also the binding-network source for `set_agent_trading_profile` swap scan
+   * validation (same resolution as the runtime scan wiring). Undefined there →
+   * a 1inch `scanner_gated` profile fails closed with `swap.network_unresolved`.
    */
   oneInchPriceChainConfig?: { tokenSafetyNetwork?: string; chainId?: number };
   /** Agent risk contract operations for reading and adjusting runtime risk limits. */

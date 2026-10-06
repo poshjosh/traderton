@@ -47,12 +47,19 @@ const operatorRiskDefaults = {
   maxBots: 5,
 };
 
-function context(ownerId = 'owner-1', agentId = 'agent-1', venue = 'hyperliquid', marketDataConfig?: Record<string, unknown>) {
+function context(
+  ownerId = 'owner-1',
+  agentId = 'agent-1',
+  venue = 'hyperliquid',
+  marketDataConfig?: Record<string, unknown>,
+  oneInchPriceChainConfig?: { tokenSafetyNetwork?: string; chainId?: number },
+) {
   return {
     ownerId,
     agentId,
     operatorRiskDefaults,
     marketDataConfig,
+    oneInchPriceChainConfig,
     db: {
       select: () => ({
         from: () => ({
@@ -143,6 +150,16 @@ function customTechnical(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+// Operator canonical tokens (USDC quote) for both swap networks under test.
+const SOLANA_AND_BASE_TOKENS = {
+  tokenSafety: {
+    canonicalTokens: {
+      solana: { USDC: { address: 'EPjF...USDC', name: 'USD Coin', aliases: [] } },
+      base: { USDC: { address: '0x8335...2913', name: 'USD Coin', aliases: [] } },
+    },
+  },
+};
 
 describe('set_agent_trading_profile scan configuration', () => {
   beforeEach(() => applyOperation.mockResolvedValue(new Map([['action-1', 1n]])));
@@ -268,22 +285,66 @@ describe('set_agent_trading_profile scan configuration', () => {
     expect(applyOperation).not.toHaveBeenCalled();
   });
 
-  it('rejects a preset creatorStrategy with scanner_gated on a swap venue (swap.network_unresolved)', async () => {
-    // D3 premise: traderton's preset branch emits no filters.networks, so a
-    // preset + scanner_gated on a swap venue cannot resolve a network.
+  it('accepts a preset creatorStrategy with scanner_gated on jupiter without filters.networks', async () => {
+    // The binding network comes from the venue (jupiter → solana), not from
+    // filters.networks, so a preset (which emits no filters.networks) validates.
     const result = await setProfile.execute(
       { ...params, scanMode: 'scanner_gated', creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' } },
-      context('owner-1', 'agent-1', 'jupiter', { tokenSafety: { canonicalTokens: {} } }),
+      context('owner-1', 'agent-1', 'jupiter', SOLANA_AND_BASE_TOKENS),
     );
 
-    expect(result).toMatchObject({ success: false, fault: false });
-    expect(String(result.errorCode)).toBe('swap.network_unresolved');
+    expect(result).toMatchObject({ success: true });
+    expect(applyOperation).toHaveBeenCalled();
+  });
+
+  it('accepts customTechnical with scanner_gated on 1inch when the operator config names the chain', async () => {
+    // Reproduces bug 2026-10-06/001: herobids forwards no filters.networks; the
+    // operator venues.1inch config resolves the network (base).
+    const technical = customTechnical({ filters: { venue: 'placeholder', venueType: 'swap' } });
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated', creatorStrategy: { customTechnical: technical } },
+      context('owner-1', 'agent-1', '1inch', SOLANA_AND_BASE_TOKENS, { chainId: 8453, tokenSafetyNetwork: 'base' }),
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(applyOperation).toHaveBeenCalled();
+  });
+
+  it('accepts a preset creatorStrategy with scanner_gated on 1inch resolved from the operator chainId', async () => {
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated', creatorStrategy: { presetKey: 'range', styleTier: 'standard' } },
+      context('owner-1', 'agent-1', '1inch', SOLANA_AND_BASE_TOKENS, { chainId: 8453 }),
+    );
+
+    expect(result).toMatchObject({ success: true });
+  });
+
+  it('rejects scanner_gated on 1inch when the operator config has no chain (swap.network_unresolved)', async () => {
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated', creatorStrategy: { presetKey: 'momentum', styleTier: 'standard' } },
+      context('owner-1', 'agent-1', '1inch', SOLANA_AND_BASE_TOKENS),
+    );
+
+    expect(result).toMatchObject({ success: false, fault: false, errorCode: 'swap.network_unresolved' });
+    expect(applyOperation).not.toHaveBeenCalled();
+  });
+
+  it('ignores a creator filters.networks entry as the network source on 1inch', async () => {
+    // filters.networks:['solana'] must not make a base-chain 1inch account scan
+    // solana; the binding network stays base, so the filter excludes it.
+    const technical = customTechnical({ filters: { venue: 'placeholder', venueType: 'swap', networks: ['solana'] } });
+    const result = await setProfile.execute(
+      { ...params, scanMode: 'scanner_gated', creatorStrategy: { customTechnical: technical } },
+      context('owner-1', 'agent-1', '1inch', SOLANA_AND_BASE_TOKENS, { tokenSafetyNetwork: 'base' }),
+    );
+
+    expect(result).toMatchObject({ success: false, fault: false, errorCode: 'swap.network_excluded' });
     expect(applyOperation).not.toHaveBeenCalled();
   });
 
   it('accepts customTechnical with filters.networks solana on jupiter', async () => {
-    // D3 premise: customTechnical keeps the connection-merged filters including
-    // networks, so a swap scanner config can resolve its network.
+    // A creator filters.networks that includes the binding network (jupiter →
+    // solana) is accepted; it narrows the scan, it does not pick the network.
     const technical = customTechnical({ filters: { venue: 'placeholder', venueType: 'swap', networks: ['solana'] } });
     const result = await setProfile.execute(
       { ...params, scanMode: 'scanner_gated', creatorStrategy: { customTechnical: technical } },
