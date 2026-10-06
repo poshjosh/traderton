@@ -10,6 +10,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Legal pages on the public site.** `site/legal/privacy-policy.html` and `site/legal/user-agreement.html` carry the trading-specific legal clauses (trading data, venue disclosures, regulatory retention, trading decisions/risk, no-advice/no-guarantees, Test/Live execution-mode definitions, limitation of liability) so Traderton — as the actual trading-infrastructure provider — owns this disclosure rather than the operator platform (herobids). Linked from the footer of every site page; a `legal/index.html` avoids a raw directory listing. `infra/hetzner/tests/site-isolation.sh` asserts both routes return 200. A clause-by-clause mapping against herobids' `trading-wording-audit.md` rows #47–#60 is recorded in `docs/features/pending/trading-legal-pages-and-wording-receiver/002-clause-mapping.md`, confirming full coverage so herobids can safely remove the equivalent clauses from its own legal pages.
 
+### Fixed
+
+- **Protective `watch_token` calls now link to positions opened through `submit_decision`.** Auto-link (no `coverage.targetPosition`) used to match only on canonical instrument identity, which production positions never carry (`instrument_id` is null; `instruments.id` is a UUID), so `stop_loss` / `take_profit` / `exit` watches without an explicit target were rejected. It now falls back to venue + symbol on the venue the watch is priced on, narrowed by the side the purpose implies (`stop_loss` below = long, above = short; `take_profit` the reverse), and links only on exactly one match. An explicit `coverage.targetPosition.instrumentId` no longer vetoes a match when the stored position has none. Protective rejections now list the caller's open positions (`venue symbol side`) to retry with. Tool descriptions are updated to match. No schema, database or position-writer change; swap-venue positions still need an explicit `coverage.targetPosition`. See `docs/bug-reports/2026/10/06/001-protective-watch-cannot-link-decision-intake-positions.md`.
+
 ## 0.0.4-2026.10.05
 
 ### Changed

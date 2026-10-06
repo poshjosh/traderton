@@ -1651,8 +1651,8 @@ describe('watch_token — coverage', () => {
       okResolve('RANDOM-COIN', 'hyperliquid', 60_000),
     );
     const getPrice = vi.fn().mockResolvedValue(okPrice(60_000));
-    // No instrument repo — so instrument resolution fails.
-    // No botRepo — so coverage resolution cannot resolve a position.
+    // Instrument repo returns nothing — so instrument resolution fails.
+    // botRepo returns no open positions — so auto-link finds nothing to link.
     const ctx = makeCtx({
       priceService: { getPrice, resolvePriceTarget },
       instrumentRepo: {
@@ -1762,5 +1762,290 @@ describe('watch_token — coverage', () => {
 
     // Non-protective → allowed even without linkage
     expect(result.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Protective linkage against production-shaped data (bug 2026-10-06/001).
+// Positions opened through decision intake store symbol = the instrumentId the
+// agent submitted and instrument_id = null; the instruments table stores ccxt
+// unified symbols with random UUID ids, so the canonical tier never links them.
+// ---------------------------------------------------------------------------
+
+describe('watch_token — protective linkage by venue + symbol', () => {
+  function openPosition(overrides: Partial<{
+    actorType: string;
+    actorId: string;
+    venue: string;
+    symbol: string;
+    side: string;
+    instrumentId: string | null;
+  }> = {}) {
+    return {
+      actorType: 'agent',
+      actorId: 'agent-test-1',
+      venue: 'hyperliquid',
+      symbol: 'NEAR',
+      instrumentId: null,
+      side: 'long',
+      size: '10',
+      entryPrice: '3',
+      openedAt: new Date(),
+      ...overrides,
+    };
+  }
+
+  const ccxtNearRow = makeInstrumentRow({
+    id: '0192f0c4-7e1a-7000-8000-000000000001',
+    symbol: 'NEAR/USDC:USDC',
+    base: 'NEAR',
+    quote: 'USDC',
+    venue: 'hyperliquid',
+  });
+
+  function ctxWith(
+    positions: unknown[],
+    opts: { resolvedSymbol?: string; resolvedChain?: string; instrumentRows?: unknown[]; botRepo?: null } = {},
+  ): ToolContext {
+    return makeCtx({
+      priceService: {
+        getPrice: vi.fn().mockResolvedValue(okPrice(3)),
+        resolvePriceTarget: vi.fn().mockResolvedValue(
+          okResolve(opts.resolvedSymbol ?? 'NEAR', opts.resolvedChain ?? 'hyperliquid', 3),
+        ),
+      },
+      instrumentRepo: { search: vi.fn().mockResolvedValue(opts.instrumentRows ?? [ccxtNearRow]) },
+      botRepo: opts.botRepo === null
+        ? null
+        : { getOpenPositionsByCreator: vi.fn().mockResolvedValue(positions) } as unknown as ToolContext['botRepo'],
+    });
+  }
+
+  function storedCoverage(ctx: ToolContext): Record<string, unknown> | undefined {
+    const hsetCalls = (ctx.redis.hset as ReturnType<typeof vi.fn>).mock.calls;
+    const watchCall = hsetCalls.find(
+      (c: unknown[]) =>
+        typeof c[0] === 'string' && c[0].startsWith('agent:watches:') && !(c[0] as string).includes('summary'),
+    );
+    return JSON.parse((watchCall as unknown[])[2] as string).coverage;
+  }
+
+  const nearStopLoss = {
+    symbol: 'NEAR',
+    chain: 'hyperliquid',
+    thresholdPrice: 2.5,
+    condition: 'below' as const,
+    purpose: 'stop_loss' as const,
+  };
+
+  // ── Auto-link fallback (no coverage.targetPosition) ────────────────
+
+  it('links a stop_loss below to the only long on the venue when the position has no instrumentId', async () => {
+    const ctx = ctxWith([openPosition()]);
+
+    const result = await watchTokenTool.execute(nearStopLoss, ctx);
+
+    expect(result.success).toBe(true);
+    expect(storedCoverage(ctx)?.positionKey).toBe('hyperliquid::NEAR::long');
+  });
+
+  it('links a take_profit below to a short', async () => {
+    const ctx = ctxWith([openPosition({ side: 'short' })]);
+
+    const result = await watchTokenTool.execute(
+      { ...nearStopLoss, thresholdPrice: 2, purpose: 'take_profit' },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(storedCoverage(ctx)?.positionKey).toBe('hyperliquid::NEAR::short');
+  });
+
+  it('matches the resolved symbol when the caller passed a perp alias', async () => {
+    const ctx = ctxWith([openPosition()], { resolvedSymbol: 'NEAR' });
+
+    const result = await watchTokenTool.execute({ ...nearStopLoss, symbol: 'NEAR-PERP' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(storedCoverage(ctx)?.positionKey).toBe('hyperliquid::NEAR::long');
+  });
+
+  it('falls back to venue + symbol when the resolved instrumentId matches no position', async () => {
+    const ctx = ctxWith([openPosition()], {
+      instrumentRows: [makeInstrumentRow({ id: 'uuid-near', symbol: 'NEAR', base: 'NEAR', venue: 'hyperliquid' })],
+    });
+
+    const result = await watchTokenTool.execute(nearStopLoss, ctx);
+
+    expect(result.success).toBe(true);
+    expect(storedCoverage(ctx)?.positionKey).toBe('hyperliquid::NEAR::long');
+  });
+
+  it('rejects a stop_loss whose condition implies the opposite side of the open position', async () => {
+    const ctx = ctxWith([openPosition({ side: 'long' })]);
+
+    const result = await watchTokenTool.execute({ ...nearStopLoss, thresholdPrice: 4, condition: 'above' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Protective watch (purpose=stop_loss) could not be auto-linked');
+    expect(result.error).toContain('protects a short position');
+    expect(result.error).toContain('position is long');
+  });
+
+  it('uses the implied side to choose between an agent long and a bot short on the same symbol', async () => {
+    const ctx = ctxWith([
+      openPosition({ side: 'long' }),
+      openPosition({ actorType: 'bot', actorId: 'bot-1', side: 'short' }),
+    ]);
+
+    const result = await watchTokenTool.execute({ ...nearStopLoss, thresholdPrice: 4, condition: 'above' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(storedCoverage(ctx)?.positionKey).toBe('hyperliquid::NEAR::short');
+  });
+
+  it('rejects as ambiguous when two positions on the implied side match, listing them', async () => {
+    const ctx = ctxWith([
+      openPosition({ side: 'long' }),
+      openPosition({ actorType: 'bot', actorId: 'bot-1', side: 'long' }),
+    ]);
+
+    const result = await watchTokenTool.execute(nearStopLoss, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Ambiguous target: 2 open positions match venue=hyperliquid symbol=NEAR side=long');
+    expect(result.error).toContain('Your open positions (venue symbol side): hyperliquid NEAR long; hyperliquid NEAR long');
+    expect(result.error).toContain('coverage.targetPosition');
+  });
+
+  it('links an exit watch when exactly one position has the symbol', async () => {
+    const ctx = ctxWith([openPosition({ side: 'long' })]);
+
+    const result = await watchTokenTool.execute({ ...nearStopLoss, condition: 'above', purpose: 'exit' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(storedCoverage(ctx)?.positionKey).toBe('hyperliquid::NEAR::long');
+  });
+
+  it('rejects an exit watch as ambiguous when positions on both sides match (exit implies no side)', async () => {
+    const ctx = ctxWith([
+      openPosition({ side: 'long' }),
+      openPosition({ actorType: 'bot', actorId: 'bot-1', side: 'short' }),
+    ]);
+
+    const result = await watchTokenTool.execute({ ...nearStopLoss, purpose: 'exit' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Ambiguous target: 2 open positions match venue=hyperliquid symbol=NEAR.');
+  });
+
+  it('does not link when the watch price resolved on a different chain than the position venue', async () => {
+    const ctx = ctxWith([openPosition()], { resolvedChain: 'ethereum' });
+
+    const result = await watchTokenTool.execute(nearStopLoss, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No open position found matching venue=ethereum symbol=NEAR side=long');
+    expect(result.error).toContain('hyperliquid NEAR long');
+  });
+
+  it('does not auto-link swap-venue positions, and lists them for an explicit retry', async () => {
+    const ctx = ctxWith(
+      [openPosition({ venue: 'jupiter', symbol: 'SOL/USDC' })],
+      { resolvedSymbol: 'SOL', resolvedChain: 'solana', instrumentRows: [] },
+    );
+
+    const result = await watchTokenTool.execute({ ...nearStopLoss, symbol: 'SOL', chain: 'solana', thresholdPrice: 120 }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No open position found matching venue=solana symbol=SOL side=long');
+    expect(result.error).toContain('jupiter SOL/USDC long');
+  });
+
+  it('caps the listed open positions in a rejection', async () => {
+    const positions = Array.from({ length: 12 }, (_, i) => openPosition({ symbol: `TOK${i}` }));
+    const ctx = ctxWith(positions);
+
+    const result = await watchTokenTool.execute(nearStopLoss, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('hyperliquid TOK9 long');
+    expect(result.error).not.toContain('TOK10');
+    expect(result.error).toContain('(+2 more)');
+  });
+
+  it('auto-links when misnested coverage fields are stripped by the schema', async () => {
+    // The reported error text is only reachable when coverage.targetPosition
+    // never reaches execute(), e.g. venue/symbol/side placed directly on
+    // coverage. Zod strips those keys, so the auto-link path must handle it.
+    const ctx = ctxWith([openPosition()]);
+    const parsed = watchTokenTool.parametersSchema!.parse({
+      ...nearStopLoss,
+      coverage: { venue: 'hyperliquid', symbol: 'NEAR', side: 'long', instrumentId: 'NEAR' },
+    });
+
+    const result = await watchTokenTool.execute(parsed, ctx);
+
+    expect(result.success).toBe(true);
+    expect(storedCoverage(ctx)?.positionKey).toBe('hyperliquid::NEAR::long');
+  });
+
+  it('explains that positions cannot be looked up when no position lookup is available', async () => {
+    const ctx = ctxWith([], { instrumentRows: [], botRepo: null });
+
+    const result = await watchTokenTool.execute(nearStopLoss, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Protective watch (purpose=stop_loss)');
+    expect(result.error).toContain('open positions cannot be looked up in this context');
+  });
+
+  // ── Explicit coverage.targetPosition ───────────────────────────────
+
+  it('links coverage.targetPosition carrying an instrumentId when the stored position has none', async () => {
+    const ctx = ctxWith([openPosition()]);
+
+    const result = await watchTokenTool.execute(
+      {
+        ...nearStopLoss,
+        coverage: { targetPosition: { venue: 'hyperliquid', symbol: 'NEAR', side: 'long', instrumentId: 'NEAR' } },
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(storedCoverage(ctx)?.positionKey).toBe('hyperliquid::NEAR::long');
+  });
+
+  it('rejects an ambiguous coverage.targetPosition, listing open positions', async () => {
+    const ctx = ctxWith([
+      openPosition(),
+      openPosition({ actorType: 'bot', actorId: 'bot-1' }),
+    ]);
+
+    const result = await watchTokenTool.execute(
+      { ...nearStopLoss, coverage: { targetPosition: { venue: 'hyperliquid', symbol: 'NEAR', side: 'long' } } },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Ambiguous target: 2 open positions match venue=hyperliquid symbol=NEAR side=long');
+    expect(result.error).toContain('Your open positions (venue symbol side): hyperliquid NEAR long; hyperliquid NEAR long');
+  });
+
+  it('rejects coverage.targetPosition whose instrumentId conflicts with the stored one, listing open positions', async () => {
+    const ctx = ctxWith([openPosition({ instrumentId: 'NEAR-CANONICAL' })]);
+
+    const result = await watchTokenTool.execute(
+      {
+        ...nearStopLoss,
+        coverage: { targetPosition: { venue: 'hyperliquid', symbol: 'NEAR', side: 'long', instrumentId: 'OTHER' } },
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No open position found matching venue=hyperliquid symbol=NEAR side=long');
+    expect(result.error).toContain('Your open positions (venue symbol side): hyperliquid NEAR long');
   });
 });

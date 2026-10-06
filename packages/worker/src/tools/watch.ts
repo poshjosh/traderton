@@ -14,7 +14,7 @@
 import { z } from 'zod';
 import crypto from 'node:crypto';
 import { createLogger } from '../logger.js';
-import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domain';
+import type { AgentTool, ToolPositionRecord, ToolResult, TradingToolContext } from '@traderton/domain';
 import { WatchPurposeEnum, type WatchPurpose } from '@traderton/domain';
 import { convertZodToJsonSchema } from './registry.js';
 import { EXPLICIT_SUPPORTED_CHAINS, validateSymbolForChain, isOnChainAddress } from './price.js';
@@ -164,6 +164,87 @@ async function ensurePinnedWatchIdentity(
 // watch_token
 // ---------------------------------------------------------------------------
 
+type ProtectedSide = 'long' | 'short';
+
+/**
+ * The position side a protective watch protects, implied by its purpose and
+ * trigger direction. A stop-loss fires against the position (below for a
+ * long, above for a short); a take-profit fires in its favour. An `exit` watch
+ * can fire in either direction, so it implies no side.
+ */
+function inferProtectedSide(purpose: WatchPurpose, condition: 'above' | 'below'): ProtectedSide | undefined {
+  if (purpose === 'stop_loss') return condition === 'below' ? 'long' : 'short';
+  if (purpose === 'take_profit') return condition === 'above' ? 'long' : 'short';
+  return undefined;
+}
+
+/** Cap on positions listed in a rejection so the message stays short. */
+const MAX_RETRY_CANDIDATES = 10;
+
+/**
+ * Retry hint appended to protective-watch rejections: the caller's open
+ * positions as `venue symbol side`, ready to copy into coverage.targetPosition.
+ */
+function formatRetryCandidates(openPositions: readonly ToolPositionRecord[]): string {
+  if (openPositions.length === 0) return ' You have no open positions.';
+  const listed = openPositions
+    .slice(0, MAX_RETRY_CANDIDATES)
+    .map((p) => `${p.venue} ${p.symbol} ${p.side}`)
+    .join('; ');
+  const overflow = openPositions.length > MAX_RETRY_CANDIDATES
+    ? ` (+${openPositions.length - MAX_RETRY_CANDIDATES} more)`
+    : '';
+  return ` Your open positions (venue symbol side): ${listed}${overflow}. ` +
+    'Retry with coverage.targetPosition set to { venue, symbol, side } from this list.';
+}
+
+type PositionLinkOutcome =
+  | { linked: true; position: ToolPositionRecord }
+  | { linked: false; reason: string };
+
+/**
+ * Auto-link fallback for protective watches: match open positions on what
+ * they actually store (venue + symbol), restricted to the venue the watch is
+ * priced on. A position whose stored instrumentId conflicts with the resolved
+ * instrument is never matched. When the purpose implies a side, only that
+ * side is eligible. Links only when exactly one position matches.
+ */
+function linkByVenueAndSymbol(input: {
+  openPositions: readonly ToolPositionRecord[];
+  venue: string;
+  /** Display symbol first, then any aliases (e.g. the caller's raw input). */
+  symbols: readonly [string, ...string[]];
+  resolvedInstrumentId: string | undefined;
+  impliedSide: ProtectedSide | undefined;
+  purpose: WatchPurpose;
+  condition: 'above' | 'below';
+}): PositionLinkOutcome {
+  const { openPositions, venue, symbols, resolvedInstrumentId, impliedSide, purpose, condition } = input;
+  const wanted = new Set(symbols.map((s) => s.toUpperCase()));
+  const sameInstrument = openPositions.filter(
+    (p) => p.venue === venue &&
+      wanted.has(p.symbol.toUpperCase()) &&
+      (!resolvedInstrumentId || !p.instrumentId || p.instrumentId === resolvedInstrumentId),
+  );
+  const matches = impliedSide ? sameInstrument.filter((p) => p.side === impliedSide) : sameInstrument;
+  if (matches.length === 1) return { linked: true, position: matches[0]! };
+
+  const target = `venue=${venue} symbol=${symbols[0]}${impliedSide ? ` side=${impliedSide}` : ''}`;
+  if (matches.length > 1) {
+    return { linked: false, reason: `Ambiguous target: ${matches.length} open positions match ${target}.` };
+  }
+  if (impliedSide && sameInstrument.length > 0) {
+    const heldSides = [...new Set(sameInstrument.map((p) => p.side))].join('/');
+    return {
+      linked: false,
+      reason: `a ${purpose} with condition "${condition}" protects a ${impliedSide} position, ` +
+        `but your open ${venue} ${sameInstrument[0]!.symbol} position is ${heldSides}. Check the condition.`,
+    };
+  }
+  const canonical = resolvedInstrumentId ? ` or instrumentId=${resolvedInstrumentId}` : '';
+  return { linked: false, reason: `No open position found matching ${target}${canonical}.` };
+}
+
 const WatchTokenParamsSchema = z.object({
   symbol: z.string().min(1).describe('Token symbol or ticker (e.g. BTC, SOL, WIF)'),
   chain: z.enum(EXPLICIT_SUPPORTED_CHAINS).or(z.literal('any')).describe(
@@ -187,10 +268,13 @@ const WatchTokenParamsSchema = z.object({
     /** Identify the target position so the worker can derive a canonical positionKey. */
     targetPosition: z.object({
       venue: z.string().min(1).describe('Venue where the position is held (e.g. "hyperliquid", "jupiter")'),
-      symbol: z.string().min(1).describe('Symbol of the position'),
+      symbol: z.string().min(1).describe(
+        'Symbol of the position as shown by list_positions. For positions you opened with submit_decision, this is the instrumentId you submitted (e.g. "NEAR", "SOL/USDC").',
+      ),
       side: z.enum(['long', 'short']).describe('Direction of the position'),
       instrumentId: z.string().optional().describe(
-        'Canonical instrument ID of the position. Provide when available to disambiguate same-symbol positions.',
+        'Optional. Omit unless list_positions shows a non-null instrumentId for this position; venue, symbol and side identify it. ' +
+        'Only narrows the match when the stored position has an instrumentId. Not the instrumentId you pass to submit_decision (that is the symbol).',
       ),
     }).optional().describe(
       'Identify the open position this watch protects. The worker derives the canonical positionKey — do NOT supply a raw positionKey.',
@@ -207,7 +291,9 @@ const watchTokenTool: AgentTool<TradingToolContext> = {
   description:
     'Register a price watch for a token. When chain is "any", the tool discovers the best-matching token and pins the watch to that concrete asset — future checks will always use the pinned identity. ' +
     'The watch fires when the token\'s price crosses the given threshold in the specified direction. ' +
-    'Protective watches (stop_loss, take_profit, exit) require either a matching instrument identity or a resolvable target position — create the position first before creating a protective watch. ' +
+    'Protective watches (stop_loss, take_profit, exit) must link to an open position, so create the position first. ' +
+    'Without coverage.targetPosition, a protective watch auto-links when exactly one open position is on the venue named by chain (e.g. "hyperliquid") with the same symbol and, for stop_loss/take_profit, the side the condition implies (stop_loss below = long, above = short; take_profit the reverse). ' +
+    'Otherwise pass coverage.targetPosition with venue, symbol and side from list_positions. ' +
     'Use check_watches to evaluate all registered watches. Use list_watches to see active watches. Use remove_watch to cancel one.',
   parametersSchema: WatchTokenParamsSchema,
   parameters: convertZodToJsonSchema(WatchTokenParamsSchema),
@@ -346,64 +432,28 @@ const watchTokenTool: AgentTool<TradingToolContext> = {
     // without the coverage linkage, causing every subsequent tick to escalate to
     // the judge for "open_position_uncovered".
     //
-    // Matching strategy: canonical identity only — venue + instrumentId.
-    // Symbol-only matching is too coarse — the same symbol can map to
-    // different instruments (e.g. perp vs spot). When canonical identity
-    // does not line up between the instrument repo and the open position,
-    // the caller must use coverage.targetPosition for explicit disambiguation.
+    // Matching strategy, in order:
+    //   1. Canonical identity — venue + instrumentId — when the instrument repo
+    //      resolved one and a position carries the same id. More than one
+    //      canonical match is rejected as ambiguous.
+    //   2. Venue + symbol (see linkByVenueAndSymbol). Symbol-only matching
+    //      across venues is too coarse (the same ticker can be a perp on one
+    //      venue and a spot token on another), so the fallback only considers
+    //      positions on the venue the watch is priced on, never matches a
+    //      position whose stored instrumentId conflicts with the resolved one,
+    //      narrows by the side the purpose implies, and links only on exactly
+    //      one match. Tier 2 exists because positions opened through decision
+    //      intake store instrument_id = null, so tier 1 alone never links them.
     //
     // Protective watches that cannot be auto-linked are REJECTED — this matches
     // the existing contract for explicit coverage.targetPosition: a stop_loss or
-    // take_profit must target a real, resolvable open position.
-    if (
-      !coverage?.targetPosition &&
-      purpose &&
-      (PROTECTIVE_WATCH_PURPOSES as readonly string[]).includes(purpose) &&
-      instrument?.venue &&
-      instrument?.instrumentId &&
-      ctx.botRepo
-    ) {
+    // take_profit must target a real, resolvable open position. Rejections list
+    // the caller's open positions so the retry can use coverage.targetPosition.
+    const isProtective = purpose ? (PROTECTIVE_WATCH_PURPOSES as readonly string[]).includes(purpose) : false;
+    if (!coverage?.targetPosition && purpose && isProtective && ctx.botRepo) {
+      let openPositions: ToolPositionRecord[];
       try {
-        const openPositions = await ctx.botRepo.getOpenPositionsByCreator('agent', ctx.agentId);
-
-        const venueMatches = openPositions.filter(
-          (p) => p.venue === instrument.venue &&
-            p.instrumentId === instrument.instrumentId,
-        );
-
-        if (venueMatches.length === 1) {
-          const match = venueMatches[0]!;
-          const derivedKey = derivePositionKey({
-            venue: match.venue,
-            symbol: match.symbol,
-            side: match.side,
-            instrumentId: match.instrumentId ?? undefined,
-          });
-          resolvedCoverage = {
-            ...(resolvedCoverage ?? {}),
-            positionKey: derivedKey,
-          };
-          logger.info(
-            { agentId: ctx.agentId, symbol: effectiveSymbol, positionKey: derivedKey },
-            'Auto-linked protective watch to open position',
-          );
-        } else if (venueMatches.length > 1) {
-          return {
-            success: false,
-            error: `Ambiguous target: ${venueMatches.length} open positions match venue=${instrument.venue} instrumentId=${instrument.instrumentId}. Cannot safely auto-link a protective watch — use coverage.targetPosition (venue, symbol, side) for disambiguation.`,
-            retryable: false,
-            fault: false,
-          };
-        } else {
-          // Zero matches: canonical identity mismatch — the instrument repo
-          // resolved a different identity than what the positions carry.
-          return {
-            success: false,
-            error: `No open position found matching venue=${instrument.venue} instrumentId=${instrument.instrumentId}. The instrument repo resolved a different identity than what the positions carry. Use coverage.targetPosition (venue, symbol, side) to identify the position explicitly.`,
-            retryable: false,
-            fault: false,
-          };
-        }
+        openPositions = await ctx.botRepo.getOpenPositionsByCreator('agent', ctx.agentId);
       } catch (err) {
         logger.warn(
           { err, agentId: ctx.agentId, symbol: effectiveSymbol },
@@ -416,20 +466,77 @@ const watchTokenTool: AgentTool<TradingToolContext> = {
           fault: false,
         };
       }
+
+      const rejectAutoLink = (reason: string): ToolResult => ({
+        success: false,
+        error: `Protective watch (purpose=${purpose}) could not be auto-linked: ${reason}${formatRetryCandidates(openPositions)}`,
+        retryable: false,
+        fault: false,
+      });
+
+      // Tier 1: canonical identity.
+      let linkedPosition: ToolPositionRecord | undefined;
+      let linkTier: 'instrument_id' | 'venue_symbol' = 'instrument_id';
+      if (instrument?.venue && instrument.instrumentId) {
+        const canonicalMatches = openPositions.filter(
+          (p) => p.venue === instrument.venue && p.instrumentId === instrument.instrumentId,
+        );
+        if (canonicalMatches.length > 1) {
+          return rejectAutoLink(
+            `Ambiguous target: ${canonicalMatches.length} open positions match venue=${instrument.venue} instrumentId=${instrument.instrumentId}.`,
+          );
+        }
+        linkedPosition = canonicalMatches[0];
+      }
+
+      // Tier 2: venue + symbol (+ implied side).
+      if (!linkedPosition) {
+        const outcome = linkByVenueAndSymbol({
+          openPositions,
+          venue: effectiveChain,
+          symbols: [effectiveSymbol, trimmedSymbol],
+          resolvedInstrumentId: instrument?.instrumentId,
+          impliedSide: inferProtectedSide(purpose, condition),
+          purpose,
+          condition,
+        });
+        if (!outcome.linked) return rejectAutoLink(outcome.reason);
+        linkedPosition = outcome.position;
+        linkTier = 'venue_symbol';
+      }
+
+      const derivedKey = derivePositionKey({
+        venue: linkedPosition.venue,
+        symbol: linkedPosition.symbol,
+        side: linkedPosition.side,
+        instrumentId: linkedPosition.instrumentId ?? undefined,
+      });
+      resolvedCoverage = {
+        ...(resolvedCoverage ?? {}),
+        positionKey: derivedKey,
+      };
+      logger.info(
+        { agentId: ctx.agentId, symbol: effectiveSymbol, positionKey: derivedKey, linkTier },
+        'Auto-linked protective watch to open position',
+      );
     }
 
     if (coverage?.targetPosition) {
       const { venue, symbol: posSymbol, side, instrumentId: targetInstrumentId } = coverage.targetPosition;
-      const isProtective = purpose ? (PROTECTIVE_WATCH_PURPOSES as readonly string[]).includes(purpose) : false;
 
       // Resolve against the agent's actual open positions.
       let matchedPosition: PositionInput | undefined;
+      let openPositions: ToolPositionRecord[] | undefined;
       if (ctx.botRepo) {
         try {
-          const openPositions = await ctx.botRepo.getOpenPositionsByCreator('agent', ctx.agentId);
+          openPositions = await ctx.botRepo.getOpenPositionsByCreator('agent', ctx.agentId);
+          // A caller-supplied instrumentId only narrows the match when the
+          // stored position carries one. Positions opened through decision
+          // intake store instrument_id = null, and a null must not veto an
+          // otherwise exact venue + symbol + side match.
           const matches = openPositions.filter(
             (p) => p.venue === venue && p.symbol === posSymbol && p.side === side &&
-              (!targetInstrumentId || p.instrumentId === targetInstrumentId),
+              (!targetInstrumentId || !p.instrumentId || p.instrumentId === targetInstrumentId),
           );
           if (matches.length === 1) {
             const match = matches[0]!;
@@ -444,7 +551,8 @@ const watchTokenTool: AgentTool<TradingToolContext> = {
             if (isProtective) {
               return {
                 success: false,
-                error: `Ambiguous target: ${matches.length} open positions match venue=${venue} symbol=${posSymbol} side=${side}. Cannot safely attach a protective watch — provide a more specific target (include instrumentId if available).`,
+                error: `Ambiguous target: ${matches.length} open positions match venue=${venue} symbol=${posSymbol} side=${side}. Cannot safely attach a protective watch — provide a more specific target (include instrumentId only if list_positions shows one).` +
+                  formatRetryCandidates(openPositions),
                 retryable: false,
                 fault: false,
               };
@@ -477,7 +585,8 @@ const watchTokenTool: AgentTool<TradingToolContext> = {
         // Reject ambiguous attachment — we cannot safely protect a position that doesn't exist.
         return {
           success: false,
-          error: `No open position found matching venue=${venue} symbol=${posSymbol} side=${side}. Protective watches must target an existing open position.`,
+          error: `No open position found matching venue=${venue} symbol=${posSymbol} side=${side}. Protective watches must target an existing open position.` +
+            (openPositions ? formatRetryCandidates(openPositions) : ''),
           retryable: false,
           fault: false,
         };
@@ -497,15 +606,17 @@ const watchTokenTool: AgentTool<TradingToolContext> = {
     // a resolved coverage positionKey is available, the watch can never
     // count as protective coverage — reject it rather than persisting a
     // false-success record.
-    if (
-      purpose &&
-      (PROTECTIVE_WATCH_PURPOSES as readonly string[]).includes(purpose) &&
-      !instrument?.instrumentId &&
-      !resolvedCoverage?.positionKey
-    ) {
+    //
+    // Both linkage branches above either set a positionKey or return early for
+    // protective purposes, so this guard is only reached when no position
+    // lookup is available (no botRepo in this context) and the instrument
+    // repo resolved nothing.
+    if (isProtective && !instrument?.instrumentId && !resolvedCoverage?.positionKey) {
       return {
         success: false,
-        error: `Protective watch (purpose=${purpose}) requires either a matching instrument identity or a resolvable target position. Create the position first, or use a non-protective purpose (e.g. "monitor", "alert") for manual tracking.`,
+        error: `Protective watch (purpose=${purpose}) requires either a matching instrument identity or a resolvable target position, ` +
+          'and neither is available here: no instrument matched the symbol and open positions cannot be looked up in this context. ' +
+          'Use a non-protective purpose (e.g. "monitor", "alert") for manual tracking.',
         retryable: false,
         fault: false,
       };
