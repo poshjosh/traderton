@@ -1,6 +1,6 @@
 # Plan: Author traderton's Privacy Policy & User Agreement (receiver for herobids trading-wording removal)
 
-Status: pending
+Status: done — all 6 tasks implemented, reviewed, and verified (unit + integration + boundary E2E + extra tests + site-isolation.sh + manual visual check all passing). See `002-clause-mapping.md` for the row-by-row coverage record.
 Owner: (unassigned)
 Repo of record: `traderton`
 Companion plan: `herobids/docs/features/pending/trading-wording-cleanup/001-plan.md` (depends on this plan landing first)
@@ -111,6 +111,17 @@ traderton, not "OpenAIdom").
    `assert "/legal/user-agreement" 200` (mirroring the existing `assert`
    calls for `/`, `/docs/`, `/status.html`) to both the offline route-shape
    check and the live-stack check.
+
+   > Note: landed as `assert "/legal/privacy-policy.html" 200` and
+   > `assert "/legal/user-agreement.html" 200` in the LIVE section only.
+   > Correction to this task's own wording: there is no "offline
+   > route-shape check" in this script to extend — the OFFLINE section
+   > only greps Caddyfile directives (guard presence, no-boundary-proxy),
+   > it contains no path-based route assertions at all. The `assert()`
+   > helper and all 200/404 route checks live exclusively in the LIVE
+   > section, which is where both new asserts were added, confirmed
+   > passing against the local compose stack
+   > (`docker compose -f infra/hetzner/compose.site-local.yaml up -d`).
 6. [DONE] **Record the clause mapping** in this plan's companion note (or a short
    `002-clause-mapping.md` in this same directory) listing herobids audit
    row numbers (#47–#60) against the corresponding traderton clause, so the
@@ -154,3 +165,22 @@ traderton, not "OpenAIdom").
   #47–#60.
 - herobids' trading-wording-cleanup plan can point to a published clause for
   each legal item it intends to remove.
+
+## Outstanding Issues
+
+From final code review (no CRITICAL/HIGH items remain open — the two HIGH
+findings, the task-5 note accuracy and the missing CHANGELOG entry, were
+fixed directly: see the task-5 note above and the `[Unreleased]` entry in
+`CHANGELOG.md`):
+
+- **[Item 6 — clause mapping]** The row #52/#57 "not a gap" judgment (grouping
+  headings carry no normative text, so flattening them into standalone
+  sections loses nothing) is a single-author call in `002-clause-mapping.md`.
+  Reasoning is sound and documented inline, but since herobids' Phase 3 plan
+  acts on this document to decide what legal text to delete, a second pass
+  (ideally from whoever implements the herobids side) re-checking rows #52
+  and #57 specifically is worth doing before Phase 3 content is deleted.
+- **[site/README.md]** Discoverability of the legal pages is footer-only (no
+  primary-nav entry) across every site page, per the reviewed task-3
+  decision to keep nav identical everywhere. Intentional, not a defect, but
+  noted here in case product wants a nav entry later.

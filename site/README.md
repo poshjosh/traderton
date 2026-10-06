@@ -14,8 +14,12 @@ site/
   index.html          # product identity / landing
   docs/index.html     # docs hub — links to the canonical docs/reference/* docs
   status.html         # static service status
+  legal/index.html    # legal hub (avoids a raw directory listing)
+  legal/privacy-policy.html   # trading data, venue disclosures, retention
+  legal/user-agreement.html   # trading decisions/risk, execution modes, liability
   assets/style.css    # shared styles
   Caddyfile.local     # file-server config for the local `site` container
+  Caddyfile.image     # file-server config baked into the staging site image
 ```
 
 The docs hub links to the canonical reference docs in the repo's
