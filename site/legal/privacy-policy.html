@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy — Traderton</title>
+    <meta
+      name="description"
+      content="Traderton's Privacy Policy: what trading data we process on behalf of connected operator platforms, our trading venue disclosures, and regulatory retention of trading records."
+    />
+    <link rel="stylesheet" href="/assets/style.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary">
+        <a class="brand" href="/">Traderton</a>
+        <ul>
+          <li><a href="/docs/">Docs</a></li>
+          <li><a href="/status.html">Status</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main id="main">
+      <h1>Privacy Policy</h1>
+      <p class="lede">
+        Last updated: 2026-08-19
+      </p>
+
+      <p>
+        Traderton ("we", "our", or "us") provides trading infrastructure for
+        AI/LLM agents: venue integrations, order execution, risk enforcement,
+        and reconciliation, exposed to connected operator platforms over a
+        secure, machine-to-machine boundary. This policy explains what
+        trading data we process on behalf of a connected operator platform
+        and why. It covers only what Traderton itself handles — receiving
+        signed tool invocations, executing and reconciling against trading
+        venues, and storing positions and fills. It does not cover the
+        account, authentication, or LLM data handling of any operator
+        platform that integrates with Traderton; that is governed by the
+        operator platform's own privacy policy.
+      </p>
+
+      <section aria-labelledby="trading-data-heading">
+        <h2 id="trading-data-heading">Trading data</h2>
+        <p>
+          On behalf of the connected operator platform, Traderton processes:
+        </p>
+        <ul class="feature-list">
+          <li>
+            <strong>Trading activity</strong> (orders, fills, positions, P&amp;L)
+            — needed to execute orders, enforce risk limits, and reconcile
+            positions against the venue.
+          </li>
+        </ul>
+        <p>
+          We use this data for:
+        </p>
+        <ul class="feature-list">
+          <li>
+            <strong>Execution</strong> — submitting and tracking orders
+            against the connected trading venue.
+          </li>
+          <li>
+            <strong>Risk</strong> — enforcing risk limits before and after
+            orders are placed.
+          </li>
+          <li>
+            <strong>Reconciliation</strong> — keeping stored positions and
+            fills consistent with what the venue reports, so downstream state
+            stays trustworthy.
+          </li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="storage-heading">
+        <h2 id="storage-heading">Data storage</h2>
+        <p>
+          Trading records (orders, fills, positions) are stored in persistent
+          database storage so that execution, risk, and reconciliation can
+          operate against a consistent record. All data is encrypted in
+          transit (TLS) and at rest.
+        </p>
+      </section>
+
+      <section aria-labelledby="venues-heading">
+        <h2 id="venues-heading">Trading venues</h2>
+        <p>
+          Orders are submitted to the trading venues Traderton integrates:
+          <strong>Hyperliquid</strong>, <strong>Bybit</strong>,
+          <strong>Jupiter</strong>, and <strong>1inch</strong>. Only the order
+          data required to execute, track, and reconcile a trade is
+          transmitted to the relevant venue.
+        </p>
+      </section>
+
+      <section aria-labelledby="retention-heading">
+        <h2 id="retention-heading">Retention and deletion</h2>
+        <p>
+          Trading records required for regulatory compliance may be retained
+          even after a deletion request from the connected operator platform.
+        </p>
+      </section>
+
+      <section aria-labelledby="contact-heading">
+        <h2 id="contact-heading">Contact</h2>
+        <p>
+          For privacy-related questions about Traderton, contact us at
+          <strong><a href="mailto:support@traderton.com">support@traderton.com</a></strong>.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Traderton — the trading product. Agent hosting is provided separately.</p>
+      <p>
+        <a href="/legal/privacy-policy.html">Privacy Policy</a> ·
+        <a href="/legal/user-agreement.html">User Agreement</a>
+      </p>
+    </footer>
+  </body>
+</html>

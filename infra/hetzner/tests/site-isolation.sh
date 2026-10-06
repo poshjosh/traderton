@@ -126,6 +126,8 @@ assert() { # path expected
 assert "/" 200
 assert "/docs/" 200
 assert "/status.html" 200
+assert "/legal/privacy-policy.html" 200
+assert "/legal/user-agreement.html" 200
 assert "/health" 404
 assert "/health/ready" 404
 assert "/internal" 404
