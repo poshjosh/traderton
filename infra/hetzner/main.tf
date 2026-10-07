@@ -91,7 +91,7 @@ resource "hcloud_server" "staging" {
   location     = var.location
   ssh_keys     = [hcloud_ssh_key.staging.id]
   firewall_ids = [hcloud_firewall.staging.id]
-  user_data    = templatefile("${path.module}/cloud-init.sh.tftpl", {})
+  user_data    = templatefile("${path.module}/cloud-init.sh.tftpl", { environment = var.environment })
   labels       = { environment = var.environment, app = "traderton" }
 }
 

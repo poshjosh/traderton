@@ -43,7 +43,7 @@ grep -Fq 'RUNTIME_FILES=(' scripts/deploy.sh
 grep -Fq 'terraform_output -raw public_ip' scripts/deploy.sh
 grep -Fq 'scp ' scripts/deploy.sh
 grep -Fq '_ssh_opts.sh' scripts/deploy.sh
-grep -Fq './deploy-on-host.sh --confirm-staging' scripts/deploy.sh
+grep -Fq './deploy-on-host.sh --confirm-${TRADERTON_ENV}' scripts/deploy.sh
 # The deploy outcome must be unmistakable: an explicit success banner, plus an
 # ERR trap so a failed/partial deploy never looks like a silent clean exit.
 grep -Fq '==> Deploy succeeded' scripts/deploy.sh
@@ -64,14 +64,15 @@ done
 # boundary (same SHA-tag model, pulled and brought up, caddy depends on it).
 grep -Fq 'site_image="ghcr.io/${ghcr_username}/traderton-site:sha-${release_sha}"' deploy-on-host.sh
 grep -Fq 'export SITE_IMAGE="$site_image"' deploy-on-host.sh
-grep -Fq 'docker compose --env-file .env.staging pull postgres redis boundary site caddy' deploy-on-host.sh
-grep -Fq 'docker compose --env-file .env.staging up -d site' deploy-on-host.sh
+grep -Fq 'docker compose --env-file .env pull postgres redis boundary site caddy' deploy-on-host.sh
+grep -Fq 'docker compose --env-file .env up -d site' deploy-on-host.sh
 
 private_ip=10.77.1.20
 export POSTGRES_PASSWORD=fixture
 export DATABASE_URL=postgres://traderton:fixture@postgres:5432/traderton
 export BOUNDARY_IMAGE="ghcr.io/poshjosh/traderton:sha-0123456789012345678901234567890123456789"
 export SITE_IMAGE="ghcr.io/poshjosh/traderton-site:sha-0123456789012345678901234567890123456789"
+export NODE_ENV=staging
 COMPOSE_PROFILES=migrate docker compose -f compose.yaml config --no-env-resolution --format json | jq -e -r '
   (.services.boundary | has("ports") | not) and
   .services.boundary.expose == ["8080"] and

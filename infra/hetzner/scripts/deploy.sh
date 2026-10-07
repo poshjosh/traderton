@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy.sh — push the Traderton staging runtime to the VM and run the on-host
+# deploy.sh — push the Traderton runtime to the VM and run the on-host
 # deploy. Runs from your laptop; the on-VM deploy-on-host.sh does the actual
 # compose lifecycle. Mirrors the Herobids local → remote deploy convention.
 #
@@ -8,8 +8,8 @@
 #             [--backend-env-file <path>] [--ssh-key <path>] \
 #             [--release-sha <40-character SHA>]
 #
-# The VM public IP is resolved from `terraform output public_ip` (the staging
-# workspace). `.env.staging` and `.env.backup` are copied from --env-file /
+# The VM public IP is resolved from `terraform output public_ip` (the
+# <env> workspace). `.env.<env>` and `.env.backup` are copied from --env-file /
 # their default paths; the directory of runtime files is copied from
 # infra/hetzner/, excluding anything with secrets or Terraform state.
 set -euo pipefail
@@ -21,19 +21,26 @@ source "${SCRIPT_DIR}/_ssh_opts.sh"
 # Make failure unmistakable: on any non-zero exit, print an explicit banner
 # naming the failing line so a half-finished deploy is never mistaken for a
 # success. The success banner at the end clears the trap.
-trap 'echo "==> Deploy FAILED (exit $? at line $LINENO) — staging may be in a partial state; re-run after fixing" >&2' ERR
+trap 'echo "==> Deploy FAILED (exit $? at line $LINENO) — ${TRADERTON_ENV} may be in a partial state; re-run after fixing" >&2' ERR
 
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-${PWD}/.env.terraform}"
-ENV_FILE="${PWD}/.env.staging"
 BACKUP_ENV_FILE="${PWD}/.env.backup"
 RELEASE_SHA=""
+ENV_FILE_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --env)
-      TRADERTON_ENV="${2:-}"; [[ -n "$TRADERTON_ENV" ]] || { echo 'ERROR: --env requires a value' >&2; exit 2; }; shift 2;;
+      TRADERTON_ENV="${2:-}"; [[ -n "$TRADERTON_ENV" ]] || { echo 'ERROR: --env requires a value' >&2; exit 2; }
+      case "$TRADERTON_ENV" in
+        staging|production) ;;
+        *) echo "ERROR: Unknown TRADERTON_ENV=${TRADERTON_ENV}. Must be staging or production." >&2; exit 1;;
+      esac
+      export TRADERTON_ENV
+      resolve_ssh_key
+      shift 2;;
     --env-file)
-      ENV_FILE="${2:-}"; [[ -n "$ENV_FILE" ]] || { echo 'ERROR: --env-file requires a path' >&2; exit 2; }; shift 2;;
+      ENV_FILE_OVERRIDE="${2:-}"; [[ -n "$ENV_FILE_OVERRIDE" ]] || { echo 'ERROR: --env-file requires a path' >&2; exit 2; }; shift 2;;
     --backend-env-file)
       BACKEND_ENV_FILE="${2:-}"; [[ -n "$BACKEND_ENV_FILE" ]] || { echo 'ERROR: --backend-env-file requires a path' >&2; exit 2; }; shift 2;;
     --ssh-key)
@@ -44,6 +51,10 @@ while [[ $# -gt 0 ]]; do
       echo "ERROR: Unknown option: $1" >&2; exit 2;;
   esac
 done
+
+# ENV_FILE depends on TRADERTON_ENV, which --env (above) or _ssh_opts.sh's
+# default may set — resolve it only now that argument parsing is complete.
+ENV_FILE="${ENV_FILE_OVERRIDE:-${PWD}/.env.${TRADERTON_ENV}}"
 
 # When no explicit --release-sha is given, resolve the pushed HEAD and wait for
 # the matching GitHub "Build and Push" run to complete, then use its SHA. This
@@ -69,10 +80,10 @@ resolve_ssh_key
 IP=$(terraform_output -raw public_ip)
 [[ "$IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "ERROR: could not resolve public_ip (got '$IP')" >&2; exit 1; }
 
-# The runtime files that must live in /opt/traderton/staging — explicit list,
+# The runtime files that must live in /opt/traderton/<env> — explicit list,
 # never a blanket copy, so secrets and Terraform state are never uploaded.
 RUNTIME_FILES=(
-  Caddyfile.staging compose.yaml deploy-on-host.sh
+  "Caddyfile.${TRADERTON_ENV}" compose.yaml deploy-on-host.sh
   mount-data.sh backup.sh backup-job.sh backup-alert.sh backup-health.sh check-backup-success.sh
   docker-data.conf
   traderton-data.service traderton-backup.service traderton-backup-alert.service
@@ -81,21 +92,21 @@ RUNTIME_FILES=(
 [[ -f "$ENV_FILE" ]] || { echo "ERROR: $ENV_FILE not found (create from .env.environment.example)" >&2; exit 1; }
 
 scp_args=(${SSH_OPTS})
-REMOTE="root@${IP}:/opt/traderton/staging/"
+REMOTE="root@${IP}:/opt/traderton/${TRADERTON_ENV}/"
 echo "==> Uploading runtime files to ${REMOTE}"
 scp "${scp_args[@]}" "${RUNTIME_FILES[@]/#/$PWD/}" "${REMOTE}"
 
-echo "==> Uploading .env.staging (mode 600) to root@${IP}:/opt/traderton/staging/.env.staging"
-scp "${scp_args[@]}" "$ENV_FILE" "root@${IP}:/opt/traderton/staging/.env.staging"
+echo "==> Uploading .env.${TRADERTON_ENV} (mode 600) to root@${IP}:/opt/traderton/${TRADERTON_ENV}/.env.${TRADERTON_ENV}"
+scp "${scp_args[@]}" "$ENV_FILE" "root@${IP}:/opt/traderton/${TRADERTON_ENV}/.env.${TRADERTON_ENV}"
 if [[ -f "$BACKUP_ENV_FILE" ]]; then
   echo "==> Uploading .env.backup"
-  scp "${scp_args[@]}" "$BACKUP_ENV_FILE" "root@${IP}:/opt/traderton/staging/.env.backup"
+  scp "${scp_args[@]}" "$BACKUP_ENV_FILE" "root@${IP}:/opt/traderton/${TRADERTON_ENV}/.env.backup"
 fi
 
-echo "==> Running on-host deploy (--confirm-staging ${RELEASE_SHA})"
+echo "==> Running on-host deploy (--confirm-${TRADERTON_ENV} ${RELEASE_SHA})"
 ssh "${scp_args[@]}" "root@${IP}" \
-  "cd /opt/traderton/staging && chmod 600 .env.staging && ./deploy-on-host.sh --confirm-staging ${RELEASE_SHA}"
+  "cd /opt/traderton/${TRADERTON_ENV} && chmod 600 .env.${TRADERTON_ENV} && ./deploy-on-host.sh --confirm-${TRADERTON_ENV} ${RELEASE_SHA}"
 
 # Reached only when the SSH on-host deploy exited 0 (set -e aborts otherwise).
 trap - ERR
-echo "==> Deploy succeeded: ${TRADERTON_ENV:-staging} is running release ${RELEASE_SHA} at https://${IP}"
+echo "==> Deploy succeeded: ${TRADERTON_ENV} is running release ${RELEASE_SHA} at https://${IP}"

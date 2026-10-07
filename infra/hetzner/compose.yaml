@@ -31,7 +31,7 @@ services:
     command: ["pnpm", "--filter", "@traderton/db", "db:migrate"]
     environment:
       DATABASE_URL: ${DATABASE_URL:?Database URL required}
-      NODE_ENV: staging
+      NODE_ENV: ${NODE_ENV}
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,12 +40,12 @@ services:
   boundary:
     image: ${BOUNDARY_IMAGE:?Boundary image required}
     restart: unless-stopped
-    env_file: .env.staging
+    env_file: .env
     environment:
       BOUNDARY_HOST: 0.0.0.0
       BOUNDARY_PORT: "8080"
       # DATABASE_URL is derived by deploy.sh (URL-encoded POSTGRES_PASSWORD) and
-      # exported there — it is NOT committed in .env.staging. Without this, the
+      # exported there — it is NOT committed in .env.<env>. Without this, the
       # boundary falls back to config/default.yaml's localhost URL and cannot
       # reach Postgres on the compose network.
       DATABASE_URL: ${DATABASE_URL:?Database URL required}
@@ -75,7 +75,7 @@ services:
     restart: unless-stopped
     # No host port: reachable only via caddy on the compose network. The site
     # carries no execution surface; the edge Caddy owns the /internal* +
-    # /health* → 404 guard (Caddyfile.staging).
+    # /health* → 404 guard (Caddyfile.<env>, materialized as ./Caddyfile).
     expose:
       - "80"
     # Hardened, but Caddy binds :80 via a file capability (NET_BIND_SERVICE) on
@@ -101,7 +101,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

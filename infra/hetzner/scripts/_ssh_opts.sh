@@ -7,7 +7,8 @@
 #
 # Environment variables:
 #   TRADERTON_SSH_KEY     Override path to the SSH private key (optional).
-#                          If unset, defaults to ~/.ssh/traderton_deploy_staging_key.
+#                          If unset, defaults to ~/.ssh/traderton_deploy_${TRADERTON_ENV}_key
+#                          (e.g. traderton_deploy_staging_key or traderton_deploy_production_key).
 #   TRADERTON_ENV         Deployment environment: staging | production (default: staging).
 #
 # Scripts that accept --env can call parse_env_flag() to set TRADERTON_ENV.
@@ -24,7 +25,7 @@ resolve_ssh_key() {
   if [[ "${_TRADERTON_SSH_KEY_USER_SET:-}" == "1" ]]; then
     _KEY="${TRADERTON_SSH_KEY:-}"
   else
-    _KEY="${HOME}/.ssh/traderton_deploy_staging_key"
+    _KEY="${HOME}/.ssh/traderton_deploy_${TRADERTON_ENV}_key"
   fi
 
   SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
@@ -90,15 +91,31 @@ parse_env_flag() {
 
 # terraform_output — workspace-aware terraform output wrapper.
 # Usage: terraform_output [-raw] <output_name>
-# Runs in a subshell from TF_DIR, selects the correct workspace first.
+# Runs in a subshell from TF_DIR. Each environment's state lives at a
+# different S3 key (traderton/<env>/terraform.tfstate, see plan-apply.sh), so
+# this must (re-)init the backend for TRADERTON_ENV before selecting the
+# workspace, every call — otherwise whichever env was last plan-apply.sh'd on
+# this machine is the only one visible, and the other fails with a misleading
+# "workspace does not exist" error. Mirrors plan-apply.sh's init pattern
+# exactly. Not cached: running init on every call is fine here.
 terraform_output() {
   (
     cd "${TF_DIR}" || { echo "ERROR: Cannot access terraform directory ${TF_DIR}" >&2; exit 1; }
-    terraform workspace select "${TRADERTON_ENV}" >/dev/null 2>&1 || {
-      echo "ERROR: Terraform workspace '${TRADERTON_ENV}' does not exist." >&2
-      echo "Run plan-apply.sh --env ${TRADERTON_ENV} first to create it." >&2
-      exit 1
-    }
+
+    [[ -n "${TF_BACKEND_BUCKET:-}" ]] || { echo 'ERROR: TF_BACKEND_BUCKET is not set (source .env.terraform first).' >&2; exit 1; }
+    local _tf_backend_region="${TF_BACKEND_REGION:-us-east-1}"
+
+    local init_args=(-input=false -reconfigure
+      "-backend-config=bucket=${TF_BACKEND_BUCKET}"
+      "-backend-config=key=traderton/${TRADERTON_ENV}/terraform.tfstate"
+      "-backend-config=region=${_tf_backend_region}"
+    )
+    if [[ -n "${TF_BACKEND_DYNAMODB_TABLE:-}" ]]; then
+      init_args+=("-backend-config=dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}")
+    fi
+    terraform init "${init_args[@]}" >/dev/null
+
+    terraform workspace select "${TRADERTON_ENV}" >/dev/null 2>&1 || terraform workspace new "${TRADERTON_ENV}" >/dev/null
     terraform output "$@"
   )
 }
