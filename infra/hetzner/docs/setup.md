@@ -137,30 +137,44 @@ will fail until it resolves.
 
 ## Phase 5 - Deploy
 
-> ⚠️ **Environment support caveat (as of this writing).** The deploy scripts
-> are currently **hard-wired to staging** and will NOT deploy production
-> unmodified:
-> - `cloud-init.sh.tftpl` always creates `/etc/traderton-staging/host-marker`
->   and `/opt/traderton/staging` regardless of `environment`, and does not set
->   the VM hostname.
-> - `deploy-on-host.sh` guards on `hostname -s == traderton-staging` and
->   `/etc/traderton-staging/host-marker`, reads only `.env.staging`, writes
->   `/etc/traderton-staging/release-sha`, and accepts only `--confirm-staging`.
-> - `scripts/deploy.sh` uploads to `/opt/traderton/staging/`, ships
->   `.env.staging` + `Caddyfile.staging`, and calls `--confirm-staging`.
->
-> On a production VM the server hostname is `traderton-production`, so
-> `deploy-on-host.sh`'s hostname guard fails and the deploy aborts before
-> starting any containers. Deploying production requires first parameterising
-> these scripts by `<env>` (host marker path, hostname check, env-file name,
-> release-sha path, confirm flag, Caddyfile, and the `/opt/traderton/<env>`
-> upload target) and adding a `Caddyfile.production`. Until that work lands,
-> treat production Phase 5 as blocked. The steps below describe the intended
-> env-parameterised flow.
+The deploy scripts are parameterised by `<env>` end to end: `scripts/deploy.sh`
+uploads `.env.<env>` and `Caddyfile.<env>` under their real names, then
+`deploy-on-host.sh` (on the VM) copies them to fixed names (`.env`,
+`Caddyfile`) before running `docker compose`, so `compose.yaml` itself never
+needs to know which environment it's running in. `cloud-init.sh.tftpl` takes
+an `environment` template variable for the marker/opt paths; the VM hostname
+itself comes from `hcloud_server.staging`'s `name = "traderton-${var.environment}"`
+attribute, not from cloud-init. Both staging and production can be deployed
+with the same commands below.
+
+> **Changing `cloud-init.sh.tftpl` or any Terraform variable that feeds it
+> forces a VM replacement.** `user_data` is immutable on Hetzner and there is
+> no `ignore_changes` rule on `hcloud_server.staging`, so the next
+> `plan-apply.sh` after such a change destroys and recreates the server. The
+> data volume (`hcloud_volume.data`) has `prevent_destroy = true` and is
+> reattached to the new server automatically — Postgres/Redis data survives —
+> but anything else on the VM's root disk (e.g. Caddy's TLS cache under
+> `caddy_data`/`caddy_config`, which are Docker volumes and also survive, but
+> any non-volume state does not) is lost. The public IP is often — but not
+> guaranteed to be — reused by Hetzner; re-run Phase 4's `dig` check after a
+> replacement to confirm the A records still point at the right IP, and clear
+> the stale SSH host key before connecting:
+> ```sh
+> ssh-keygen -R <public_ip>
+> ```
 
 - **Set `GHCR_USERNAME` and `GHCR_TOKEN` in `.env.<env>`** to a GitHub token with `read:packages` scope, so `deploy-on-host.sh` can `docker login ghcr.io` and pull the private image. See the "Image Build And Registry" section of `traderton/infra/hetzner/README.md`.
 
 - **Set `NODE_ENV` correctly in `.env.<env>`** — it must be `production` for the production environment (not `staging`). `deploy-on-host.sh` hard-fails if any of these eight keys is missing or empty: `POSTGRES_PASSWORD`, `REDIS_URL`, `BOUNDARY_CONSUMER_ID`, `BOUNDARY_KEY_ID`, `BOUNDARY_SIGNING_SECRET`, `CREDENTIAL_ENCRYPTION_KEY` (64 hex chars), `GHCR_USERNAME`, and `GHCR_TOKEN` (the last two are the same credentials as the previous bullet). `NODE_ENV` itself is consumed as the config overlay, not in that hard-fail check — but it must still be correct for the environment.
+
+  **Verify `CREDENTIAL_ENCRYPTION_KEY` locally before deploying** — a wrong value only surfaces as a VM-side failure after the upload, costing a full round trip:
+  ```sh
+  val=$(sed -n 's/^CREDENTIAL_ENCRYPTION_KEY=//p' infra/hetzner/.env.<env>)
+  [[ ${#val} -eq 64 && "$val" =~ ^[0-9a-fA-F]+$ ]] && echo OK || echo "BAD: not 64 hex chars"
+  ```
+  Generate a fresh one with `openssl rand -hex 32`. This key must stay stable
+  once set — rotating it makes previously stored venue credentials
+  undecryptable.
 
 - **Commit any changes, then push to main.** (If `origin/main` already contains the commit you intend to deploy, no push is needed — the image for that SHA is already built.)
 
@@ -185,19 +199,27 @@ It resolves the VM IP via `terraform output -raw public_ip`, copies the runtime
 files + `.env.<env>` (mode 600) + `.env.backup` to `/opt/traderton/<env>` over
 SSH, then runs the on-VM `./deploy-on-host.sh --confirm-<env> <sha>`.
 
-- **Verify Traderton is up.** Once DNS resolves and Caddy has issued TLS:
+- **Verify Traderton is up.** Once DNS resolves and Caddy has issued TLS, using
+  that environment's `api_hostname` (production: `api.traderton.com`; staging:
+  `api.staging.traderton.com`):
 
 ```sh
-curl https://api.traderton.com/health/ready -v
+curl https://<api_hostname>/health/ready -v
 ```
 
 Expect HTTP 200. Before DNS is live you can bypass it with `--resolve`:
 
 ```sh
-curl --resolve "api.traderton.com:443:<public_ip>" https://api.traderton.com/health/ready -v
+curl --resolve "<api_hostname>:443:<public_ip>" https://<api_hostname>/health/ready -v
 # note: TLS will only succeed once Caddy has issued a cert, which itself needs
 # public DNS pointing at the VM, so --resolve is mainly a post-DNS sanity check.
 ```
+
+> If a deploy fails with an unexpected/stale-looking value in `.env.<env>` even
+> after you've just fixed it locally, re-run from a **fresh shell** (don't
+> reuse a long-running terminal/background job started before the fix) — a
+> stale shell can re-upload a cached copy of the file instead of what's
+> actually on disk now.
 
 Optional live boundary test (staging only):
 
