@@ -1,5 +1,8 @@
 # Traderton useful commands
 
+- staging ip = 2.28.19.89
+- production ip = 2.31.19.195
+
 ## Integration tests
 
 ### staging
