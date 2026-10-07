@@ -6,6 +6,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## 0.1.1-2026.10.07
+## 0.1.0-2026.10.06
+
 ### Added
 
 - **Legal pages on the public site.** `site/legal/privacy-policy.html` and `site/legal/user-agreement.html` carry the trading-specific legal clauses (trading data, venue disclosures, regulatory retention, trading decisions/risk, no-advice/no-guarantees, Test/Live execution-mode definitions, limitation of liability) so Traderton — as the actual trading-infrastructure provider — owns this disclosure rather than the operator platform (herobids). Linked from the footer of every site page; a `legal/index.html` avoids a raw directory listing. `infra/hetzner/tests/site-isolation.sh` asserts both routes return 200. A clause-by-clause mapping against herobids' `trading-wording-audit.md` rows #47–#60 is recorded in `docs/features/pending/trading-legal-pages-and-wording-receiver/002-clause-mapping.md`, confirming full coverage so herobids can safely remove the equivalent clauses from its own legal pages.
