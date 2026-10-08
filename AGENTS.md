@@ -53,6 +53,17 @@ pnpm test:integration   # integration suite (requires its documented services)
 - Keep operator/deploy configuration separate from trading/instance settings;
   consult [configuration best practices](./docs/best-practices/configuration.md)
   before changing either.
+- Investigate before fixing: read the related docs, search `docs/bug-reports/`
+  by keyword (error text, script/function names), and read `git log` for the
+  affected files. Check whether a recent fix, cleanup, or state change
+  interacted with this one.
+- Never mutate shared infrastructure state while investigating: no Terraform
+  command that can write to the S3 backend (`apply`, `workspace new`, or
+  `output`/`init` against a made-up workspace), no remote-backend init beyond
+  what `infra/hetzner/README.md` allows, without user approval.
+- `infra/hetzner` Terraform always runs in the env's own data dir,
+  `TF_DATA_DIR=.terraform-envs/<env>`, never the shared `.terraform/`. See
+  `docs/bug-reports/2026/10/08/001-terraform-output-shares-data-dir-across-envs.md`.
 
 ## Code Conventions
 

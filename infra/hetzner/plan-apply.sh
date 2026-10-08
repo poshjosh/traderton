@@ -69,6 +69,20 @@ if [[ -f "$BACKEND_ENV_FILE" ]]; then
   set +a
 fi
 
+# Terraform environment isolation (after sourcing, so the backend file cannot
+# reintroduce these). An inherited TF_WORKSPACE would override the workspace;
+# TF_CLI_ARGS* would inject arguments into every command.
+unset TF_WORKSPACE TF_CLI_ARGS TF_CLI_ARGS_init TF_CLI_ARGS_workspace
+unset TF_CLI_ARGS_plan TF_CLI_ARGS_show TF_CLI_ARGS_apply
+# One data dir per env (same as terraform_output in scripts/_ssh_opts.sh).
+# The shared .terraform/ kept the other env's workspace selection, which init
+# then rejected against this env's key. See
+# docs/bug-reports/2026/10/08/001-terraform-output-shares-data-dir-across-envs.md.
+export TF_DATA_DIR=".terraform-envs/${ENVIRONMENT}"
+# Start from "default" (always exists under any key) so a remembered selection
+# whose workspace no longer exists cannot abort init before we create it.
+rm -f "${TF_DATA_DIR}/environment"
+
 for command_name in terraform jq; do
   command -v "$command_name" >/dev/null 2>&1 || { echo "ERROR: ${command_name} is required." >&2; exit 1; }
 done

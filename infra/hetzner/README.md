@@ -13,8 +13,8 @@ end-to-end runbook, follow [`docs/setup.md`](./docs/setup.md).
 | Artifact | Purpose |
 | --- | --- |
 | `main.tf`, `backend.tf`, `environment.tfvars.example` | Terraform: Hetzner VM, firewall, data volume; S3 remote state + DynamoDB locking. Environment selected by `--env`, which picks `<env>.tfvars`, the workspace, and state key `traderton/<env>/terraform.tfstate`. |
-| `plan-apply.sh` | `init` → `workspace` → `plan` (review) → `apply`, with an interactive confirm + `--yes`. Mirrors Herobids `provision.sh`; only extra guard is a bold warning when the plan DESTROYS resources. |
-| `scripts/deploy.sh` | Local helper: resolves the VM IP via `terraform output public_ip`, scp's the runtime files + `.env.staging` + `.env.backup`, then runs the on-host deploy. |
+| `plan-apply.sh` | `init` → `workspace` (select or create) → `plan` (review) → `apply`, with an interactive confirm + `--yes`. Mirrors Herobids `provision.sh`; only extra guard is a bold warning when the plan DESTROYS resources. |
+| `scripts/deploy.sh` | Local helper: resolves the VM IP via `terraform_output -raw public_ip` (`scripts/_ssh_opts.sh`; read-only, never creates a workspace), scp's the runtime files + `.env.<env>` + `.env.backup`, then runs the on-host deploy. |
 | `deploy-on-host.sh` | Runs **on the VM**: verifies host/marker, `docker login ghcr.io`, pulls and starts Postgres/Redis/boundary, applies migrations, checks readiness. |
 | `compose.yaml`, `Caddyfile.staging` | Runtime stack: Postgres/Redis/boundary + Caddy TLS (port 80/443). The boundary publishes no host port — reachable only through Caddy. |
 | `cloud-init.sh.tftpl` | First-boot provisioning: Docker, Compose, restic, UFW (22/80/443). |
@@ -41,6 +41,14 @@ per-environment subdirectory. The same `main.tf`/`compose.yaml`/`Caddyfile`
 serve every environment, differing only through `<env>.tfvars` and the runtime
 `.env.*` files. See [`docs/setup.md`](./docs/setup.md) for the exact inputs.
 
+Terraform's local data dir is per environment as well: `plan-apply.sh` and
+`terraform_output` use `infra/hetzner/.terraform-envs/<env>/` (gitignored),
+never the shared `.terraform/`. The S3 key is fixed at `init` time, and `init`
+rejects a workspace selection left over from the other env. For a manual
+session, use the same dir, e.g.
+`TF_DATA_DIR=.terraform-envs/staging terraform output -raw public_ip` after a
+`plan-apply.sh --env staging` run.
+
 ## Variables
 
 See `environment.tfvars.example` for the full, commented set. Key inputs:
@@ -56,6 +64,7 @@ terraform -chdir=infra/hetzner fmt -check
 terraform -chdir=infra/hetzner validate -no-color
 terraform -chdir=infra/hetzner test -no-color
 bash infra/hetzner/tests/offline-guards.sh
+bash infra/hetzner/tests/terraform-env-isolation.sh
 python3 -m unittest discover -s infra/hetzner/tests -p 'test_*.py'
 ```
 

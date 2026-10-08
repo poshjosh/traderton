@@ -56,7 +56,7 @@ if awk '/RUNTIME_FILES=\(/{f=1} f{print} f&&/\)/{exit}' scripts/deploy.sh | grep
   echo 'Deploy helper must not upload Terraform state, tfvars, or real env files' >&2
   exit 1
 fi
-for script in deploy-on-host.sh scripts/deploy.sh backup.sh backup-job.sh backup-alert.sh backup-health.sh check-backup-success.sh plan-apply.sh mount-data.sh cloud-init.sh.tftpl; do
+for script in deploy-on-host.sh scripts/deploy.sh scripts/_ssh_opts.sh backup.sh backup-job.sh backup-alert.sh backup-health.sh check-backup-success.sh plan-apply.sh mount-data.sh cloud-init.sh.tftpl tests/terraform-env-isolation.sh; do
   bash -n "$script"
 done
 

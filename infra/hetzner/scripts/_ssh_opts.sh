@@ -96,8 +96,18 @@ parse_env_flag() {
 # this must (re-)init the backend for TRADERTON_ENV before selecting the
 # workspace, every call — otherwise whichever env was last plan-apply.sh'd on
 # this machine is the only one visible, and the other fails with a misleading
-# "workspace does not exist" error. Mirrors plan-apply.sh's init pattern
-# exactly. Not cached: running init on every call is fine here.
+# "workspace does not exist" error. Not cached: running init on every call is
+# fine here.
+# Each env uses its own TF_DATA_DIR (.terraform-envs/<env>, same as
+# plan-apply.sh) instead of the shared .terraform/. `init` checks the locally
+# selected workspace against the new key, so re-initing the shared dir while
+# it still selected the other env aborted ("Currently selected workspace
+# "production" does not exist"). Inherited TF_WORKSPACE / TF_CLI_ARGS* are
+# cleared so they cannot override the selection or inject arguments.
+# `workspace select` only, never `new`: a read must not
+# create backend state (and `terraform output` in a missing workspace writes
+# an empty state object to S3). See
+# docs/bug-reports/2026/10/08/001-terraform-output-shares-data-dir-across-envs.md.
 terraform_output() {
   (
     cd "${TF_DIR}" || { echo "ERROR: Cannot access terraform directory ${TF_DIR}" >&2; exit 1; }
@@ -113,9 +123,19 @@ terraform_output() {
     if [[ -n "${TF_BACKEND_DYNAMODB_TABLE:-}" ]]; then
       init_args+=("-backend-config=dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}")
     fi
-    terraform init "${init_args[@]}" >/dev/null
+    # Relative to TF_DIR (we cd'ed above). Gitignored.
+    export TF_DATA_DIR=".terraform-envs/${TRADERTON_ENV}"
+    unset TF_WORKSPACE TF_CLI_ARGS TF_CLI_ARGS_init TF_CLI_ARGS_workspace TF_CLI_ARGS_output
+    terraform init "${init_args[@]}" >/dev/null || {
+      echo "ERROR: terraform init failed for backend key traderton/${TRADERTON_ENV}/terraform.tfstate (TF_DATA_DIR=${TF_DIR}/${TF_DATA_DIR})." >&2
+      exit 1
+    }
 
-    terraform workspace select "${TRADERTON_ENV}" >/dev/null 2>&1 || terraform workspace new "${TRADERTON_ENV}" >/dev/null
+    terraform workspace select "${TRADERTON_ENV}" >/dev/null 2>&1 || {
+      echo "ERROR: Terraform workspace '${TRADERTON_ENV}' does not exist." >&2
+      echo "Run plan-apply.sh --env ${TRADERTON_ENV} first to create it." >&2
+      exit 1
+    }
     terraform output "$@"
   )
 }

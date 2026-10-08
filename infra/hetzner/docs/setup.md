@@ -93,7 +93,8 @@ Get the public IP (use `-raw` to get an unquoted value you can pass to `dig`,
 `scp`, etc.):
 
 ```sh
-terraform output -raw public_ip
+# from infra/hetzner; plan-apply.sh keeps each env's Terraform data dir in .terraform-envs/<env>
+TF_DATA_DIR=.terraform-envs/<env> terraform output -raw public_ip
 ```
 
 ## Phase 4 - Setup Domain Records (A and AAAA)
@@ -195,7 +196,7 @@ bash scripts/deploy.sh --env <env>
 # or pin a known-built commit: bash scripts/deploy.sh --env <env> --release-sha <40-hex-sha>
 ```
 
-It resolves the VM IP via `terraform output -raw public_ip`, copies the runtime
+It resolves the VM IP via `terraform_output -raw public_ip` (env's own data dir, read-only), copies the runtime
 files + `.env.<env>` (mode 600) + `.env.backup` to `/opt/traderton/<env>` over
 SSH, then runs the on-VM `./deploy-on-host.sh --confirm-<env> <sha>`.
 
