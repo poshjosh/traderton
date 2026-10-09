@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+## 0.1.2-2026.10.09
+
 ### Fixed
 - **Staging and production Terraform runs no longer trip over each other on the operator machine.** `terraform_output` (used by `scripts/deploy.sh`) and `plan-apply.sh` re-inited the shared `infra/hetzner/.terraform/` with the env's state key. `init` then rejected the other env's leftover workspace selection (`Currently selected workspace "production" does not exist`). Both now use a per-env data dir, `infra/hetzner/.terraform-envs/<env>/` (gitignored), and ignore inherited `TF_WORKSPACE` / `TF_CLI_ARGS*`. `terraform_output` no longer creates a missing workspace; it tells you to run `plan-apply.sh` first. New offline test `infra/hetzner/tests/terraform-env-isolation.sh`. See `docs/bug-reports/2026/10/08/001-terraform-output-shares-data-dir-across-envs.md`.
 
