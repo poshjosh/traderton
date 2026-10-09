@@ -14,6 +14,12 @@
 #   scripts/shell/ops/release.sh --all            # run all tests, no version bump
 #   scripts/shell/ops/release.sh                  # run core tests, no version bump
 #
+# Parity pin (herobids ↔ traderton mirrors):
+#   scripts/shell/ops/release.sh --bump-parity-pin <herobids-tag>
+#     Update the herobids ref pinned in .github/workflows/slow-tests.yml to the
+#     given tag. Run this after releasing herobids, so the next traderton release
+#     parity-checks against the matching herobids revision.
+#
 # Examples:
 #   scripts/shell/ops/release.sh 0.1.2
 #   scripts/shell/ops/release.sh v0.1.2 --all
@@ -39,18 +45,29 @@ log()    { echo -e "${CYAN}[release]${RESET} $*"; }
 ok()     { echo -e "${GREEN}[release]${RESET} $*"; }
 warn()   { echo -e "${YELLOW}[release]${RESET} $*"; }
 err()    { echo -e "${RED}[release]${RESET} $*" >&2; }
-header() { echo -e "\n${BOLD}${CYAN}══ $* ══${RESET}"; }
-
-# ─── Parse arguments ─────────────────────────────────────────────────────────
+header() {
+  echo ""
+  echo -e "${BOLD}=== $* ===${RESET}"
+}
 
 VERSION=""
 RUN_ALL=false
+COMMIT_ALL=false
+BUMP_PARITY_REF=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --all)
       RUN_ALL=true
       shift
+      ;;
+    --bump-parity-pin)
+      if [[ -z "${2:-}" ]]; then
+        err "--bump-parity-pin requires a herobids tag/sha argument"
+        exit 1
+      fi
+      BUMP_PARITY_REF="$2"
+      shift 2
       ;;
     --help|-h)
       sed -n '2,/^set -euo/p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'
@@ -70,6 +87,37 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# ─── Parity pin bump (herobids ↔ traderton mirrors) ──────────────────────────
+
+# Standalone action: repoint the herobids ref pinned in slow-tests.yml. No
+# version bump, no commit.
+PARITY_WORKFLOW="${ROOT}/.github/workflows/slow-tests.yml"
+
+if [[ -n "$BUMP_PARITY_REF" ]]; then
+  header "Parity pin bump"
+
+  if [[ ! -f "$PARITY_WORKFLOW" ]]; then
+    err "Parity workflow not found: ${PARITY_WORKFLOW}"
+    exit 1
+  fi
+
+  if ! grep -q 'repository: poshjosh/herobids' "$PARITY_WORKFLOW"; then
+    err "Expected 'repository: poshjosh/herobids' in ${PARITY_WORKFLOW}; aborting."
+    exit 1
+  fi
+
+  sed -i "" -E \
+    "s|(^[[:space:]]*ref: ).*( # parity-pin.*)$|\1${BUMP_PARITY_REF}\2|" \
+    "$PARITY_WORKFLOW"
+
+  CURRENT_PIN=$(grep -E '^[[:space:]]*ref: .*# parity-pin' "$PARITY_WORKFLOW" | sed -E 's/^[[:space:]]*ref: ([^ #]+).*/\1/')
+  ok "Pinned herobids ref → ${CURRENT_PIN}"
+
+  header "Done"
+  ok "Parity pin bumped to herobids ${CURRENT_PIN}. Review and commit slow-tests.yml; record the pair in herobids' EXECUTION_LEDGER.md."
+  exit 0
+fi
 
 # ─── Pre-flight: must be on main ─────────────────────────────────────────────
 
@@ -180,6 +228,21 @@ if $RUN_ALL; then
     exit 1
   fi
   ok "Extra tests passed"
+fi
+
+# ─── Parity gate (best-effort; abort on drift) ──────────────────────────────
+
+# The traderton checker shells out to herobids' check-parity-drift.mjs; it SKIPs
+# (exit 0) when the sibling herobids checkout is absent, FAILs on drift.
+header "Parity gate"
+if [[ -d "${ROOT}/../herobids" ]]; then
+  if ! node "${ROOT}/scripts/check-parity-drift.mjs"; then
+    err "Parity-drift check FAILED. Fix/reclassify mirrors, or bump the pin, before releasing."
+    exit 1
+  fi
+  ok "Parity-drift check passed"
+else
+  warn "No sibling herobids checkout at ${ROOT}/../herobids — skipping parity gate."
 fi
 
 # ─── Version bump (only if version provided) ─────────────────────────────────
