@@ -1,6 +1,6 @@
 name: Publish Contracts Package
 
-# Publishes @traderton/contracts to GitHub Packages (see the C2.0 plan in
+# Publishes @poshjosh/contracts to GitHub Packages (see the C2.0 plan in
 # herobids' parity-drift epic: plans/C2-publish-contracts.md). Path-triggered on
 # changes to the contracts package; also available via workflow_dispatch.
 # The package version is independent of the root traderton version.
@@ -34,12 +34,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build contracts package
-        run: pnpm --filter @traderton/contracts run build
+        run: pnpm --filter @poshjosh/contracts run build
 
       - name: Test contracts package
-        run: pnpm --filter @traderton/contracts run test
+        run: pnpm --filter @poshjosh/contracts run test
 
       - name: Publish contracts package
-        run: pnpm publish --filter @traderton/contracts --no-git-checks
+        run: pnpm publish --filter @poshjosh/contracts --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

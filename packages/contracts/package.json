@@ -1,5 +1,5 @@
 {
-  "name": "@traderton/contracts",
+  "name": "@poshjosh/contracts",
   "version": "0.1.0",
   "private": false,
   "description": "Versioned wire-DTO contract package published by traderton for herobids (Brief B decision 5).",

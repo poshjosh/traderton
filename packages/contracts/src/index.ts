@@ -1,5 +1,5 @@
 /**
- * `@traderton/contracts` — versioned wire-DTO contract package.
+ * `@poshjosh/contracts` — versioned wire-DTO contract package.
  *
  * Traderton is the sole producer of every shape here; herobids consumes them as a
  * published dependency (Brief B decision 5, `decisions/wire-dto-package-mechanics.md`).

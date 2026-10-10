@@ -10,7 +10,7 @@ import {
   WakePrioritySchema,
 } from '../index.js';
 
-describe('@traderton/contracts round-trip fixtures', () => {
+describe('@poshjosh/contracts round-trip fixtures', () => {
   it('parses a structured watch with purpose, instrument and coverage', () => {
     const watch = WatchEntrySchema.parse({
       watchId: '3f2a8e0c-0000-4000-8000-000000000001',
