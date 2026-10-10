@@ -34,11 +34,6 @@ verbatim (no in-file editing) because they import subjects that were deleted or
 deferred in Traderton. The whole file is moved rather than pruned to preserve
 *copy, never author*.
 
-- `tick-gates.test.ts` — imports `computeMarketEventDigest` from
-  `./runtime-composition.js` (a DELETE'd module). The market-event digest and the
-  `PendingMarketEvent` / `MarketDiscoveryDetectedPayload` /
-  `MarketRegimeChangedPayload` types are not yet in Traderton; deferred until those
-  market-event types land. Its source `tick-gates.ts` stays in the build.
 - `validate-trade-instrument.test.ts` — imports `SubmitDecisionParamsSchema` from
   `./tools/trading.js`; the `tools/` trading modules are **Phase 9**. Its source
   `validate-trade-instrument.ts` stays in the build.
@@ -50,9 +45,9 @@ deferred in Traderton. The whole file is moved rather than pruned to preserve
 - Excluded from the test run: root `vitest.config.ts` `test.exclude`
   (`**/_deferred-config/**`).
 
-The two remaining files stay on disk (retained, not deleted) so that when their
-deferred subjects land (market-event types for `tick-gates.test.ts`; `tools/trading.ts`
-for `validate-trade-instrument.test.ts`) they can be un-quarantined with a move.
+The one remaining file stays on disk (retained, not deleted) so that when its
+deferred subject lands (`tools/trading.ts` for `validate-trade-instrument.test.ts`)
+it can be un-quarantined with a move.
 
 **Do not edit these files** — they must stay verbatim copies for the eventual
 un-quarantine.

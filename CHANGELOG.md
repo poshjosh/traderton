@@ -8,6 +8,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- **Deleted the `tick-gates` cluster (parity-drift epic, milestone A10).**
+  `packages/worker/src/tick-gates.ts`, `tick-gate-state.ts`, `tick-gate-state.test.ts`,
+  `tick-message-types.test.ts` and the quarantined `_deferred-config/tick-gates.test.ts`
+  had no non-test importers in traderton (herobids is the sole executor of the gating).
+  The `_deferred-config/README.md` bullet naming `tick-gates.test.ts` was removed.
+
 - **Deleted three dead domain copies (parity-drift epic, milestone A9).**
   `packages/domain/src/cost-profile.ts`, `packages/domain/src/values/instrument.ts`
   and `packages/domain/src/pagination.ts` had no non-test importers in traderton
