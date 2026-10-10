@@ -7,6 +7,11 @@ data-only and free" (eligibility, review screen, placement), "Agent strategy own
 the trading profile". Resolves the 011 §3 "Market-assessment ownership" item.
 **Depends on:** Wave E E1-T (`active_strategy`, scan loop, scan persistence) and E3-T
 (notifications, for review wakes).
+**Referenced by:** herobids' "Eliminate the Parity-Drift Check" epic
+(`herobids/docs/features/2026/10/10/001-eliminate-parity-check/000-roadmap.md`, Track D)
+treats this plan pair's completion as a dependency for retiring several
+`parity-drift-manifest.json` entries. That epic found and fixed two scope gaps in the
+herobids counterpart's step H5 (not in this file) — see the herobids plan for detail.
 
 ## Goal
 
