@@ -77,7 +77,9 @@ const params = {
   actionId: 'action-1',
   capital: '100',
   riskPosture: null,
-  executionDefaults: { mode: 'paper' as const },
+  // shadow (not paper) so the scan-configuration tests against swap venues are
+  // not tripped by the B1.2 paper+swap execution-capability guard.
+  executionDefaults: { mode: 'shadow' as const },
 };
 
 describe('set_agent_trading_profile tool identity boundary', () => {
@@ -129,6 +131,32 @@ describe('set_agent_trading_profile tool identity boundary', () => {
     const result = await setProfile.execute(
       { ...params, riskPosture: { maxOpenPositions: 5, maxPositionSizePct: 50 } },
       context(),
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(applyOperation).toHaveBeenCalled();
+  });
+
+  it('rejects paper+swap for the agent path with the dedicated execution_capability code', async () => {
+    const result = await setProfile.execute(
+      { ...params, executionDefaults: { mode: 'paper' } },
+      context('owner-1', 'agent-1', 'jupiter'),
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      fault: false,
+      errorCode: 'execution_capability.paper_swap_not_supported',
+    });
+    expect(applyOperation).not.toHaveBeenCalled();
+  });
+
+  it('accepts shadow+swap for the agent path', async () => {
+    applyOperation.mockResolvedValue(new Map([['action-1', 1n]]));
+
+    const result = await setProfile.execute(
+      { ...params, executionDefaults: { mode: 'shadow' } },
+      context('owner-1', 'agent-1', 'jupiter'),
     );
 
     expect(result).toMatchObject({ success: true });

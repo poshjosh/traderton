@@ -17,6 +17,7 @@ import {
   TechnicalConfigSchema,
   TokenSafetyConfigSchema,
   resolveActiveStrategy,
+  validateExecutionCapability,
   type AgentRiskDefaultsConfig,
   type AgentTool,
   type CreatorStrategy,
@@ -326,12 +327,46 @@ const setAgentTradingProfileTool: AgentTool<TradingToolContext> = {
     const actions = setActions(params);
     const denied = await authorizeActions(ctx, params.actorId, actions);
     if (denied) return denied;
+    const db = ctx.db as Database;
+
+    // Execution-capability guard (B1.2): reject paper+swap for the AGENT path,
+    // mirroring herobids's routes/agents.ts:1276. The agent's execution mode is
+    // `executionDefaults.mode`; the venue type derives from the venue account's
+    // `venue`. Runs BEFORE any DB write, surfacing the dedicated
+    // `execution_capability.paper_swap_not_supported` code.
+    for (const action of actions) {
+      if (action.kind !== 'set') continue;
+      const effectiveMode = action.executionDefaults === undefined
+        ? undefined
+        : action.executionDefaults?.mode;
+      if (effectiveMode == null) continue;
+      const [venueAccount] = await db.select({ venue: venueAccounts.venue }).from(venueAccounts).where(and(
+        eq(venueAccounts.id, action.venueAccountId),
+        eq(venueAccounts.ownerId, ctx.ownerId!),
+      )).limit(1);
+      if (!venueAccount) {
+        return { success: false, fault: false, error: 'Venue account not owned by signed owner', errorCode: 'authorization.denied' };
+      }
+      const venueType = venueTypeFor(venueAccount.venue);
+      const capCheck = validateExecutionCapability({
+        actorType: 'agent',
+        executionMode: effectiveMode,
+        venueType,
+      });
+      if (!capCheck.ok) {
+        return {
+          success: false,
+          fault: false,
+          error: capCheck.error.message,
+          errorCode: `execution_capability.${capCheck.error.code}`,
+        };
+      }
+    }
 
     // Scan-config boundary validation on the RESOLVED technical config, applied
     // per set action BEFORE any DB write. The resolved config and the repo's
     // active_strategy derivation share `resolveActiveStrategy`, so a config
     // accepted here is the one the actor runs.
-    const db = ctx.db as Database;
     for (const action of actions) {
       if (action.kind !== 'set') continue;
       // Resolve the EFFECTIVE scan config with the same absent=unchanged /

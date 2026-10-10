@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Agent-path execution-capability guard (parity-drift epic, B1.2).**
+  `set_agent_trading_profile` now rejects `paper` + swap for the agent path with the
+  dedicated `execution_capability.paper_swap_not_supported` code, mirroring the check
+  herobids dropped from `routes/agents.ts`. The venue type derives from the venue
+  account's `venue`; the check runs before any DB write.
+
 ### Removed
 
 - **Deleted the `tick-gates` cluster (parity-drift epic, milestone A10).**
