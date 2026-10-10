@@ -379,6 +379,51 @@ export interface TradingToolContext {
      */
     stop(): Promise<{ stoppedBots: string[] }>;
   };
+  /**
+   * Preset-assessment seam (004 "Preset assessment becomes data-only and free").
+   * The boundary builds this per request over the assessment repo + the profile
+   * repo + the preset catalog + the scanner candle fetcher, closing over the
+   * request's resolved venue coordinates and the signed owner/actor. Present only
+   * for agent subjects; absent otherwise, so the tools guard on it (fault:false
+   * when missing). The tools stay thin and never touch `@traderton/db` directly.
+   */
+  presetAssessment?: {
+    /** Operator preset-assessment config (cooldowns, cache freshness, caps). */
+    config: import('../config/schema.js').PresetAssessmentConfig;
+    /** The creator's preset policy for this agent (from the profile), or null. */
+    presetPolicy: import('../config/preset-policy.js').PresetPolicy | null;
+    /** The agent's current active strategy (from the profile), or null. */
+    activeStrategy: import('../config/agent-strategy.js').ActiveStrategy | null;
+    /** The venue account's venue (for identity resolution). */
+    venue: string;
+    /** The venue account's venue type. */
+    venueType: 'orderbook' | 'swap';
+    /** The venue account id (for profile writes). */
+    venueAccountId: string;
+    /** The agent's execution mode (from the profile). */
+    executionMode: 'paper' | 'shadow' | 'live';
+    /** List the catalog presets for a style tier. */
+    listPresets(styleTier: string): Array<{ key: string; entry: import('../config/presets.js').PresetEntry }>;
+    /** Fetch candles behind the boundary for a scanner target. */
+    fetchCandles(target: import('../scanner-types.js').ScannerCandleTarget, interval: string, limit: number): Promise<import('../ports/candle-fetcher.js').PriceCandle[]>;
+    /** Score a candidate behind the boundary (score_candidate). */
+    scoreCandidate(payload: unknown): Promise<{ kind: 'success'; data: unknown } | { kind: 'failure'; code: string; message: string } | { kind: 'transport_error'; message: string } | { kind: 'in_progress' }>;
+    /** Evaluate the market regime behind the boundary (check_regime). */
+    checkRegime(payload: unknown): Promise<{ kind: 'success'; data: unknown } | { kind: 'failure'; code: string; message: string } | { kind: 'transport_error'; message: string } | { kind: 'in_progress' }>;
+    /** Get volatility evidence behind the boundary (get_volatility). */
+    getVolatility(payload: unknown): Promise<{ kind: 'success'; data: unknown } | { kind: 'failure'; code: string; message: string } | { kind: 'transport_error'; message: string } | { kind: 'in_progress' }>;
+    /** Apply a preset change: write active_strategy (source:'agent') + record the audit row. */
+    applyPresetChange(params: {
+      targetPreset: string;
+      styleTier: string;
+      reason: string;
+      artifactId: string;
+    }): Promise<{ ok: true } | { ok: false; code: string; message: string }>;
+    /** List an agent's strategy-change history (consumer-only read). */
+    listStrategyChanges?(actorId: string, since?: string, limit?: number): Promise<Array<Record<string, unknown>>>;
+    /** Read a data-only assessment artifact by id (consumer-only read). */
+    getArtifact?(artifactId: string): Promise<Record<string, unknown> | null>;
+  };
 }
 
 /**

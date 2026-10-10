@@ -6,6 +6,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Preset assessment, data-only and free (004 "Preset assessment becomes data-only and free").**
+  Traderton now owns the preset-assessment and preset-change tools in the
+  `crypto-trading` skill: `list_strategy_presets`, `assess_strategy_preset`
+  (computed data only — evidence, per-preset scorecards and flags, no LLM ranking,
+  no narrative, no billing), and `change_strategy_preset` (agent-driven
+  `active_strategy` write with `source:'agent'`, a required reason, and the
+  creator's preset policy enforced). The agent trading profile gains a
+  creator-authored `preset_policy` (written by herobids, read-only to the agent).
+  New `market_assessment_requests` (cooldown/cache bookkeeping, no billing) and
+  `agent_strategy_changes` (audit trail + review-screen source) tables; the
+  `market_assessment_artifacts` table drops its LLM-only columns and gains
+  `evidence`/`presets`/`current_strategy`. Consumer-only read tools
+  `list_agent_strategy_changes` and `get_assessment_artifact` power the review
+  screen. See `docs/features/2026/10/04/004-preset-assessment-data-only/001-plan.md`.
+
 ### Changed
 
 - **Dropped the two herobids-local worker thresholds from `agentRiskDefaults` (parity-drift epic, B4.2).**

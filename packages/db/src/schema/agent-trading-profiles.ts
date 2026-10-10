@@ -4,6 +4,7 @@ import type {
   AgentRiskOverrides,
   CreatorStrategy,
   ExecutionDefaults,
+  PresetPolicy,
   RiskPosture,
   ScanMode,
 } from '@traderton/domain';
@@ -33,6 +34,12 @@ export const agentTradingProfiles = pgTable('agent_trading_profiles', {
    * derived from `creatorStrategy` on write, never a forward input).
    */
   activeStrategy: jsonb('active_strategy').$type<ActiveStrategy>(),
+  /**
+   * Creator-authored preset-change policy (004 "Preset assessment becomes
+   * data-only and free" — written by herobids, read-only to the agent). Governs
+   * whether/how the agent may change its own preset.
+   */
+  presetPolicy: jsonb('preset_policy').$type<PresetPolicy>(),
   revision: bigint('revision', { mode: 'bigint' }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -53,6 +60,7 @@ export interface AgentTradingProfilePreimage {
   scanMode: ScanMode | null;
   creatorStrategy: CreatorStrategy | null;
   activeStrategy: ActiveStrategy | null;
+  presetPolicy: PresetPolicy | null;
   revision: string;
   createdAt: string;
   updatedAt: string;
@@ -74,6 +82,8 @@ export interface AgentTradingProfileForwardAction {
   // `set` action; a `clear` action always carries null (removes the row).
   scanMode?: ScanMode | null;
   creatorStrategy?: CreatorStrategy | null;
+  // Creator-authored preset policy (004). Absent = unchanged; explicit null = clear.
+  presetPolicy?: PresetPolicy | null;
 }
 
 /** Durable preimages for reversible cross-service profile changes. */

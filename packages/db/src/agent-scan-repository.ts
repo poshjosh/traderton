@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { inArray, lt } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lt } from 'drizzle-orm';
 import type { Database } from './index.js';
 import { agentScanCandidates, agentScanMetrics } from './schema/index.js';
 
@@ -129,6 +129,28 @@ export class AgentScanRepository {
       topConfidence: metrics.topConfidence !== null ? String(metrics.topConfidence) : null,
       regimeBucket: metrics.regimeBucket,
     });
+  }
+
+  /**
+   * List an agent's recent scan candidates (S7 review pre-check). Returns rows
+   * with `scannedAt >= since`, ordered newest-first, capped at `limit`. The
+   * review pre-check reads these to produce deterministic advice without live
+   * market-data requests.
+   */
+  async listRecentCandidates(opts: {
+    agentId: string;
+    since: Date;
+    limit: number;
+  }): Promise<typeof agentScanCandidates.$inferSelect[]> {
+    return this.db
+      .select()
+      .from(agentScanCandidates)
+      .where(and(
+        eq(agentScanCandidates.agentId, opts.agentId),
+        gte(agentScanCandidates.scannedAt, opts.since),
+      ))
+      .orderBy(desc(agentScanCandidates.scannedAt), agentScanCandidates.candidateRank)
+      .limit(opts.limit);
   }
 
   /**

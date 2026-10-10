@@ -64,6 +64,13 @@
       "when": 1791146828699,
       "tag": "0008_journal_partitioning",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791657000000,
+      "tag": "0009_preset_assessment_data_only",
+      "breakpoints": true
     }
   ]
 }

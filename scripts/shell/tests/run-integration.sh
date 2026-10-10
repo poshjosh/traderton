@@ -120,6 +120,7 @@ pnpm exec vitest run --no-file-parallelism \
   packages/db/src/journal-partitioning.integration.test.ts \
   packages/db/src/journal-partition-maintenance.integration.test.ts \
   packages/db/src/running-agent-bots.integration.test.ts \
+  packages/db/src/preset-assessment-repository.integration.test.ts \
   "$@"
 
 echo "==> integration run complete"

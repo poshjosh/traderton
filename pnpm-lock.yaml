@@ -45,6 +45,9 @@ importers:
       '@traderton/market-data':
         specifier: workspace:*
         version: link:../market-data
+      '@traderton/strategy':
+        specifier: workspace:*
+        version: link:../strategy
       '@traderton/worker':
         specifier: workspace:*
         version: link:../worker

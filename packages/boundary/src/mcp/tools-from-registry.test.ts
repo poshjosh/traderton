@@ -73,15 +73,21 @@ describe('buildToolsFromRegistry', () => {
 });
 
 describe('SKILL_TOOL_MAP (the published Traderton skills)', () => {
-  it('names the three crypto skills and omits the herobids-owned preset tools from crypto-trading', () => {
+  it('names the three crypto skills and lists the Traderton-owned preset tools in crypto-trading', () => {
     expect(Object.keys(SKILL_TOOL_MAP).sort()).toEqual([
       'traderton/skills/crypto-bot-management',
       'traderton/skills/crypto-risk-monitoring',
       'traderton/skills/crypto-trading',
     ]);
     const trading = SKILL_TOOL_MAP['traderton/skills/crypto-trading'] ?? [];
-    expect(trading).not.toContain('assess_strategy_preset');
-    expect(trading).not.toContain('change_strategy_preset');
+    // 004 "Preset assessment becomes data-only and free": the preset tools are
+    // now Traderton-owned and listed in crypto-trading.
+    expect(trading).toContain('assess_strategy_preset');
+    expect(trading).toContain('change_strategy_preset');
+    expect(trading).toContain('list_strategy_presets');
+    // The consumer-only read tools stay out of every skill set.
+    expect(trading).not.toContain('list_agent_strategy_changes');
+    expect(trading).not.toContain('get_assessment_artifact');
   });
 
   it('inverts to a tool→refs map that tags shared tools with every owning skill', () => {

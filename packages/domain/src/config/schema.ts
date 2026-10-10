@@ -1048,6 +1048,49 @@ export const AppConfigSchema = z.object({
      *  (60_000). */
     orphanSweepIntervalMs: z.number().int().min(1000).default(60_000),
   }).default({}),
+  /** Preset assessment (data-only, free — 004 "Preset assessment becomes
+   *  data-only and free"). Traderton owns the assessment + preset-change tools;
+   *  herobids pushes the creator's preset policy and delivers the review wake.
+   *  Every key has a default so existing operator configs without the block
+   *  still parse. No env vars — operator config only (no `.env.example` change). */
+  presetAssessment: z.object({
+    /** Operator floor for the per-(agent, identity) assessment interval. The
+     *  creator may lengthen it via the profile's preset policy, never shorten it
+     *  below this floor. Default copied from herobids `platformAssessor.minReviewIntervalMs`
+     *  (24h). */
+    minRequestIntervalMs: z.number().int().positive().default(86_400_000),
+    /** How long a fresh artifact is returned as-is (cache) before a recompute is
+     *  allowed. Default copied from herobids `platformAssessor.cacheFreshnessMs`
+     *  (6h). */
+    cacheFreshnessMs: z.number().int().positive().default(21_600_000),
+    /** Maximum instruments accepted per `assess_strategy_preset` request.
+     *  Default copied from herobids `platformAssessor.maxInstrumentsPerRequest` (3). */
+    maxInstrumentsPerRequest: z.number().int().min(1).max(50).default(3),
+    /** Operator floor for the preset-change cooldown (S6). The creator may
+     *  lengthen it via the profile's preset policy, never shorten it below this
+     *  floor. Default 24h (matches the assessment interval floor). */
+    minChangeCooldownMs: z.number().int().positive().default(86_400_000),
+    /** Deterministic review pre-check (S7) — copied from herobids
+     *  `platformAssessor.preCheck`. */
+    preCheck: z.object({
+      /** Signal count ratio threshold for peer-outperformance detection. */
+      signalRatioThreshold: z.number().min(1.0).default(2.0),
+      /** Lookback window for scan-metrics comparison (ms). Default 24h. */
+      scanMetricsLookbackMs: z.number().int().positive().default(86_400_000),
+      /** Minimum signals a preset must generate to be "active" for comparison. */
+      minSignalsForActive: z.number().int().min(1).default(3),
+      /** Minimum cooldown between review advice for the same (agent, identity). */
+      identityCooldownMs: z.number().int().positive().default(86_400_000),
+      /** Maximum candidate stale age — older candidates are ignored. Default 24h. */
+      candidateMaxAgeMs: z.number().int().positive().default(86_400_000),
+      /** Policy version for the deterministic review predicate. */
+      policyVersion: z.string().default('1.0.0'),
+      /** Whether the pre-check compares peer presets for mismatch detection. */
+      enablePeerComparison: z.boolean().default(true),
+      /** How often the scheduled review pre-check loop runs (default 1h). */
+      reviewIntervalMs: z.number().int().positive().default(3_600_000),
+    }).default({}),
+  }).default({}),
   /** `journal_events` audit-log retention + partitioning maintenance (plan 003).
    *  Deploy/restart operator config, not runtime. The default keeps everything
    *  (`auditRetentionMonths` null) so the mechanism ships without waiting on the
@@ -1114,3 +1157,6 @@ export type AgentScannerConfig = AppConfig['agentScanner'];
  *  exported here so consumers reference a named type rather than
  *  `AppConfig['journal']`. */
 export type JournalConfig = AppConfig['journal'];
+/** Preset-assessment operator config (004 data-only). Threaded into the
+ *  assessment tools + the scheduled review pre-check loop. */
+export type PresetAssessmentConfig = AppConfig['presetAssessment'];

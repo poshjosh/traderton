@@ -7,6 +7,7 @@ import {
   type AgentRiskOverrides,
   type CreatorStrategy,
   type ExecutionDefaults,
+  type PresetPolicy,
   type RiskPosture,
   type ScanMode,
 } from '@traderton/domain';
@@ -34,6 +35,7 @@ export interface TradingProfileConfiguration {
   executionDefaults: ExecutionDefaults | null;
   scanMode?: ScanMode | null;
   creatorStrategy?: CreatorStrategy | null;
+  presetPolicy?: PresetPolicy | null;
 }
 
 export interface ApplyTradingProfileChange extends TradingProfileConfiguration {
@@ -89,6 +91,7 @@ export class AgentTradingProfileRepository {
         // distinction rather than coercing undefined to null.
         ...(input.scanMode === undefined ? {} : { scanMode: input.scanMode }),
         ...(input.creatorStrategy === undefined ? {} : { creatorStrategy: input.creatorStrategy }),
+        ...(input.presetPolicy === undefined ? {} : { presetPolicy: input.presetPolicy }),
       }],
     });
     return { operationId: input.operationId, actionId: input.actionId, revision: results.get(input.actionId) ?? null };
@@ -181,6 +184,9 @@ export class AgentTradingProfileRepository {
     const creatorStrategy = action.creatorStrategy === undefined
       ? (profile?.creatorStrategy ?? null)
       : action.creatorStrategy;
+    const presetPolicy = action.presetPolicy === undefined
+      ? (profile?.presetPolicy ?? null)
+      : action.presetPolicy;
     const activeStrategy = await this.deriveActiveStrategy(tx, ownerId, action, profile, now);
     if (profile) {
       await tx.update(agentTradingProfiles).set({
@@ -189,6 +195,7 @@ export class AgentTradingProfileRepository {
         executionDefaults: action.executionDefaults,
         scanMode,
         creatorStrategy,
+        presetPolicy,
         activeStrategy,
         revision,
         updatedAt: now,
@@ -205,6 +212,7 @@ export class AgentTradingProfileRepository {
         executionDefaults: action.executionDefaults,
         scanMode,
         creatorStrategy,
+        presetPolicy,
         activeStrategy,
         revision,
         createdAt: now,
@@ -280,6 +288,51 @@ export class AgentTradingProfileRepository {
       eq(agentTradingProfileChanges.ownerId, ownerId),
       eq(agentTradingProfileChanges.actorId, actorId),
     ));
+  }
+
+  /**
+   * Agent-driven preset change (004 "Preset assessment becomes data-only and
+   * free", S4). Writes `active_strategy` with `source:'agent'` (the resolved
+   * technical config for the target preset) and bumps the revision so the actor
+   * rebuilds (E1). The creator's `presetPolicy` is enforced by the CALLER (the
+   * tool) before this is reached — this method only performs the durable write.
+   * Returns the new revision, or null when the profile is absent.
+   */
+  async applyAgentPresetChange(params: {
+    ownerId: string;
+    actorId: string;
+    venueAccountId: string;
+    targetPreset: string;
+    styleTier: string;
+    changedAt: string;
+  }): Promise<bigint | null> {
+    return this.db.transaction(async (tx) => {
+      const lockKey = `${params.ownerId}:${params.actorId}:${params.venueAccountId}`;
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${AgentTradingProfileRepository.PROFILE_LOCK_CLASS}, hashtext(${lockKey}))`);
+      const profile = await this.findIn(tx, params.ownerId, params.actorId, params.venueAccountId);
+      if (!profile) return null;
+      const [venueAccount] = await tx.select({ venue: venueAccounts.venue }).from(venueAccounts).where(and(
+        eq(venueAccounts.id, params.venueAccountId),
+        eq(venueAccounts.ownerId, params.ownerId),
+      )).limit(1);
+      if (!venueAccount) {
+        throw new Error(`Venue account ${params.venueAccountId} not found for owner ${params.ownerId} while applying agent preset change`);
+      }
+      const activeStrategy = resolveActiveStrategy(
+        { presetKey: params.targetPreset, styleTier: params.styleTier },
+        { venue: venueAccount.venue, venueType: venueTypeFor(venueAccount.venue) },
+        params.changedAt,
+      );
+      // The agent-driven write keeps `source:'agent'` provenance.
+      const agentActive: ActiveStrategy = { ...activeStrategy, source: 'agent' };
+      const revision = profile.revision + 1n;
+      await tx.update(agentTradingProfiles).set({
+        activeStrategy: agentActive,
+        revision,
+        updatedAt: new Date(),
+      }).where(eq(agentTradingProfiles.id, profile.id));
+      return revision;
+    });
   }
 
   async rollbackChange(ownerId: string, actorId: string, operationId: string): Promise<void> {

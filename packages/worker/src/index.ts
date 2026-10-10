@@ -88,6 +88,7 @@ export {
   botManagementTools,
   instrumentTools,
   marketDataTools,
+  presetAssessmentTools,
   priceTools,
   provisioningTools,
   resolverTools,

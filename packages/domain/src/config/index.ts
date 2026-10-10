@@ -114,6 +114,7 @@ export type {
   AppConfig,
   MechanicalStrategy,
   JournalConfig,
+  PresetAssessmentConfig,
 } from './schema.js';
 
 export {
@@ -128,3 +129,8 @@ export {
   type ActiveStrategy,
   type ResolveStrategyContext,
 } from './agent-strategy.js';
+
+export {
+  PresetPolicySchema,
+  type PresetPolicy,
+} from './preset-policy.js';

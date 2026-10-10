@@ -10,7 +10,7 @@
 // boundary package (the 000 invariant); the dispatcher stays wiring-free.
 
 import { Redis } from 'ioredis';
-import type { TradingToolContext, ToolCategory } from '@traderton/domain';
+import type { TradingToolContext, ToolCategory, ScannerCandleTarget, PriceCandle } from '@traderton/domain';
 import { isReadOnlyCategory } from '@traderton/domain';
 import {
   createDatabase,
@@ -21,6 +21,7 @@ import {
   ConsumerNotificationRepository,
   AgentScanRepository,
   AgentActorRunRepository,
+  PresetAssessmentRepository,
   JournalPartitionMaintenance,
   computeRequestFingerprint,
 } from '@traderton/db';
@@ -73,6 +74,8 @@ import { registerBoundaryShutdown } from './boundary-shutdown.js';
 import { startConsumerNotificationPruneLoop } from './consumer-notification-prune.js';
 import { startAgentScanPruneLoop } from './agent-scan-prune.js';
 import { buildAgentActorLifecycleOps } from './agent-actor-lifecycle-ops.js';
+import { buildPresetAssessmentOps } from './preset-assessment-ops.js';
+import { startReviewPreCheckLoop } from './review-pre-check-loop.js';
 import { rehydrateAgentActors } from './agent-actor-rehydrate.js';
 import { startAgentOrphanSweep } from './agent-orphan-sweep.js';
 import { startJournalMaintenanceLoop } from './journal-maintenance.js';
@@ -232,6 +235,42 @@ async function main(): Promise<void> {
     logger: createLogger('boundary-agent-orphan-sweep'),
   });
 
+  // 004 S7: the scheduled review pre-check loop. Single-flight across replicas
+  // via a DEDICATED InstanceLease (its OWN worker id + renew-timer map, NOT the
+  // runtime's agent/bot lease handle). The loop acquires `preset-review` at tick
+  // start and releases it in a finally. Self-rescheduling, reschedules on failure
+  // (AGENTS). On a positive result it writes an `agent_wake` notification with a
+  // review-advice payload (delivered by the herobids relay).
+  const reviewLease = new InstanceLease(redis, `preset-review-${runtime.workerId}`, 30);
+  const reviewPreCheckLoop = startReviewPreCheckLoop({
+    config: appConfig.presetAssessment,
+    scanRepo: new AgentScanRepository(db),
+    notifications: new ConsumerNotificationRepository(db),
+    lease: {
+      tryAcquire: () => reviewLease.acquire('preset-review'),
+      release: async () => {
+        await reviewLease.release('preset-review');
+      },
+    },
+    listRunningAgents: () => agentActorRunRepo.listRunning(),
+    resolveActivePreset: async (actorId) => {
+      const run = await agentActorRunRepo.getByActorId(actorId);
+      if (!run) return null;
+      const profile = await profileRepo.getByOwnerActorVenueAccount(run.ownerId, actorId, run.venueAccountId);
+      const active = profile?.activeStrategy;
+      if (!active) return null;
+      return {
+        presetKey: active.presetKey ?? 'none',
+        behaviorVersion: active.behaviorVersion,
+        styleTier: (active.styleTier as 'economy' | 'standard' | 'premium') ?? 'standard',
+        signalBias: (active.technical.signalBias as 'trend-following' | 'mean-reverting') ?? 'trend-following',
+        enabledIndicators: Object.keys(active.technical.indicators ?? {}),
+        compatibilityThresholds: {},
+      };
+    },
+    logger: createLogger('boundary-preset-review'),
+  });
+
   // 001 S3: the agent-actor command consumer. One blocking-pop loop per container
   // on its OWN command list (`agent-actor:cmd:{workerId}`), with a DEDICATED Redis
   // connection — BLPOP blocks the connection, so it cannot be the shared client.
@@ -285,6 +324,77 @@ async function main(): Promise<void> {
   const scannerPoolResolver = appConfig.marketData
     ? createScannerPoolResolverFromConfig(appConfig.marketData)
     : undefined;
+
+  // ── Preset-assessment ops (004 data-only). Built ONCE over the assessment
+  //    repo + profile repo + the scanner candle fetcher + the market-data
+  //    registry; the tools consume it per-request via the ctx `presetAssessment`
+  //    port. The score/regime/volatility reads route over the SAME in-process
+  //    market-data registry the read tools use (behind the boundary).
+  const presetAssessmentRepo = new PresetAssessmentRepository(db);
+  const presetAssessmentOps = buildPresetAssessmentOps({
+    config: appConfig.presetAssessment,
+    assessmentRepo: presetAssessmentRepo,
+    profileRepo,
+    fetchCandles: scannerCandleFetcher
+      ? (target, interval, limit) => scannerCandleFetcher(target, interval, limit)
+      : async () => [],
+    scoreCandidate: async (payload) => {
+      if (!scannerCandleFetcher) return { kind: 'failure', code: 'market_data_not_configured', message: 'scanner candle fetcher not configured' };
+      // score_candidate is a read tool; route it through the registry's own
+      // execute path is overkill — the boundary re-implements the narrow scoring
+      // via the strategy package directly (candles fetched behind the boundary).
+      const { scoreCandidate } = await import('@traderton/strategy');
+      const p = payload as {
+        symbol: string; instrumentId: string; venueType: 'orderbook' | 'swap';
+        providerSymbol?: string; network?: string; poolAddress?: string; tokenAddress?: string;
+        venue?: string; interval?: string; candleLimit?: number;
+        config: { indicators: Record<string, unknown>; signalBias: 'trend-following' | 'mean-reverting' };
+      };
+      try {
+        const target: ScannerCandleTarget = p.venueType === 'swap'
+          ? { venueType: 'swap', network: p.network ?? '', poolAddress: p.poolAddress ?? '' }
+          : { venueType: 'orderbook', providerSymbol: p.providerSymbol ?? p.symbol };
+        const candles = await scannerCandleFetcher(target, p.interval ?? '1h', p.candleLimit ?? 200);
+        const signal = scoreCandidate(
+          { symbol: p.symbol, instrumentId: p.instrumentId ?? p.symbol, candles, venue: p.venue, venueType: p.venueType },
+          { indicators: p.config.indicators as never, signalBias: p.config.signalBias },
+        );
+        return { kind: 'success', data: { signal, candlesEvaluated: candles.length, candleWindow: candles.length > 0 ? { start: candles[0]!.timestamp, end: candles[candles.length - 1]!.timestamp } : null } };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { kind: 'failure', code: 'assessment.scorecard_failed', message };
+      }
+    },
+    checkRegime: async (payload) => {
+      if (!marketDataRegistry) return { kind: 'failure', code: 'market_data_not_configured', message: 'market data registry not configured' };
+      const { evaluateRegime } = await import('@traderton/market-data');
+      const p = payload as { benchmarkSymbol?: string };
+      try {
+        const result = await evaluateRegime({ benchmarkSymbol: p.benchmarkSymbol ?? 'BTC' }, async (symbol) => {
+          const withMeta = await (marketDataRegistry as unknown as { binance: { candles: (s: string, o?: { interval?: string; limit?: number }) => Promise<{ data: unknown[] }> } }).binance.candles(symbol, { interval: '1h', limit: 200 });
+          return (withMeta.data as unknown as PriceCandle[]);
+        });
+        return { kind: 'success', data: result };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { kind: 'failure', code: 'assessment.regime_failed', message };
+      }
+    },
+    getVolatility: async (payload) => {
+      if (!marketDataRegistry) return { kind: 'failure', code: 'market_data_not_configured', message: 'market data registry not configured' };
+      const { calculateAtrPercent, computeVolatilityEvidence } = await import('@traderton/market-data');
+      const p = payload as { symbol?: string };
+      try {
+        const candles = await (marketDataRegistry as unknown as { binance: { candles: (s: string, o?: { interval?: string; limit?: number }) => Promise<{ data: unknown[] }> } }).binance.candles(p.symbol ?? 'BTC', { interval: '1h', limit: 24 });
+        const priceCandles = candles.data as unknown as PriceCandle[];
+        return { kind: 'success', data: { volatilityPct: calculateAtrPercent(priceCandles), volatilityEvidence: computeVolatilityEvidence(priceCandles) } };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { kind: 'failure', code: 'assessment.volatility_failed', message };
+      }
+    },
+    logger: createLogger('boundary-preset-assessment'),
+  });
 
   // ── Market-data provider registry for the market-intelligence read tools
   //    (check_regime / get_market_overview / discover_tokens / search_tokens /
@@ -597,6 +707,22 @@ async function main(): Promise<void> {
             stop: () => agentActorLifecycleOps.stopAgent(request.ownerId, request.actor.id),
           }
         : undefined,
+      // Preset-assessment seam (004 data-only). Present only for an AGENT subject
+      // with a resolved venue account; the tools guard on its absence. It closes
+      // over this request's resolved venue coordinates + the profile's preset
+      // policy + active strategy, so the tools never touch the db/runtime.
+      presetAssessment: request.actor.type === 'agent' && injection.venueAccountId
+        ? presetAssessmentOps.buildContext({
+            ownerId: request.ownerId,
+            actorId: request.actor.id,
+            venueAccountId: injection.venueAccountId,
+            venue: injection.venue,
+            venueType: injection.venueType,
+            executionMode: profile?.executionDefaults?.mode ?? injection.ownerMode,
+            presetPolicy: profile?.presetPolicy ?? null,
+            activeStrategy: profile?.activeStrategy ?? null,
+          })
+        : undefined,
     };
   };
 
@@ -635,6 +761,7 @@ async function main(): Promise<void> {
       () => consumerNotificationPrune.stop(),
       () => agentScanPrune.stop(),
       () => agentOrphanSweep.stop(),
+      () => reviewPreCheckLoop.stop(),
       // Plan 003 S4: stop the journal-maintenance loop (latch no-ops a pending
       // tick) and clear any lease renew timer (a tick mid-run releases in its own
       // finally; this covers the loop being stopped between acquire and release).

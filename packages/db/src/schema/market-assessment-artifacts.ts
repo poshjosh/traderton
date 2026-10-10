@@ -1,12 +1,19 @@
-import { pgTable, text, timestamp, jsonb, integer, numeric, index, uniqueIndex, check } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, jsonb, index, uniqueIndex, check } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { marketAssessmentRuns } from './market-assessment-runs.js';
 
 /**
- * Market assessment artifacts — cached shared assessment results per
- * canonical per-symbol identity.
- * Each row represents a completed assessment artifact that agents can consume
- * to make preset-transition decisions.
+ * Market assessment artifacts — cached data-only assessment results per
+ * canonical per-symbol identity (004 "Preset assessment becomes data-only and
+ * free"). Each row is a completed assessment artifact the agent consumes to
+ * make a preset-change decision.
+ *
+ * The LLM-only columns from the herobids source (rankings' pros/cons/fitNotes/
+ * score, confidence, urgency, narrative summaries, recommendedPreset,
+ * relativeUplift, reasoningSummary) are DROPPED — the assessment is computed
+ * data only. `presets` carries the per-preset data + flags (S3); `evidence`
+ * carries the regime/volatility/candle-window evidence; `currentStrategy` the
+ * active-strategy view at assessment time.
  */
 export const marketAssessmentArtifacts = pgTable('market_assessment_artifacts', {
   id: text('id').primaryKey(),
@@ -37,46 +44,16 @@ export const marketAssessmentArtifacts = pgTable('market_assessment_artifacts', 
   assessmentRunId: text('assessment_run_id').notNull().references(() => marketAssessmentRuns.id, { onDelete: 'restrict' }),
   assessedAt: timestamp('assessed_at', { withTimezone: true }).notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  /** ISO 8601 duration or timestamp — max age for actor use */
-  maxActorUseAge: text('max_actor_use_age').notNull(),
-  /** ISO 8601 duration or timestamp — max age for wake emission */
-  maxWakeAge: text('max_wake_age').notNull(),
-  assessmentVersion: integer('assessment_version').notNull().default(1),
-  artifactVersion: integer('artifact_version').notNull().default(1),
-  rankingPolicyVersion: integer('ranking_policy_version').notNull().default(1),
   /** Lifecycle status: active | expired | superseded */
   status: text('status').notNull().default('active'),
   /** Allowed preset keys for this identity */
   allowedPresets: jsonb('allowed_presets').notNull().$type<string[]>(),
-  /** LLM-produced narrative summary of current market conditions */
-  currentMarketSummary: text('current_market_summary').notNull().default(''),
-  /** LLM-produced narrative summary of market regime */
-  regimeSummary: text('regime_summary').notNull().default(''),
-  /** Summary of scanner health across presets */
-  scanHealthSummary: text('scan_health_summary').notNull().default(''),
-  /** Ranked preset assessments */
-  presetRankings: jsonb('preset_rankings').notNull().$type<
-    Array<{
-      presetKey: string;
-      presetBehaviorVersion: string;
-      rank: number;
-      score: number;
-      scoreBand: string;
-      pros: string[];
-      cons: string[];
-      fitNotes: string | null;
-    }>
-  >(),
-  /** Top-ranked preset key (null if no clear recommendation) */
-  recommendedPreset: text('recommended_preset'),
-  /** Estimated score uplift of recommended preset over others */
-  relativeUplift: numeric('relative_uplift'),
-  /** Assessor confidence in the ranking (0-1) */
-  confidence: numeric('confidence').notNull(),
-  /** How urgently the platform assessor recommends review */
-  urgency: text('urgency').notNull().default('low'), // low | medium | high
-  /** LLM-produced reasoning behind the assessment */
-  reasoningSummary: text('reasoning_summary').notNull().default(''),
+  /** Deterministic evidence (regime, volatility, candle window, count). */
+  evidence: jsonb('evidence').notNull().default(sql`'{}'::jsonb`).$type<Record<string, unknown>>(),
+  /** Per-preset data + flags (S3). */
+  presets: jsonb('presets').notNull().default(sql`'[]'::jsonb`).$type<Record<string, unknown>[]>(),
+  /** The active-strategy view at assessment time. */
+  currentStrategy: jsonb('current_strategy').notNull().default(sql`'{}'::jsonb`).$type<Record<string, unknown>>(),
   /** References to raw evidence used */
   evidenceRefs: jsonb('evidence_refs').notNull().$type<string[]>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

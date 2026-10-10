@@ -50,6 +50,8 @@ export { AgentActorRunRepository } from './agent-actor-run-repository.js';
 export type { UpsertRunningParams, AgentActorRunRow } from './agent-actor-run-repository.js';
 export { AgentTradingProfileRepository, TradingProfileOperationConflictError } from './agent-trading-profile-repository.js';
 export type { AgentTradingProfile, TradingProfileConfiguration, ApplyTradingProfileChange, ApplyTradingProfileOperation } from './agent-trading-profile-repository.js';
+export { PresetAssessmentRepository } from './preset-assessment-repository.js';
+export type { InsertAssessmentRequest, InsertAssessmentArtifact, InsertAgentStrategyChange } from './preset-assessment-repository.js';
 // decision-approval-repository / decision_approvals table removed 2026-09-07:
 // user-approval lifecycle is a platform/consumer-owned concern, not trading
 // (Intentional Divergence — see docs/001 + docs/004). Agents own asking for a

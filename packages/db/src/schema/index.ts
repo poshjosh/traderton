@@ -28,6 +28,7 @@ export { decisionFailures } from './decision-failures.js';
 // platform/consumer-owned (Intentional Divergence, docs/001 + docs/004).
 export { marketAssessmentRuns } from './market-assessment-runs.js';
 export { marketAssessmentArtifacts } from './market-assessment-artifacts.js';
+export { marketAssessmentRequests, agentStrategyChanges } from './preset-assessment.js';
 export { boundaryInvocations } from './boundary-invocations.js';
 export { consumerNotifications } from './consumer-notifications.js';
 export { agentScanCandidates } from './agent-scan-candidates.js';

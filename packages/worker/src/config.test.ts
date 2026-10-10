@@ -491,6 +491,22 @@ agentScanner:
     });
   });
 
+  describe('presetAssessment config', () => {
+    it('applies Zod defaults when presetAssessment is omitted', () => {
+      writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML);
+
+      const config = loadConfig(tmpDir);
+
+      expect(config.presetAssessment.minRequestIntervalMs).toBe(86_400_000);
+      expect(config.presetAssessment.cacheFreshnessMs).toBe(21_600_000);
+      expect(config.presetAssessment.maxInstrumentsPerRequest).toBe(3);
+      expect(config.presetAssessment.minChangeCooldownMs).toBe(86_400_000);
+      expect(config.presetAssessment.preCheck.signalRatioThreshold).toBe(2.0);
+      expect(config.presetAssessment.preCheck.identityCooldownMs).toBe(86_400_000);
+      expect(config.presetAssessment.preCheck.enablePeerComparison).toBe(true);
+    });
+  });
+
   describe('1inch token safety config', () => {
     it('rejects unsupported 1inch chainId without tokenSafetyNetwork when token safety is enabled', () => {
       writeFileSync(resolve(tmpDir, 'default.yaml'), BASE_YAML + MINIMAL_MARKET_DATA_YAML + `

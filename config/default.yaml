@@ -214,6 +214,25 @@ agentScanner:
     pruneBatchSize: 5000         # expired rows deleted per prune batch, per table
   orphanSweepIntervalMs: 60000   # agent-actor orphan sweep cadence in ms (copied from herobids worker.agents.botOrphanSweepIntervalMs)
 
+# Preset assessment (004 "Preset assessment becomes data-only and free").
+# Traderton owns the assessment + preset-change tools; herobids pushes the
+# creator's preset policy and delivers the review wake. Operator config only —
+# no env vars. Defaults copied from herobids platformAssessor.
+presetAssessment:
+  minRequestIntervalMs: 86400000 # operator floor for the per-(agent, identity) assessment interval (24h)
+  cacheFreshnessMs: 21600000     # a fresh artifact is returned as-is for this long (6h)
+  maxInstrumentsPerRequest: 3    # max instruments accepted per assess_strategy_preset (1–50)
+  minChangeCooldownMs: 86400000  # operator floor for the preset-change cooldown (24h)
+  preCheck:                      # deterministic review pre-check (S7)
+    signalRatioThreshold: 2.0    # peer preset must have >= this ratio × current signals to flag
+    scanMetricsLookbackMs: 86400000 # scan-metrics comparison window (24h)
+    minSignalsForActive: 3       # min signals a preset must generate to be "active"
+    identityCooldownMs: 86400000 # min cooldown between review advice for the same (agent, identity)
+    candidateMaxAgeMs: 86400000  # candidates older than this are ignored (24h)
+    policyVersion: "1.0.0"       # review predicate version
+    enablePeerComparison: true   # compare peer presets for mismatch detection
+    reviewIntervalMs: 3600000    # scheduled review pre-check cadence (1h)
+
 # journal_events audit-log retention + partitioning maintenance (plan 003).
 # Default keeps everything (auditRetentionMonths null) — the mechanism ships
 # without waiting on the retention-policy decision.

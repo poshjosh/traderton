@@ -25,9 +25,11 @@ export const SKILL_REFS_META_KEY = 'io.agentskills/skillRefs';
  * (recorded 2026-10-04): every name here is a real Traderton worker-registry tool
  * name, so a consumer's visible set = (these names) ∩ (its own registry).
  *
- * `assess_strategy_preset` and `change_strategy_preset` are intentionally ABSENT
- * from `crypto-trading`: their executor lives in herobids, not Traderton (T0.7
- * case 4, large — NOT MOVED), so Traderton does not list them.
+ * `assess_strategy_preset` and `change_strategy_preset` are now Traderton tools
+ * (004 "Preset assessment becomes data-only and free") — added to `crypto-trading`
+ * alongside `list_strategy_presets`. The consumer-only read tools
+ * (`list_agent_strategy_changes`, `get_assessment_artifact`) are intentionally
+ * ABSENT from every skill set (they power the review screen, not the agent).
  */
 export const SKILL_TOOL_MAP: Readonly<Record<string, readonly string[]>> = {
   'traderton/skills/crypto-trading': [
@@ -49,6 +51,9 @@ export const SKILL_TOOL_MAP: Readonly<Record<string, readonly string[]>> = {
     'find_instrument',
     'submit_decision',
     'adjust_risk_limits',
+    'list_strategy_presets',
+    'assess_strategy_preset',
+    'change_strategy_preset',
   ],
   'traderton/skills/crypto-bot-management': [
     'create_bot',

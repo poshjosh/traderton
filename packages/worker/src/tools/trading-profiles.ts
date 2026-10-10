@@ -9,6 +9,7 @@ import {
 import {
   CreatorStrategySchema,
   ExecutionDefaultsSchema,
+  PresetPolicySchema,
   RiskPostureSchema,
   ScanModeSchema,
   StrictTechnicalConfigSchema,
@@ -52,6 +53,8 @@ const ForwardSetActionSchema = z.object({
   // Creator inputs (004 ownership rule). Absent = unchanged; explicit null = clear.
   scanMode: ScanModeSchema.nullable().optional(),
   creatorStrategy: CreatorStrategySchema.nullable().optional(),
+  // Creator-authored preset policy (004 data-only). Absent = unchanged; null = clear.
+  presetPolicy: PresetPolicySchema.nullable().optional(),
 });
 const ForwardClearActionSchema = z.object({
   actionId: z.string().min(1),
@@ -62,6 +65,7 @@ const ForwardClearActionSchema = z.object({
   executionDefaults: z.null(),
   scanMode: z.null().default(null),
   creatorStrategy: z.null().default(null),
+  presetPolicy: z.null().default(null),
 });
 const ForwardActionSchema = z.discriminatedUnion('kind', [ForwardSetActionSchema, ForwardClearActionSchema]);
 const ManifestSchema = z.object({ actions: z.array(ForwardActionSchema).min(1) });
@@ -73,6 +77,9 @@ const SetProfileSchema = ProfileConfigurationSchema.merge(OperationSchema).exten
   ),
   creatorStrategy: CreatorStrategySchema.nullish().describe(
     'The creator-chosen strategy: exactly one of { presetKey, styleTier } or { customTechnical }.',
+  ),
+  presetPolicy: PresetPolicySchema.nullish().describe(
+    'The creator-authored preset-change policy (changesAllowed, allowedPresets, styleTier, optional cooldowns). Read-only to the agent.',
   ),
   actions: ManifestSchema.shape.actions.optional(),
 });
@@ -267,6 +274,7 @@ function setActions(params: z.infer<typeof SetProfileSchema>): z.infer<typeof Fo
     executionDefaults: params.executionDefaults,
     ...(params.scanMode === undefined ? {} : { scanMode: params.scanMode }),
     ...(params.creatorStrategy === undefined ? {} : { creatorStrategy: params.creatorStrategy }),
+    ...(params.presetPolicy === undefined ? {} : { presetPolicy: params.presetPolicy }),
   };
   return validateCurrentAction(params.actions ?? [current], current);
 }
@@ -281,6 +289,7 @@ function clearActions(params: z.infer<typeof ExactProfileOperationSchema>): z.in
     executionDefaults: null,
     scanMode: null,
     creatorStrategy: null,
+    presetPolicy: null,
   };
   return validateCurrentAction(params.actions ?? [current], current);
 }
