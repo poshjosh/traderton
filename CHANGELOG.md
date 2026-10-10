@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Dropped the two herobids-local worker thresholds from `agentRiskDefaults` (parity-drift epic, B4.2).**
+  `agentDecisionNoContextThreshold` and `agentDecisionSwapInstrumentFormatThreshold`
+  are herobids worker decision-handler hardening knobs, not traderton risk defaults.
+  Removed from `AgentRiskDefaultsSchema` and `config/default.yaml` so the
+  `agent-risk-defaults` parity entry stays byte-identical with herobids (15 fields).
+  See `docs/features/2026/10/10/001-eliminate-parity-check/plans/B4-agent-risk-defaults-boundary-cache.md`
+  (herobids path).
+
 ### Added
 
 - **Agent-path execution-capability guard (parity-drift epic, B1.2).**

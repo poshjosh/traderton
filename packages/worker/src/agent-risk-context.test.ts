@@ -27,8 +27,6 @@ const DEFAULTS: AgentRiskDefaultsConfig = {
   botConfigInvalidHaltThreshold: 1,
   botExecutionErrorHaltThreshold: 5,
   botLlmProviderErrorHaltThreshold: 1,
-  agentDecisionNoContextThreshold: 10,
-  agentDecisionSwapInstrumentFormatThreshold: 5,
   maxDrawdown: 1_000_000_000,
   maxDrawdownPct: 20,
   perTradeLevelMonitorIntervalMs: 5000,
