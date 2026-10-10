@@ -115,7 +115,7 @@ if [[ -n "$BUMP_PARITY_REF" ]]; then
   ok "Pinned herobids ref → ${CURRENT_PIN}"
 
   header "Done"
-  ok "Parity pin bumped to herobids ${CURRENT_PIN}. Review and commit slow-tests.yml; record the pair in herobids' EXECUTION_LEDGER.md."
+  ok "Parity pin bumped to herobids ${CURRENT_PIN}. Review and commit slow-tests.yml"
   exit 0
 fi
 
