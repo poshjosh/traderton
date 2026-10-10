@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **Deleted three dead domain copies (parity-drift epic, milestone A9).**
+  `packages/domain/src/cost-profile.ts`, `packages/domain/src/values/instrument.ts`
+  and `packages/domain/src/pagination.ts` had no non-test importers in traderton
+  (the `Instrument` type, `PaginatedResponse<T>`, and the `AgentCostProfile*` /
+  `resolveAgentCostProfile` symbols are unused). Barrels `packages/domain/src/index.ts`
+  and `packages/domain/src/values/index.ts` pruned. The herobids parity pin in
+  `.github/workflows/slow-tests.yml` is bumped to `v0.6.7`.
+
 ## 0.1.3-2026.10.09
 
 ## 0.1.2-2026.10.09

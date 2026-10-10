@@ -13,7 +13,5 @@ export * from './trading/trading-protocol.js';
 export * from './trading/tool-contract.js';
 export * from './trading/agent-message-types.js';
 export * from './tool-schemas.js';
-export * from './cost-profile.js';
 export * from './scanner-types.js';
 export * from './market-assessment.js';
-export * from './pagination.js';
