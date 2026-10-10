@@ -19,7 +19,7 @@ jobs:
           repository: poshjosh/herobids
           # Immutable tag pin (C2.3: never a moving branch). Bump via
           # `scripts/shell/ops/release.sh --bump-parity-pin <herobids-tag>`.
-          ref: v0.6.7 # parity-pin
+          ref: v0.6.8 # parity-pin
           path: herobids
       - uses: actions/checkout@v4
         with:
