@@ -1,0 +1,39 @@
+{
+  "name": "@traderton/contracts",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Versioned wire-DTO contract package published by traderton for herobids (Brief B decision 5).",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./trading": {
+      "import": "./dist/trading/index.js",
+      "types": "./dist/trading/index.d.ts"
+    },
+    "./assessment": {
+      "import": "./dist/assessment/index.js",
+      "types": "./dist/assessment/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  }
+}

@@ -68,6 +68,22 @@ importers:
         specifier: ^25.9.1
         version: 25.9.5
 
+  packages/contracts:
+    dependencies:
+      zod:
+        specifier: ^3.25.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.1
+        version: 25.9.5
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@25.9.5)(tsx@4.23.13)(yaml@2.9.0)
+
   packages/db:
     dependencies:
       '@traderton/domain':
