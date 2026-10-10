@@ -8,7 +8,7 @@ export * from './agent-risk-contract.js';
 export * from './trading/mode-rank.js';
 export * from './trading/execution-capability.js';
 export * from './trading/venue-capability.js';
-export * from './trading/actor-health.js';
+
 export * from './trading/trading-protocol.js';
 export * from './trading/tool-contract.js';
 export * from './trading/agent-message-types.js';

@@ -63,7 +63,6 @@ Per-route blocking reason (all also hit #1 and #2):
 | `backtests.ts` | `PlansConfig`, plan-guards |
 | `credentials.ts` | `PlansConfig`, plan-guards, `../providers/*`, `../credential-dependents.js`, `../crypto.js` |
 | `reconciliation.ts` | (only #1 + #2 — `bots.userId` + `request.userId`) |
-| `actor-health.ts` | `agents` platform table |
 | `exports.ts` | platform tables (agents/blueprints/…) |
 | `datasets.ts` | (only #1 + #2 — `datasets.userId` + `request.userId`) |
 | `capabilities/trading.ts` | `PlansConfig`/`RuntimeBudgetPolicy`, runtime-assignment platform tables |

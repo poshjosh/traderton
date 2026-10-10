@@ -16,6 +16,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- **Actor-health dead copy removed (parity-drift epic, B2.2).**
+  `packages/domain/src/trading/actor-health.ts` (+ test), `packages/worker/src/actor-health-publisher.ts`
+  (+ test), and the quarantined `_deferred-authoring/api-routes/actor-health.ts` deleted;
+  the `_deferred-authoring/README.md` row removed. No non-test importers.
+
 - **Deleted the `tick-gates` cluster (parity-drift epic, milestone A10).**
   `packages/worker/src/tick-gates.ts`, `tick-gate-state.ts`, `tick-gate-state.test.ts`,
   `tick-message-types.test.ts` and the quarantined `_deferred-config/tick-gates.test.ts`
