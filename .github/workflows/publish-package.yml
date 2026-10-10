@@ -1,0 +1,45 @@
+name: Publish Contracts Package
+
+# Publishes @traderton/contracts to GitHub Packages (see the C2.0 plan in
+# herobids' parity-drift epic: plans/C2-publish-contracts.md). Path-triggered on
+# changes to the contracts package; also available via workflow_dispatch.
+# The package version is independent of the root traderton version.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/contracts/**'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: publish-contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://npm.pkg.github.com'
+
+      - run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build contracts package
+        run: pnpm --filter @traderton/contracts run build
+
+      - name: Test contracts package
+        run: pnpm --filter @traderton/contracts run test
+
+      - name: Publish contracts package
+        run: pnpm publish --filter @traderton/contracts --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

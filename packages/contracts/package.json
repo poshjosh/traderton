@@ -5,6 +5,9 @@
   "description": "Versioned wire-DTO contract package published by traderton for herobids (Brief B decision 5).",
   "type": "module",
   "sideEffects": false,
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "import": "./dist/index.js",
