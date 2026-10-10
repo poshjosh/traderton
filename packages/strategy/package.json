@@ -14,6 +14,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@poshjosh/contracts": "workspace:*",
     "@traderton/domain": "workspace:*",
     "@traderton/market-data": "workspace:*",
     "zod": "^3.25.0"

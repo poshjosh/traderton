@@ -1,4 +1,5 @@
 export type { PriceCandle } from '@traderton/domain';
+export type { RegimeResult } from '@poshjosh/contracts';
 
 export const PROVIDER_REQUEST_CLASSES = [
   'execution-critical',
@@ -145,24 +146,6 @@ export interface RegimeParams {
   marketStructure?: 'higherHighs' | 'lowerHighs' | 'any';
   priceAboveVwap?: boolean;
   disableWhenChoppy?: boolean;
-}
-
-export interface RegimeResult {
-  pass: boolean;
-  reasons: string[];
-  details: {
-    benchmarkSymbol: string;
-    currentPrice: number;
-    emaFast: number;
-    emaSlow: number;
-    emaTrend: number;
-    emaAlignment: 'bullish' | 'bearish';
-    adxValue: number;
-    choppy: boolean;
-    vwap: number;
-    priceAboveVwap: boolean;
-    marketStructure: 'higherHighs' | 'lowerHighs' | 'mixed';
-  };
 }
 
 export interface MarketDataConfig {

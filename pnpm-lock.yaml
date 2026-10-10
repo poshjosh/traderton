@@ -105,6 +105,9 @@ importers:
 
   packages/domain:
     dependencies:
+      '@poshjosh/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       decimal.js:
         specifier: ^10.5.0
         version: 10.6.0
@@ -131,6 +134,9 @@ importers:
 
   packages/market-data:
     dependencies:
+      '@poshjosh/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@traderton/domain':
         specifier: workspace:*
         version: link:../domain
@@ -144,6 +150,9 @@ importers:
 
   packages/strategy:
     dependencies:
+      '@poshjosh/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@traderton/domain':
         specifier: workspace:*
         version: link:../domain
@@ -185,6 +194,9 @@ importers:
 
   packages/worker:
     dependencies:
+      '@poshjosh/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@traderton/backtesting':
         specifier: workspace:*
         version: link:../backtesting

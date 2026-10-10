@@ -2,8 +2,7 @@
 // (whose platform body is not part of the mechanical trading loop). These are the
 // mechanical scan/watch/freshness value shapes consumed by the KEEP scan + tick-gate
 // files. Type-relocation seam only — no logic authored here.
-import type { HybridPricingIdentity } from '@traderton/domain';
-import type { RegimeResult } from '@traderton/market-data';
+import type { HybridPricingIdentity, RegimeResult } from '@poshjosh/contracts';
 import type { ScoredSignal } from '@traderton/strategy';
 import type { PositionIndicatorUpdate, SymbolFetchOutcome } from './technical-phase.js';
 import type { WatchInstrumentIdentity, WatchPurpose, WatchCoverageLink } from './watch-types.js';
@@ -59,7 +58,7 @@ export interface RuntimeActiveWatchSummary {
   overflowCount: number;
 }
 
-export type { HybridPricingIdentity } from '@traderton/domain';
+export type { HybridPricingIdentity } from '@poshjosh/contracts';
 
 // ─── Scanner health classification ─────────────────────────────────────────
 

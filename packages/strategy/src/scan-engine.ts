@@ -1,5 +1,6 @@
 import type { PriceCandle } from '@traderton/market-data';
-import type { HybridPricingIdentity, ScannerCandleTarget, SwapExecutionIdentity } from '@traderton/domain';
+import type { HybridPricingIdentity } from '@poshjosh/contracts';
+import type { ScannerCandleTarget, SwapExecutionIdentity } from '@traderton/domain';
 import {
   rsi,
   macd,

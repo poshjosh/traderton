@@ -1,8 +1,9 @@
-import type { Decision, DecisionId, HybridPricingIdentity, InstrumentId, VenueAccountId, RiskConfig, TechnicalConfig } from '@traderton/domain';
+import type { Decision, DecisionId, InstrumentId, VenueAccountId, RiskConfig, TechnicalConfig } from '@traderton/domain';
 import { quantity, scannerTargetKey } from '@traderton/domain';
 import type { SwapExecutionIdentity, ScannerCandleTarget } from '@traderton/domain';
 import type { PositionState } from '@traderton/engine';
-import type { PriceCandle, RegimeParams, RegimeResult } from '@traderton/market-data';
+import type { PriceCandle, RegimeParams } from '@traderton/market-data';
+import type { CandleFetchStatus, HybridPricingIdentity, PositionIndicatorUpdate, RegimeResult, SymbolFetchOutcome } from '@poshjosh/contracts';
 import { scanCandidates, scoreCandidate } from '@traderton/strategy';
 import type { CandidateContext, ScanConfig, ScoredSignal } from '@traderton/strategy';
 import type { RetryOptions } from './candle-fetch-retry.js';
@@ -26,33 +27,8 @@ export interface DiscoveredInstrument {
 
 export type FilterConfig = TechnicalConfig['filters'];
 
-/** Classification of a single candle-fetch attempt in the technical scan. */
-export type CandleFetchStatus = 'eligible_fetched' | 'eligible_empty' | 'unsupported' | 'transient_failure' | 'skipped_breaker_open';
-
-export interface SymbolFetchOutcome {
-  symbol: string;
-  /** Exact instrument ID this outcome corresponds to. */
-  instrumentId: string;
-  /** For orderbook targets, the provider symbol used for candle fetching. Undefined for swap targets. */
-  resolvedProviderSymbol?: string;
-  status: CandleFetchStatus;
-  candleCount?: number;
-  errorDetail?: string;
-}
-
-export interface PositionIndicatorUpdate {
-  symbol: string;
-  side: 'long' | 'flat';
-  /** Venue-specific instrument identifier for this position. Falls back to symbol when unavailable. */
-  instrumentId?: string;
-  entryPrice?: number;
-  currentPrice?: number;
-  unrealizedPnlPct?: number;
-  rsi?: number;
-  signalNote?: string;
-  /** Set to true when the scanner found this position should exit but advisory mode held back the direct submission. */
-  exitAdvisory?: boolean;
-}
+// Re-export the contract scan-state shapes so existing relative importers keep working.
+export type { CandleFetchStatus, PositionIndicatorUpdate, SymbolFetchOutcome };
 
 export interface TechnicalPhaseDeps {
   config: TechnicalConfig;

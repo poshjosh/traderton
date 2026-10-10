@@ -1,4 +1,5 @@
-import type { AgentWakePayload, HybridPricingIdentity, TechnicalConfig } from '@traderton/domain';
+import type { AgentWakePayload, TechnicalConfig } from '@traderton/domain';
+import type { HybridPricingIdentity } from '@poshjosh/contracts';
 import type { ScoredSignal } from '@traderton/strategy';
 import type { TechnicalPhaseResult } from './technical-phase.js';
 import type { ScannerHealthResult, TechnicalScanState } from './scan-types.js';

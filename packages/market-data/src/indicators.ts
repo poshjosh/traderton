@@ -1,5 +1,5 @@
 import type { PriceCandle } from './types.js';
-import type { VolatilityEvidence } from '@traderton/domain';
+import type { VolatilityEvidence } from '@poshjosh/contracts';
 
 /**
  * Exponential Moving Average — returns array of EMA values aligned with input candles.
