@@ -100,9 +100,10 @@ LIVE and KEPT. **[CORRECTED 2026-10-04]** The earlier claim that "Traderton now 
 Traderton now DOES produce the actor events: the agent scan loop is wired (E1-T T4), the scan/wake/journal
 and bot/agent-status callbacks write to a dedicated `consumer_notifications` outbox (E3-T T2–T4), and the
 system-only `scan_consumer_notifications` tool exposes them for a poller. The producer side is live.
-What remains is the herobids RELAY (E3-H) that polls the outbox and republishes the existing herobids
-message types — it is GATED behind a human go, so until it lands the notifications accumulate unread and
-are pruned after `notifications.retentionDays`. See 001 "Actor event + lifecycle callbacks never authored
+The herobids RELAY (E3-H) that polls the outbox and republishes the existing herobids message types
+landed 2026-10-05 (herobids `apps/worker/src/agents/actor-event-relay.ts` + `boundary-consumer-notification-feed.ts`),
+so the channel is now end-to-end: Traderton produces → herobids republishes to the existing agent streams.
+See 001 "Actor event + lifecycle callbacks never authored
 (item C2)" (Wave E `-T` restoration), 003 (2026-10-04), and
 `docs/features/2026/10/04/001-wave-e-actor-events-and-lifecycle/`.
 

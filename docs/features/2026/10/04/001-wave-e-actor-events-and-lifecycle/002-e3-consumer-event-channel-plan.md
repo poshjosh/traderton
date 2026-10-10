@@ -1,7 +1,7 @@
 # 002 — E3: Traderton → consumer event channel
 
 **Status:** E3-T DONE (T1 DONE, T2 DONE, T3 DONE, T4 DONE, T5 DONE);
-E3-H GATED (herobids, awaiting human go).
+E3-H DONE (herobids relay landed 2026-10-05; human go given).
 **Depends on:** E2 step 2 (loader stamps `creatorType`/`creatorId`
 on bot configs). **Repos:** traderton (E3-T), then herobids (E3-H, gated on human go).
 **Source behaviour:** `git -C ../herobids show 45271d28^:apps/worker/src/index.ts`. Agent

@@ -1,7 +1,7 @@
 # 003 — E1: agent technical scan loop + agent-actor lifecycle
 
 **Status:** E1-T DONE (T1 DONE, T2 DONE, T3 DONE, T4 DONE, T5 DONE);
-E1-H GATED (herobids, awaiting human go).
+E1-H DONE (herobids profile fields + session lifecycle calls landed 2026-10-05; human go given).
 **Depends on:** E3-T (scan results reach agents only through
 the E3 `consumer_notifications` channel), and E2 (loader + status callbacks). **Repos:** traderton (E1-T), then
 herobids (E1-H, gated on human go).

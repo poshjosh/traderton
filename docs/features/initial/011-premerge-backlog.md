@@ -249,12 +249,15 @@ Plans + per-step/per-task status live in
 - [x] **E3-T — Traderton → consumer event channel (producer side)** (traderton). DONE 2026-10-04 —
   `consumer_notifications` outbox + repo, best-effort notifier wired into agent + bot actors, the
   system-only `scan_consumer_notifications` tool, and a retention prune loop.
-- [ ] **E3-H — herobids relay** — GATED (awaiting human go). Polls the outbox and republishes the existing
-  herobids message types.
+- [x] **E3-H — herobids relay** — DONE 2026-10-05. Polls the outbox and republishes the existing
+  herobids message types (`ActorEventRelay` + `boundary-consumer-notification-feed` in herobids
+  `apps/worker/src/agents/`).
 - [x] **E1-T — agent scan loop + agent-actor lifecycle** (traderton). DONE 2026-10-04 — profile
   creator/active strategy ownership split (parity-tested), `agentScanner` operator config, scan persistence
   + retention, the hybrid scan loop wired into the agent actor, and consumer-only
   `start_agent_actor`/`stop_agent_actor` + `agent_actor_runs` with cascade stop, boot rehydrate, orphan sweep.
-- [ ] **E1-H — herobids profile fields + session start/stop calls** — GATED (awaiting human go).
+- [x] **E1-H — herobids profile fields + session start/stop calls** — DONE 2026-10-05. herobids sends
+  `scanMode`/`creatorStrategy` with every profile write and drives `start_agent_actor`/`stop_agent_actor`
+  from session lifecycle (`agent-actor-lifecycle.ts` + the API post-commit hook).
 - Follow-ups: **E4** (agent-actor lease + owner routing) and **E5** (`journal_events` retention +
   partitioning) are separate feature folders, not started.

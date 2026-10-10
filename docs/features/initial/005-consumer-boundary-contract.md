@@ -523,6 +523,54 @@ event twice — accepted). Rows are pruned after `notifications.retentionDays`
 Payloads are **additive-only** — new fields may be added, existing fields are
 never removed or repurposed, so an older relay keeps parsing newer rows.
 
+### `start_agent_actor` / `stop_agent_actor` (write-database) — Wave E / E1-T T5
+
+Consumer-only agent-actor lifecycle tools. They are **agent-subject, owner-scoped**
+(`actor.type='agent'`, `actor.id` = the agent itself) and are called by the
+consumer's session manager (herobids `onSessionActive` / `onSessionStopped` /
+`onAgentCrashed` / agent delete), **not** by an agent. They are registered in the
+boundary tool registry (so the consumer can invoke them) but are deliberately
+**absent from every `SKILL_TOOL_MAP` skill set and carry no `get_schema` entry**,
+so they never appear in an agent-facing `tools/list` (the same mechanism that
+keeps `scan_consumer_notifications` / `scan_trade_events` consumer-only).
+
+- **`start_agent_actor`** — payload `{ venueAccountId?: string }` (optional; the
+  venue account to start the actor on, defaults to the owner default). The
+  boundary context factory's ensure constructs + starts the actor **before** the
+  tool runs (exactly like `submit_decision`); the tool then records the durable
+  run-state intent (`agent_actor_runs.desiredState='running'`) with the resolved
+  coordinates. Idempotent (repeated calls upsert the same running row). Result
+  `{ ok: true, actorId, desiredState: 'running' }`.
+- **`stop_agent_actor`** — payload `{}`. Marks the run state `stopped`, stops +
+  deregisters the actor, evicts the ensure cache, and cascade-stops the agent's
+  running bots (best-effort per bot). Idempotent (a stopped agent/bot stays
+  stopped). Result `{ ok: true, actorId, stoppedBots: string[] }`.
+
+Both are `write-database`; the boundary's `boundary_invocations` idempotency layer
+handles retry dedup transparently (no per-tool dedup key). Traderton rehydrates
+`running` actors on boot and its orphan sweep re-ensures dead `running` actors, so
+an undelivered stop leaves the scanner running until the next stop is delivered.
+
+### `set_agent_trading_profile` / `get_agent_trading_profile` — Wave E / E1-T T1 (scan fields)
+
+The agent trading profile carries a **creator/active strategy ownership split**
+(004 "Agent strategy ownership in the trading profile"). herobids sends **creator
+inputs only**; Traderton derives the active strategy it actually runs.
+
+- **`set_agent_trading_profile`** gains two optional creator-input fields:
+  `scanMode` (`'scanner_gated' | 'mixed' | null`) and `creatorStrategy` (exactly
+  one of `{ presetKey, styleTier }` or `{ customTechnical }`). **Absent =
+  unchanged; explicit `null` = clear.** The tool **never** accepts
+  `active_strategy` (Traderton derives it on write: a first set or a changed
+  `creatorStrategy` resolves `source:'creator'`; an unchanged resend leaves the
+  stored `active_strategy` untouched). Validation is applied to the **resolved**
+  technical config (`scanner_gated` → strict parse + strategy required; `mixed` →
+  lenient; swap + `scanner_gated` → swap-scanner validation), mapping to
+  `validation.*` / `swap.*` codes.
+- **`get_agent_trading_profile`** returns the full profile including
+  `scan_mode`, `creator_strategy`, and the Traderton-owned `active_strategy`, so
+  the agent and herobids can see what is actually running.
+
 ### `get_owner_bot_fills` / `get_owner_bot_positions` / `get_owner_fills` / `get_owner_positions` / `get_owner_journal` (read-only) — c4.2
 
 Owner-scoped raw-row reads used by the herobids PLATFORM export routes
