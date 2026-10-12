@@ -6,6 +6,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`get_strategy_presets` full-preset read tool (D2-a).** Traderton is now the
+  sole authority for the strategy preset definitions. The new venue-independent
+  `get_strategy_presets` read tool returns the complete `PresetEntry` catalog
+  (grouped by style tier) so herobids can derive agent config without holding its
+  own copy of the preset YAML. The preset wire/type surface
+  (`PresetEntrySchema`, `PresetEntry`, `StyleKey`, `isStyleKey`,
+  `agentStyleToPresetStyle`) moved to `@poshjosh/contracts@0.3.0`; the derivation
+  (`applyPresetToAgent`, `computePresetBehaviorVersion`, `extractBehaviorFields`)
+  stays local in `packages/domain/src/config/presets.ts`.
+
+### Changed
+
+- **`@poshjosh/contracts` v0.2.0 + v0.3.0.** Added `ScannerCandleTarget`,
+  `SwapExecutionIdentity`, `scannerTargetKey`, `PriceCandle` (v0.2.0) and the
+  preset wire/type surface (v0.3.0).
+
 ## 0.1.4-2026.10.12
 
 ### Added
