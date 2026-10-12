@@ -361,6 +361,8 @@ const ListAgentStrategyChangesParamsSchema = z.object({
   actorId: z.string().min(1).describe('The agent whose strategy changes to list.'),
   since: z.string().optional().describe('ISO timestamp — only changes after this.'),
   limit: z.number().int().min(1).max(500).optional().describe('Max rows (default 50).'),
+  venueAccountId: z.string().min(1).optional()
+    .describe('Consumer-injected venue account binding. Never an LLM input.'),
 });
 
 const listAgentStrategyChangesTool: AgentTool<TradingToolContext> = {

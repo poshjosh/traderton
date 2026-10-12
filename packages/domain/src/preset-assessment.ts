@@ -96,6 +96,8 @@ export const AssessStrategyPresetParamsSchema = z.object({
     .describe('Venue family to scope the assessment (e.g. "hyperliquid", "bybit", "jupiter"). Required.'),
   instrumentKind: z.enum(['orderbook', 'perp', 'swap', 'dex']).optional()
     .describe('Instrument kind shared across all requested symbols. Defaults to "orderbook" when omitted.'),
+  venueAccountId: z.string().min(1).optional()
+    .describe('Consumer-injected venue account binding. Never an LLM input.'),
 });
 export type AssessStrategyPresetParams = z.infer<typeof AssessStrategyPresetParamsSchema>;
 
