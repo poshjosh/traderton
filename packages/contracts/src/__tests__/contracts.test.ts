@@ -8,6 +8,10 @@ import {
   EvidenceValueSchema,
   ScannerWakeContextSchema,
   WakePrioritySchema,
+  scannerTargetKey,
+  type PriceCandle,
+  type ScannerCandleTarget,
+  type SwapExecutionIdentity,
 } from '../index.js';
 
 describe('@poshjosh/contracts round-trip fixtures', () => {
@@ -89,5 +93,37 @@ describe('@poshjosh/contracts round-trip fixtures', () => {
   it('parses wake priority', () => {
     expect(WakePrioritySchema.parse('high')).toBe('high');
     expect(() => WakePrioritySchema.parse('urgent')).toThrow();
+  });
+
+  it('derives a stable scanner target key for orderbook and swap targets', () => {
+    const orderbook: ScannerCandleTarget = { venueType: 'orderbook', providerSymbol: 'BTCUSDT' };
+    const swap: ScannerCandleTarget = { venueType: 'swap', network: 'solana', poolAddress: '0xabc' };
+    expect(scannerTargetKey(orderbook)).toBe('orderbook:BTCUSDT');
+    expect(scannerTargetKey(swap)).toBe('swap:solana:0xabc');
+  });
+
+  it('carries a swap execution identity with address-qualified assets', () => {
+    const identity: SwapExecutionIdentity = {
+      network: 'solana',
+      baseSymbol: 'USDC',
+      baseAddress: '0xbase',
+      quoteSymbol: 'SOL',
+      quoteAddress: '0xquote',
+    };
+    expect(identity.baseAddress).toBe('0xbase');
+    expect(identity.quoteAddress).toBe('0xquote');
+  });
+
+  it('carries a price candle with OHLCV fields', () => {
+    const candle: PriceCandle = {
+      timestamp: '2026-10-10T00:00:00.000Z',
+      open: 100,
+      high: 110,
+      low: 95,
+      close: 105,
+      volume: 1000,
+    };
+    expect(candle.close).toBe(105);
+    expect(candle.volume).toBe(1000);
   });
 });
