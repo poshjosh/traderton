@@ -90,7 +90,7 @@ describe('list_strategy_presets', () => {
 });
 
 describe('get_strategy_presets', () => {
-  it('returns the full preset entry (params, risk, execution) for a tier', async () => {
+  it('returns the full preset entry (params, risk, execution) grouped by tier', async () => {
     const ctx = makeCtx({
       presetCatalog: {
         listPresets: () => [{ key: 'momentum', entry: momentumPreset }],
@@ -98,11 +98,11 @@ describe('get_strategy_presets', () => {
     });
     const result = await getFullTool.execute({ styleTier: 'standard' }, ctx);
     expect(result.success).toBe(true);
-    const data = result.data as { presets: Array<{ key: string; entry: PresetEntry }> };
-    expect(data.presets).toHaveLength(1);
-    expect(data.presets[0]!.key).toBe('momentum');
-    expect(data.presets[0]!.entry.strategy.type).toBe('momentum');
-    expect(data.presets[0]!.entry.strategy.params).toEqual({ signalBias: 'trend-following', indicators: {} });
+    const data = result.data as { presets: Record<string, Array<{ key: string; entry: PresetEntry }>> };
+    expect(data.presets['standard']).toHaveLength(1);
+    expect(data.presets['standard']![0]!.key).toBe('momentum');
+    expect(data.presets['standard']![0]!.entry.strategy.type).toBe('momentum');
+    expect(data.presets['standard']![0]!.entry.strategy.params).toEqual({ signalBias: 'trend-following', indicators: {} });
   });
 
   it('fails cleanly when the preset catalog port is absent', async () => {

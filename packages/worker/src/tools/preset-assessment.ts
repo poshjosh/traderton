@@ -424,7 +424,7 @@ const GetStrategyPresetsParamsSchema = z.object({
 const getStrategyPresetsTool: AgentTool<TradingToolContext> = {
   name: 'get_strategy_presets',
   category: 'read-config',
-  description: 'Read the full strategy preset definitions (name, description, strategy type, decision mode, params, risk, execution) from the Traderton catalog. Returns the complete preset entries, not the thin catalog.',
+  description: 'Read the full strategy preset definitions (name, description, strategy type, decision mode, params, risk, execution) from the Traderton catalog. Returns the complete preset entries grouped by style tier, not the thin catalog.',
   parametersSchema: GetStrategyPresetsParamsSchema,
   parameters: convertZodToJsonSchema(GetStrategyPresetsParamsSchema),
   async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
@@ -436,11 +436,9 @@ const getStrategyPresetsTool: AgentTool<TradingToolContext> = {
       ? [params.styleTier]
       : ['economy', 'standard', 'premium'];
 
-    const presets: Array<{ key: string; entry: PresetEntry }> = [];
+    const presets: Record<string, Array<{ key: string; entry: PresetEntry }>> = {};
     for (const tier of tiers) {
-      for (const { key, entry } of ctx.presetCatalog.listPresets(tier)) {
-        presets.push({ key, entry });
-      }
+      presets[tier] = ctx.presetCatalog.listPresets(tier).map(({ key, entry }) => ({ key, entry }));
     }
     return { success: true, data: { ok: true, presets } };
   },
