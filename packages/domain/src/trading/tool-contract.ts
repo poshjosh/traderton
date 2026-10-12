@@ -423,6 +423,21 @@ export interface TradingToolContext {
     listStrategyChanges?(actorId: string, since?: string, limit?: number): Promise<Array<Record<string, unknown>>>;
     /** Read a data-only assessment artifact by id (consumer-only read). */
     getArtifact?(artifactId: string): Promise<Record<string, unknown> | null>;
+    /** Persist a completed data-only assessment (run + artifact + request bookkeeping). */
+    persistAssessment?(params: {
+      identity: import('../market-assessment.js').MarketAssessmentIdentity;
+      artifactId: string;
+      assessedAt: Date;
+      expiresAt: Date;
+      allowedPresets: string[];
+      evidence: Record<string, unknown>;
+      presets: Record<string, unknown>[];
+      currentStrategy: Record<string, unknown>;
+    }): Promise<void>;
+    /** The freshest active artifact for an identity, or null (cache). */
+    findFreshArtifact?(identity: import('../market-assessment.js').MarketAssessmentIdentity): Promise<Record<string, unknown> | null>;
+    /** The most recent completed request for an identity (cooldown bookkeeping). */
+    latestCompletedRequest?(identity: import('../market-assessment.js').MarketAssessmentIdentity): Promise<Record<string, unknown> | null>;
   };
 }
 

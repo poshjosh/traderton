@@ -110,6 +110,8 @@ export const AssessStrategyPresetResultSchema = z.object({
   assessedAt: z.string().optional(),
   expiresAt: z.string().optional(),
   freshnessNote: z.string().optional(),
+  /** When a recompute is next eligible (cooldown-blocked results). */
+  nextEligibleAt: z.string().optional(),
   error: z.string().optional(),
   errorCode: z.string().optional(),
 });

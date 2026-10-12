@@ -113,6 +113,57 @@ async function assessOne(
     };
   }
 
+  const identity = {
+    instrumentKind: instrumentKind as 'orderbook' | 'perp',
+    venueFamily,
+    styleTier: styleTier as 'economy' | 'standard' | 'premium',
+    symbol,
+  } as const;
+
+  // ── Cache: a fresh artifact for the same identity is returned as-is. ──
+  const fresh = await pa.findFreshArtifact?.(identity);
+  if (fresh) {
+    const freshId = typeof fresh.id === 'string' ? fresh.id : undefined;
+    const freshAssessedAt = typeof fresh.assessedAt === 'string' ? fresh.assessedAt : undefined;
+    const freshExpiresAt = typeof fresh.expiresAt === 'string' ? fresh.expiresAt : undefined;
+    return {
+      success: true,
+      symbol,
+      canonicalIdentity: identity,
+      evidence: fresh.evidence as AssessmentEvidence,
+      currentStrategy: (fresh.currentStrategy as CurrentStrategyView | null) ?? null,
+      presets: (fresh.presets as PresetAssessmentEntry[]) ?? [],
+      artifactId: freshId,
+      assessedAt: freshAssessedAt,
+      expiresAt: freshExpiresAt,
+      freshnessNote: freshExpiresAt ? computeFreshnessNote(freshExpiresAt, Date.now()) : undefined,
+    };
+  }
+
+  // ── Cooldown: a recompute is allowed once per effective interval per
+  //    (agent, identity). The creator may lengthen it via the profile's preset
+  //    policy, never shorten it below the operator floor. ──
+  const effectiveIntervalMs = Math.max(
+    pa.config.minRequestIntervalMs,
+    pa.presetPolicy?.minRequestIntervalMs ?? 0,
+  );
+  const lastRequest = await pa.latestCompletedRequest?.(identity);
+  const lastCompletedAt = typeof lastRequest?.completedAt === 'string' ? lastRequest.completedAt : null;
+  if (lastCompletedAt) {
+    const lastCompleted = new Date(lastCompletedAt).getTime();
+    const nextEligibleAt = lastCompleted + effectiveIntervalMs;
+    if (Date.now() < nextEligibleAt) {
+      return {
+        success: false,
+        symbol,
+        canonicalIdentity: identity,
+        error: 'A fresh assessment was already computed for this identity. Wait for the cooldown before requesting a new one.',
+        errorCode: 'assessment.cooldown_blocked',
+        nextEligibleAt: new Date(nextEligibleAt).toISOString(),
+      };
+    }
+  }
+
   // ── Evidence: regime + volatility + candle window (behind the boundary). ──
   const regimeResult = await pa.checkRegime({ benchmarkSymbol: symbol });
   const volatilityResult = await pa.getVolatility({ symbol });
@@ -221,20 +272,35 @@ async function assessOne(
 
   const now = new Date();
   const expiresAt = new Date(now.getTime() + pa.config.cacheFreshnessMs);
+  const artifactId = `assess:${symbol}:${now.getTime()}`;
+
+  // ── Persist the completed data-only assessment (run + artifact + request). ──
+  // The artifact is the change_strategy_preset gate-1 source and the review
+  // screen's get_assessment_artifact read. Persistence is best-effort: a
+  // persistence failure must not fail the assessment the agent already received.
+  try {
+    await pa.persistAssessment?.({
+      identity,
+      artifactId,
+      assessedAt: now,
+      expiresAt,
+      allowedPresets: pa.presetPolicy?.allowedPresets ?? [],
+      evidence: evidence as unknown as Record<string, unknown>,
+      presets: presetEntries as unknown as Record<string, unknown>[],
+      currentStrategy: (currentStrategy ?? {}) as unknown as Record<string, unknown>,
+    });
+  } catch {
+    // Best-effort — the in-memory result is still returned to the agent.
+  }
 
   return {
     success: true,
     symbol,
-    canonicalIdentity: {
-      instrumentKind: instrumentKind as 'orderbook' | 'perp',
-      venueFamily,
-      styleTier: styleTier as 'economy' | 'standard' | 'premium',
-      symbol,
-    },
+    canonicalIdentity: identity,
     evidence,
     currentStrategy,
     presets: presetEntries,
-    artifactId: `assess:${symbol}:${now.getTime()}`,
+    artifactId,
     assessedAt: now.toISOString(),
     expiresAt: expiresAt.toISOString(),
     freshnessNote: computeFreshnessNote(expiresAt.toISOString(), now.getTime()),
@@ -257,7 +323,18 @@ const changeStrategyPresetTool: AgentTool<TradingToolContext> = {
     }
     const pa = ctx.presetAssessment;
 
-    // ── Gate 1: creator policy ──
+    // ── Gate 1: the artifact must exist, belong to this owner/agent identity,
+    //    and be fresh. ──
+    const artifact = await pa.getArtifact?.(params.assessmentArtifactId);
+    if (!artifact) {
+      return { success: false, error: 'The assessment artifact does not exist or is not owned by this agent.', errorCode: 'assessment.artifact_not_found', fault: false };
+    }
+    const expiresAt = typeof artifact.expiresAt === 'string' ? new Date(artifact.expiresAt).getTime() : NaN;
+    if (Number.isNaN(expiresAt) || Date.now() >= expiresAt) {
+      return { success: false, error: 'The assessment artifact has expired. Request a fresh assessment before changing your preset.', errorCode: 'assessment.artifact_expired', fault: false };
+    }
+
+    // ── Gate 2: creator policy ──
     if (!pa.presetPolicy || !pa.presetPolicy.changesAllowed) {
       return { success: false, error: 'The creator has disabled preset changes.', errorCode: 'assessment.preset_changes_disabled', fault: false };
     }

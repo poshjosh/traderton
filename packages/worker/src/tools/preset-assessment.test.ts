@@ -42,6 +42,16 @@ function makePresetAssessment(overrides: Partial<NonNullable<TradingToolContext[
     checkRegime: vi.fn(async () => ({ kind: 'success', data: { pass: true, reasons: [], details: { benchmarkSymbol: 'BTC', currentPrice: 1, emaFast: 1, emaSlow: 1, emaTrend: 1, emaAlignment: 'bullish', adxValue: 25, choppy: false, vwap: 1, priceAboveVwap: true, marketStructure: 'higherHighs' } } })),
     getVolatility: vi.fn(async () => ({ kind: 'success', data: { volatilityEvidence: { averageTrueRange: 10, volatilityRegime: 'normal', calculationVersion: '1.0.0' } } })),
     applyPresetChange: vi.fn(async () => ({ ok: true as const })),
+    getArtifact: vi.fn(async () => ({
+      id: 'a1',
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      presets: [],
+      evidence: {},
+      currentStrategy: {},
+    })),
+    persistAssessment: vi.fn(async () => undefined),
+    findFreshArtifact: vi.fn(async () => null),
+    latestCompletedRequest: vi.fn(async () => null),
     ...overrides,
   };
 }
@@ -108,6 +118,48 @@ describe('assess_strategy_preset', () => {
     const result = await assessTool.execute({ symbols: ['BTC'], venueFamily: 'hyperliquid' }, makeCtx({ presetAssessment: undefined }));
     expect(result.success).toBe(false);
   });
+
+  it('returns the cached artifact while it is fresh', async () => {
+    const findFreshArtifact = vi.fn(async () => ({
+      id: 'cached-1',
+      assessedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      evidence: {},
+      currentStrategy: null,
+      presets: [],
+    }));
+    const ctx = makeCtx({ presetAssessment: makePresetAssessment({ findFreshArtifact }) });
+    const result = await assessTool.execute({ symbols: ['BTC'], venueFamily: 'hyperliquid' }, ctx);
+    expect(result.success).toBe(true);
+    const data = result.data as { results: Array<Record<string, unknown>> };
+    expect(data.results[0]!.artifactId).toBe('cached-1');
+  });
+
+  it('blocks a recompute inside the cooldown', async () => {
+    const latestCompletedRequest = vi.fn(async () => ({
+      id: 'req-1',
+      completedAt: new Date().toISOString(),
+      assessmentArtifactId: 'a1',
+    }));
+    const ctx = makeCtx({ presetAssessment: makePresetAssessment({ latestCompletedRequest }) });
+    const result = await assessTool.execute({ symbols: ['BTC'], venueFamily: 'hyperliquid' }, ctx);
+    expect(result.success).toBe(true);
+    const data = result.data as { results: Array<Record<string, unknown>> };
+    expect(data.results[0]!.success).toBe(false);
+    expect(data.results[0]!.errorCode).toBe('assessment.cooldown_blocked');
+    expect(data.results[0]!.nextEligibleAt).toBeDefined();
+  });
+
+  it('persists the completed assessment artifact', async () => {
+    const persistAssessment = vi.fn(async () => undefined);
+    const ctx = makeCtx({ presetAssessment: makePresetAssessment({ persistAssessment }) });
+    const result = await assessTool.execute({ symbols: ['BTC'], venueFamily: 'hyperliquid' }, ctx);
+    expect(result.success).toBe(true);
+    expect(persistAssessment).toHaveBeenCalledTimes(1);
+    const arg = persistAssessment.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.artifactId).toBeDefined();
+    expect(arg.presets).toBeDefined();
+  });
 });
 
 describe('change_strategy_preset', () => {
@@ -135,5 +187,27 @@ describe('change_strategy_preset', () => {
 
   it('requires a reason', () => {
     expect(() => changeTool.parametersSchema!.parse({ assessmentArtifactId: 'a1', targetPreset: 'momentum', mode: 'entries_only' })).toThrow();
+  });
+
+  it('rejects an expired artifact', async () => {
+    const getArtifact = vi.fn(async () => ({
+      id: 'a1',
+      expiresAt: new Date(Date.now() - 1_000).toISOString(),
+      presets: [],
+      evidence: {},
+      currentStrategy: {},
+    }));
+    const ctx = makeCtx({ presetAssessment: makePresetAssessment({ getArtifact }) });
+    const result = await changeTool.execute({ assessmentArtifactId: 'a1', targetPreset: 'momentum', mode: 'entries_only', reason: 'x' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('assessment.artifact_expired');
+  });
+
+  it('rejects a missing artifact', async () => {
+    const getArtifact = vi.fn(async () => null);
+    const ctx = makeCtx({ presetAssessment: makePresetAssessment({ getArtifact }) });
+    const result = await changeTool.execute({ assessmentArtifactId: 'missing', targetPreset: 'momentum', mode: 'entries_only', reason: 'x' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('assessment.artifact_not_found');
   });
 });

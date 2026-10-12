@@ -12,6 +12,7 @@
 import crypto from 'node:crypto';
 import type {
   ActiveStrategy,
+  MarketAssessmentIdentity,
   PresetAssessmentConfig,
   PresetEntry,
   PresetPolicy,
@@ -74,6 +75,21 @@ export interface PresetAssessmentContext {
   }): Promise<{ ok: true } | { ok: false; code: string; message: string }>;
   listStrategyChanges(actorId: string, since?: string, limit?: number): Promise<Array<Record<string, unknown>>>;
   getArtifact(artifactId: string): Promise<Record<string, unknown> | null>;
+  /** Persist a completed data-only assessment (run + artifact + request bookkeeping). */
+  persistAssessment(params: {
+    identity: MarketAssessmentIdentity;
+    artifactId: string;
+    assessedAt: Date;
+    expiresAt: Date;
+    allowedPresets: string[];
+    evidence: Record<string, unknown>;
+    presets: Record<string, unknown>[];
+    currentStrategy: Record<string, unknown>;
+  }): Promise<void>;
+  /** The freshest active artifact for an identity, or null (cache). */
+  findFreshArtifact(identity: MarketAssessmentIdentity): Promise<Record<string, unknown> | null>;
+  /** The most recent completed request for an identity (cooldown bookkeeping). */
+  latestCompletedRequest(identity: MarketAssessmentIdentity): Promise<Record<string, unknown> | null>;
 }
 
 export function buildPresetAssessmentOps(deps: PresetAssessmentOpsDeps): {
@@ -181,6 +197,103 @@ export function buildPresetAssessmentOps(deps: PresetAssessmentOpsDeps): {
             evidence: artifact.evidence,
             presets: artifact.presets,
             currentStrategy: artifact.currentStrategy,
+          };
+        },
+        persistAssessment: async (params) => {
+          const identity = params.identity;
+          const symbol = identity.instrumentKind === 'orderbook' || identity.instrumentKind === 'perp'
+            ? identity.symbol
+            : undefined;
+          const network = identity.instrumentKind === 'swap' || identity.instrumentKind === 'dex'
+            ? identity.network
+            : undefined;
+          const address = identity.instrumentKind === 'swap' || identity.instrumentKind === 'dex'
+            ? identity.address
+            : undefined;
+          const identitySnapshot = identity as unknown as Record<string, unknown>;
+          const runId = crypto.randomUUID();
+          await deps.assessmentRepo.insertRun({
+            id: runId,
+            instrumentKind: identity.instrumentKind,
+            venueFamily: identity.venueFamily,
+            styleTier: identity.styleTier,
+            symbol,
+            network,
+            address,
+            identitySnapshot,
+            startedAt: params.assessedAt,
+            completedAt: params.assessedAt,
+            status: 'completed',
+            evidenceRefs: [],
+            evidenceSnapshot: params.evidence,
+            scorecardSnapshots: params.presets,
+            calculationVersions: {},
+          });
+          await deps.assessmentRepo.insertArtifact({
+            id: params.artifactId,
+            instrumentKind: identity.instrumentKind,
+            venueFamily: identity.venueFamily,
+            styleTier: identity.styleTier,
+            symbol,
+            network,
+            address,
+            identitySnapshot,
+            assessmentRunId: runId,
+            assessedAt: params.assessedAt,
+            expiresAt: params.expiresAt,
+            status: 'active',
+            allowedPresets: params.allowedPresets,
+            evidence: params.evidence,
+            presets: params.presets,
+            currentStrategy: params.currentStrategy,
+            evidenceRefs: [],
+          });
+          await deps.assessmentRepo.insertRequest({
+            id: crypto.randomUUID(),
+            ownerId: input.ownerId,
+            agentId: input.actorId,
+            instrumentKind: identity.instrumentKind,
+            venueFamily: identity.venueFamily,
+            styleTier: identity.styleTier,
+            symbol,
+            network,
+            address,
+            identitySnapshot,
+            requestGroupKey: crypto.randomUUID(),
+            status: 'assessment_completed',
+            assessmentArtifactId: params.artifactId,
+            requestedAt: params.assessedAt,
+            completedAt: params.assessedAt,
+          });
+        },
+        findFreshArtifact: async (identity) => {
+          const artifact = await deps.assessmentRepo.findFreshArtifact(identity, new Date());
+          if (!artifact) return null;
+          return {
+            id: artifact.id,
+            instrumentKind: artifact.instrumentKind,
+            venueFamily: artifact.venueFamily,
+            styleTier: artifact.styleTier,
+            symbol: artifact.symbol,
+            network: artifact.network,
+            address: artifact.address,
+            assessedAt: artifact.assessedAt.toISOString(),
+            expiresAt: artifact.expiresAt.toISOString(),
+            status: artifact.status,
+            allowedPresets: artifact.allowedPresets,
+            evidence: artifact.evidence,
+            presets: artifact.presets,
+            currentStrategy: artifact.currentStrategy,
+          };
+        },
+        latestCompletedRequest: async (identity) => {
+          const req = await deps.assessmentRepo.latestCompletedRequest(input.actorId, identity);
+          if (!req) return null;
+          return {
+            id: req.id,
+            requestedAt: req.requestedAt.toISOString(),
+            completedAt: req.completedAt?.toISOString() ?? null,
+            assessmentArtifactId: req.assessmentArtifactId ?? null,
           };
         },
       };

@@ -4,6 +4,7 @@ import {
   agentStrategyChanges,
   marketAssessmentArtifacts,
   marketAssessmentRequests,
+  marketAssessmentRuns,
 } from './schema/index.js';
 import type { MarketAssessmentIdentity } from '@traderton/domain';
 
@@ -55,6 +56,25 @@ export interface InsertAssessmentArtifact {
   presets: Record<string, unknown>[];
   currentStrategy: Record<string, unknown>;
   evidenceRefs: string[];
+}
+
+/** A data-only assessment run row to insert (artifact FK target). */
+export interface InsertAssessmentRun {
+  id: string;
+  instrumentKind: string;
+  venueFamily: string;
+  styleTier: string;
+  symbol?: string;
+  network?: string;
+  address?: string;
+  identitySnapshot: Record<string, unknown>;
+  startedAt: Date;
+  completedAt: Date;
+  status: string;
+  evidenceRefs: string[];
+  evidenceSnapshot: Record<string, unknown>;
+  scorecardSnapshots: Record<string, unknown>[];
+  calculationVersions: Record<string, unknown>;
 }
 
 /** A strategy-change audit row to insert. */
@@ -130,6 +150,28 @@ export class PresetAssessmentRepository {
       .orderBy(desc(marketAssessmentRequests.requestedAt))
       .limit(1);
     return row ?? null;
+  }
+
+  // ── Runs ────────────────────────────────────────────────────────────────
+
+  async insertRun(run: InsertAssessmentRun): Promise<void> {
+    await this.db.insert(marketAssessmentRuns).values({
+      id: run.id,
+      instrumentKind: run.instrumentKind,
+      venueFamily: run.venueFamily,
+      styleTier: run.styleTier,
+      symbol: run.symbol ?? null,
+      network: run.network ?? null,
+      address: run.address ?? null,
+      identitySnapshot: run.identitySnapshot,
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+      status: run.status,
+      evidenceRefs: run.evidenceRefs,
+      evidenceSnapshot: run.evidenceSnapshot,
+      scorecardSnapshots: run.scorecardSnapshots,
+      calculationVersions: run.calculationVersions,
+    });
   }
 
   // ── Artifacts ───────────────────────────────────────────────────────────
