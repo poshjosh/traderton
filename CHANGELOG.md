@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **The parity-drift check wrapper and CI job.** The herobids manifest reached
+  zero entries, so traderton's `scripts/check-parity-drift.mjs` wrapper, the
+  `parity-drift` CI job (`.github/workflows/slow-tests.yml`), the `test:slow`
+  script, and the `--bump-parity-pin` / parity-gate steps in `release.sh` are all
+  removed. See herobids ADR 018 and
+  `docs/features/2026/10/10/001-eliminate-parity-check/000-roadmap.md`.
+
 ### Added
 
 - **`get_strategy_presets` full-preset read tool (D2-a).** Traderton is now the
