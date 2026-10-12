@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## 0.1.4-2026.10.12
+
 ### Added
 
 - **Preset assessment, data-only and free (004 "Preset assessment becomes data-only and free").**
