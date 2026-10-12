@@ -8,6 +8,9 @@ import {
   EvidenceValueSchema,
   ScannerWakeContextSchema,
   WakePrioritySchema,
+  PresetEntrySchema,
+  agentStyleToPresetStyle,
+  isStyleKey,
   scannerTargetKey,
   type PriceCandle,
   type ScannerCandleTarget,
@@ -125,5 +128,21 @@ describe('@poshjosh/contracts round-trip fixtures', () => {
     };
     expect(candle.close).toBe(105);
     expect(candle.volume).toBe(1000);
+  });
+
+  it('parses a full preset entry and maps agent style to preset style', () => {
+    const preset = PresetEntrySchema.parse({
+      name: 'Momentum — Day',
+      description: 'Day-trend following',
+      strategy: { type: 'momentum', decisionMode: 'mechanical', params: { signalBias: 'trend-following' } },
+      risk: { maxPositionSizePct: 5 },
+      execution: { mode: 'paper' },
+    });
+    expect(preset.strategy.type).toBe('momentum');
+    expect(preset.risk?.maxPositionSizePct).toBe(5);
+    expect(agentStyleToPresetStyle('careful')).toBe('economy');
+    expect(agentStyleToPresetStyle('bold')).toBe('premium');
+    expect(isStyleKey('standard')).toBe(true);
+    expect(isStyleKey('nope')).toBe(false);
   });
 });

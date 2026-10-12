@@ -15,6 +15,7 @@ export * from './trading/scan-state.js';
 export * from './trading/pricing-identity.js';
 export * from './trading/scanner-identity.js';
 export * from './trading/price-candle.js';
+export * from './trading/presets.js';
 
 // Wake envelope (C1.4)
 export * from './trading/wake.js';
