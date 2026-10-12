@@ -3,6 +3,7 @@ import type { TradingToolContext, PresetEntry } from '@traderton/domain';
 import { presetAssessmentTools } from './preset-assessment.js';
 
 const listTool = presetAssessmentTools.find((t) => t.name === 'list_strategy_presets')!;
+const getFullTool = presetAssessmentTools.find((t) => t.name === 'get_strategy_presets')!;
 const assessTool = presetAssessmentTools.find((t) => t.name === 'assess_strategy_preset')!;
 const changeTool = presetAssessmentTools.find((t) => t.name === 'change_strategy_preset')!;
 
@@ -83,6 +84,29 @@ describe('list_strategy_presets', () => {
 
   it('fails cleanly when the preset-assessment port is absent', async () => {
     const result = await listTool.execute({}, makeCtx({ presetAssessment: undefined }));
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+  });
+});
+
+describe('get_strategy_presets', () => {
+  it('returns the full preset entry (params, risk, execution) for a tier', async () => {
+    const ctx = makeCtx({
+      presetCatalog: {
+        listPresets: () => [{ key: 'momentum', entry: momentumPreset }],
+      },
+    });
+    const result = await getFullTool.execute({ styleTier: 'standard' }, ctx);
+    expect(result.success).toBe(true);
+    const data = result.data as { presets: Array<{ key: string; entry: PresetEntry }> };
+    expect(data.presets).toHaveLength(1);
+    expect(data.presets[0]!.key).toBe('momentum');
+    expect(data.presets[0]!.entry.strategy.type).toBe('momentum');
+    expect(data.presets[0]!.entry.strategy.params).toEqual({ signalBias: 'trend-following', indicators: {} });
+  });
+
+  it('fails cleanly when the preset catalog port is absent', async () => {
+    const result = await getFullTool.execute({}, makeCtx({ presetCatalog: undefined }));
     expect(result.success).toBe(false);
     expect(result.fault).toBe(false);
   });

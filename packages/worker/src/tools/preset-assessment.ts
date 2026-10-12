@@ -410,8 +410,45 @@ const getAssessmentArtifactTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// ── get_strategy_presets ───────────────────────────────────────────────────
+// D2-a: the full-preset read tool. Unlike `list_strategy_presets` (a thin
+// catalog for the agent), this returns the COMPLETE `PresetEntry` (strategy
+// params, risk, execution) so a consumer (herobids) can derive agent config
+// without holding its own copy of the preset YAML. Venue-independent.
+
+const GetStrategyPresetsParamsSchema = z.object({
+  styleTier: z.enum(['economy', 'standard', 'premium']).optional()
+    .describe('Style tier to list presets for. Omit to list all tiers.'),
+});
+
+const getStrategyPresetsTool: AgentTool<TradingToolContext> = {
+  name: 'get_strategy_presets',
+  category: 'read-config',
+  description: 'Read the full strategy preset definitions (name, description, strategy type, decision mode, params, risk, execution) from the Traderton catalog. Returns the complete preset entries, not the thin catalog.',
+  parametersSchema: GetStrategyPresetsParamsSchema,
+  parameters: convertZodToJsonSchema(GetStrategyPresetsParamsSchema),
+  async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const params = GetStrategyPresetsParamsSchema.parse(rawParams);
+    if (!ctx.presetCatalog) {
+      return { success: false, error: 'preset catalog not available in this context', fault: false };
+    }
+    const tiers: Array<'economy' | 'standard' | 'premium'> = params.styleTier
+      ? [params.styleTier]
+      : ['economy', 'standard', 'premium'];
+
+    const presets: Array<{ key: string; entry: PresetEntry }> = [];
+    for (const tier of tiers) {
+      for (const { key, entry } of ctx.presetCatalog.listPresets(tier)) {
+        presets.push({ key, entry });
+      }
+    }
+    return { success: true, data: { ok: true, presets } };
+  },
+};
+
 export const presetAssessmentTools: AgentTool<TradingToolContext>[] = [
   listStrategyPresetsTool,
+  getStrategyPresetsTool,
   assessStrategyPresetTool,
   changeStrategyPresetTool,
   listAgentStrategyChangesTool,

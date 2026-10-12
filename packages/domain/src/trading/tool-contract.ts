@@ -307,6 +307,15 @@ export interface TradingToolContext {
   /** Operator-configured risk defaults (17-field `agentRiskDefaults` block). Traderton is the sole authority; a read tool exposes it and profile writes enforce its ceilings. */
   operatorRiskDefaults?: import('../config/schema.js').AgentRiskDefaultsConfig;
   /**
+   * Full preset catalog (all three style tiers) for the `get_strategy_presets`
+   * read tool. Venue-independent — always present, unlike `presetAssessment`
+   * (which is agent-subject + venue-scoped). Traderton is the sole authority for
+   * the preset definitions; herobids consumes them over the boundary (D2-a).
+   */
+  presetCatalog?: {
+    listPresets(styleTier: string): Array<{ key: string; entry: import('../config/presets.js').PresetEntry }>;
+  };
+  /**
    * Venue-aware candle fetcher for read-only market/strategy tools (e.g.
    * score_candidate). Fetches candles BEHIND the boundary — orderbook targets
    * route to the orderbook provider, swap targets to the swap provider by

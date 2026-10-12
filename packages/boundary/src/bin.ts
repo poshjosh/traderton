@@ -75,6 +75,7 @@ import { startConsumerNotificationPruneLoop } from './consumer-notification-prun
 import { startAgentScanPruneLoop } from './agent-scan-prune.js';
 import { buildAgentActorLifecycleOps } from './agent-actor-lifecycle-ops.js';
 import { buildPresetAssessmentOps } from './preset-assessment-ops.js';
+import { listPresets } from '@traderton/domain/config/presets-loader';
 import { startReviewPreCheckLoop } from './review-pre-check-loop.js';
 import { rehydrateAgentActors } from './agent-actor-rehydrate.js';
 import { startAgentOrphanSweep } from './agent-orphan-sweep.js';
@@ -689,6 +690,16 @@ async function main(): Promise<void> {
       // the get_operator_defaults read tool and enforced as ceilings by
       // set_agent_trading_profile. Traderton is the sole authority.
       operatorRiskDefaults: appConfig.agentRiskDefaults,
+      // Full preset catalog (all three tiers) for the get_strategy_presets read
+      // tool (D2-a). Venue-independent — always present. Traderton is the sole
+      // authority for the preset definitions.
+      presetCatalog: {
+        listPresets: (styleTier: string) =>
+          listPresets(styleTier as 'economy' | 'standard' | 'premium').map(({ key, ...entryFields }) => ({
+            key,
+            entry: entryFields,
+          })),
+      },
       // Wave E / E1-T T5: the agent-actor lifecycle port for the consumer-only
       // start_agent_actor / stop_agent_actor tools. Present only for an AGENT
       // subject (actor = the agent itself); the tools guard on its absence. It
