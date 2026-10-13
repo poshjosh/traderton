@@ -306,6 +306,8 @@ export interface TradingToolContext {
   };
   /** Operator-configured risk defaults (17-field `agentRiskDefaults` block). Traderton is the sole authority; a read tool exposes it and profile writes enforce its ceilings. */
   operatorRiskDefaults?: import('../config/schema.js').AgentRiskDefaultsConfig;
+  /** Operator-configured test-provisioning defaults (WP-B path C). Traderton is the sole authority; `get_operator_defaults` merges them into its response alongside the risk defaults. */
+  testProvisioningDefaults?: import('../config/schema.js').TestProvisioningDefaultsConfig;
   /**
    * Full preset catalog (all three style tiers) for the `get_strategy_presets`
    * read tool. Venue-independent — always present, unlike `presetAssessment`

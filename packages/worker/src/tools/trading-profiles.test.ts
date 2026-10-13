@@ -45,6 +45,12 @@ const operatorRiskDefaults = {
   maxBots: 5,
 };
 
+const testProvisioningDefaults = {
+  defaultTestCapital: '1000',
+  defaultTestProvider: 'hyperliquid',
+  generatedWalletTestSetupAllowed: true,
+};
+
 function context(
   ownerId = 'owner-1',
   agentId = 'agent-1',
@@ -56,6 +62,7 @@ function context(
     ownerId,
     agentId,
     operatorRiskDefaults,
+    testProvisioningDefaults,
     marketDataConfig,
     oneInchPriceChainConfig,
     db: {
@@ -406,6 +413,27 @@ describe('set_agent_trading_profile scan configuration', () => {
 describe('get_operator_defaults', () => {
   it('returns the injected operator risk defaults', async () => {
     const result = await getOperatorDefaults.execute({}, context());
+
+    expect(result).toEqual({
+      success: true,
+      data: { ...operatorRiskDefaults, ...testProvisioningDefaults },
+    });
+  });
+
+  it('merges the test-provisioning defaults into the response', async () => {
+    const result = await getOperatorDefaults.execute({}, context());
+
+    expect(result).toEqual({
+      success: true,
+      data: { ...operatorRiskDefaults, ...testProvisioningDefaults },
+    });
+  });
+
+  it('returns only the risk defaults when test-provisioning defaults are absent', async () => {
+    const ctx = context();
+    const { testProvisioningDefaults: _dropped, ...withoutTestProvisioning } = ctx;
+
+    const result = await getOperatorDefaults.execute({}, withoutTestProvisioning as never);
 
     expect(result).toEqual({ success: true, data: operatorRiskDefaults });
   });

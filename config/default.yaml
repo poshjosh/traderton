@@ -140,6 +140,14 @@ agentRiskDefaults:
   perTradeLevelMonitorIntervalMs: 5000   # interval for periodic per-trade stop-loss / take-profit monitor loop
   maxBots: 5                              # operator default for agent max concurrent bots
 
+# Safe defaults for post-creation trading provisioning (WP-B path C). Traderton
+# is the sole authority; herobids reads them over the get_operator_defaults
+# boundary tool. Kept separate from agentRiskDefaults (risk-only block).
+testProvisioningDefaults:
+  defaultTestCapital: "1000"              # default paper-trading capital (decimal string)
+  defaultTestProvider: hyperliquid        # default provider for generated test wallets
+  generatedWalletTestSetupAllowed: true   # whether the platform may auto-create a generated-wallet test connection
+
 reconciliation:
   intervalMs: 30000          # reconciliation loop interval
   driftAlertOnly: false       # true = log+alert only (safe default); false = block trading on drift

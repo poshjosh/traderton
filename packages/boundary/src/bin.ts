@@ -690,6 +690,10 @@ async function main(): Promise<void> {
       // the get_operator_defaults read tool and enforced as ceilings by
       // set_agent_trading_profile. Traderton is the sole authority.
       operatorRiskDefaults: appConfig.agentRiskDefaults,
+      // Test-provisioning defaults (WP-B path C) — merged into the
+      // get_operator_defaults response alongside the risk defaults. Traderton
+      // is the sole authority.
+      testProvisioningDefaults: appConfig.testProvisioningDefaults,
       // Full preset catalog (all three tiers) for the get_strategy_presets read
       // tool (D2-a). Venue-independent — always present. Traderton is the sole
       // authority for the preset definitions.

@@ -491,14 +491,14 @@ const getOperatorDefaultsTool: AgentTool<TradingToolContext> = {
   name: 'get_operator_defaults',
   ownerScopedNoVenue: true,
   category: 'read-config',
-  description: 'Read the operator-configured risk defaults (17-field agentRiskDefaults block). Traderton is the sole authority for these defaults; creator risk posture writes are ceiling-enforced against them.',
+  description: 'Read the operator-configured risk defaults (17-field agentRiskDefaults block) plus the test-provisioning defaults (WP-B path C). Traderton is the sole authority for these defaults; creator risk posture writes are ceiling-enforced against them.',
   parametersSchema: z.object({}),
   parameters: convertZodToJsonSchema(z.object({})),
   async execute(_rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
     if (!ctx.operatorRiskDefaults) {
       return unavailable('Operator risk defaults not configured in this context', 'risk_defaults.unavailable');
     }
-    return { success: true, data: ctx.operatorRiskDefaults };
+    return { success: true, data: { ...ctx.operatorRiskDefaults, ...ctx.testProvisioningDefaults } };
   },
 };
 

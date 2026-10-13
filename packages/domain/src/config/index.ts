@@ -61,6 +61,7 @@ export {
   deriveStrategyPreset,
   extractStrategyFromConfig,
   AgentRiskDefaultsSchema,
+  TestProvisioningDefaultsSchema,
   AppConfigSchema,
   MechanicalStrategySchema,
 } from './schema.js';
@@ -111,6 +112,7 @@ export type {
   PriceActionParams,
   SentimentConfig,
   AgentRiskDefaultsConfig,
+  TestProvisioningDefaultsConfig,
   AppConfig,
   MechanicalStrategy,
   JournalConfig,

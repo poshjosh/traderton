@@ -906,6 +906,25 @@ export const AgentRiskDefaultsSchema = z.object({
 export type AgentRiskDefaultsConfig = z.infer<typeof AgentRiskDefaultsSchema>;
 
 // ---------------------------------------------------------------------------
+// Test provisioning defaults (operator layer) — the "safe defaults" for
+// post-creation trading provisioning (WP-B path C). Traderton is the sole
+// authority; herobids reads them over the `get_operator_defaults` boundary tool
+// alongside the risk defaults. Kept OUT of `agentRiskDefaults` so that block
+// stays risk-only (17 fields) — these are provisioning knobs, not risk/halt
+// limits. Every field has a default so existing operator configs without the
+// block still parse.
+// ---------------------------------------------------------------------------
+export const TestProvisioningDefaultsSchema = z.object({
+  /** Default paper-trading capital for a freshly provisioned test setup (decimal string). */
+  defaultTestCapital: z.string().regex(/^\d+(\.\d+)?$/).default('1000'),
+  /** Default provider for generated test wallets. */
+  defaultTestProvider: z.string().min(1).default('hyperliquid'),
+  /** Whether the platform may auto-create a generated-wallet test connection. */
+  generatedWalletTestSetupAllowed: z.boolean().default(true),
+}).default({});
+export type TestProvisioningDefaultsConfig = z.infer<typeof TestProvisioningDefaultsSchema>;
+
+// ---------------------------------------------------------------------------
 // Traderton-owned AppConfig — re-synced from herobids AppConfigSchema (item A,
 // Phase 9b) by COPY-AND-DELETE (fused-file trim, the Phase-1 technique):
 //   - kept: trading keys (database, redis, venues, execution, simulation, risk,
@@ -965,6 +984,7 @@ export const AppConfigSchema = z.object({
     maxPositionSizePct: z.number().min(0).max(100).default(25),
   }),
   agentRiskDefaults: AgentRiskDefaultsSchema,
+  testProvisioningDefaults: TestProvisioningDefaultsSchema,
   reconciliation: ReconciliationConfigSchema.default({}),
   streams: StreamConfigSchema.default({}),
   marking: MarkingConfigSchema.default({}),
