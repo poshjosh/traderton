@@ -41,6 +41,7 @@ export const SKILL_TOOL_MAP: Readonly<Record<string, readonly string[]>> = {
     'discover_tokens',
     'get_risk_limits',
     'get_account_summary',
+    'get_funding_info',
     'get_analytics',
     'list_positions',
     'watch_token',

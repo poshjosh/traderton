@@ -26,7 +26,7 @@ import crypto from 'node:crypto';
 import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domain';
 import { and, eq, inArray } from 'drizzle-orm';
 import type { Database } from '@traderton/db';
-import { userCredentials, venueAccounts, bots } from '@traderton/db';
+import { userCredentials, venueAccounts, bots, BalanceSnapshotRepository } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
 import { encryptCredential, getEncryptionKey } from '../crypto.js';
 import { findProviderRegistryEntry } from '../providers/registry.js';
@@ -690,10 +690,84 @@ const getVenueAccountTool: AgentTool<TradingToolContext> = {
   },
 };
 
+// Network label per venue for the funding address; generate-mode wallets are minted on these chains.
+const NETWORK_BY_VENUE: Readonly<Record<string, string>> = {
+  hyperliquid: 'Hyperliquid',
+  jupiter: 'Solana',
+};
+
+const GetFundingInfoParamsSchema = z.object({
+  venueAccountId: z.string().min(1).describe('Venue account id to report funding for'),
+});
+
+type GetFundingInfoParams = z.infer<typeof GetFundingInfoParamsSchema>;
+
+const getFundingInfoTool: AgentTool<TradingToolContext> = {
+  name: 'get_funding_info',
+  description:
+    "Get the trading wallet's funding address, network, and latest observed balance for this owner's venue account. fundingStatus is 'unknown' until a balance snapshot has been recorded. Never returns secrets.",
+  parametersSchema: GetFundingInfoParamsSchema,
+  parameters: convertZodToJsonSchema(GetFundingInfoParamsSchema),
+  category: 'read-database',
+  async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
+    const { venueAccountId } = rawParams as GetFundingInfoParams;
+
+    if (!ctx.db) {
+      return { success: false, error: 'direct db access not available', fault: false };
+    }
+    if (!ctx.ownerId) {
+      return { success: false, error: 'owner scope not available', fault: false };
+    }
+    const db = ctx.db as Database;
+    const ownerId = ctx.ownerId;
+
+    const [account] = await db
+      .select({
+        venueAccountRef: venueAccounts.venueAccountRef,
+        venue: venueAccounts.venue,
+        label: venueAccounts.label,
+      })
+      .from(venueAccounts)
+      .where(and(eq(venueAccounts.id, venueAccountId), eq(venueAccounts.ownerId, ownerId)));
+
+    if (!account) {
+      return {
+        success: false,
+        fault: false,
+        error: `Venue account not found: ${venueAccountId}`,
+        errorCode: 'not_found.resource',
+      };
+    }
+
+    const latest = await new BalanceSnapshotRepository(db).getLatestByVenueAccount(venueAccountId, account.venue);
+    let fundingStatus: 'unknown' | 'unfunded' | 'funded' = 'unknown';
+    if (latest !== null) {
+      fundingStatus = latest.balances.some((balance) => Number(balance.total) > 0) ? 'funded' : 'unfunded';
+    }
+
+    return {
+      success: true,
+      data: {
+        ok: true,
+        venueAccountId,
+        venue: account.venue,
+        label: account.label,
+        fundingAddress: account.venueAccountRef ?? null,
+        network: NETWORK_BY_VENUE[account.venue] ?? null,
+        fundingStatus,
+        balance: latest === null
+          ? null
+          : { snapshotAt: latest.snapshotAt.toISOString(), balances: latest.balances },
+      },
+    };
+  },
+};
+
 export const provisioningTools: AgentTool<TradingToolContext>[] = [
   provisionVenueAccountTool,
   deprovisionVenueAccountTool,
   countBotsByVenueAccountTool,
   countBotsByBlueprintTool,
   getVenueAccountTool,
+  getFundingInfoTool,
 ];
