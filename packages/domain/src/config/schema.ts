@@ -917,10 +917,8 @@ export type AgentRiskDefaultsConfig = z.infer<typeof AgentRiskDefaultsSchema>;
 export const TestProvisioningDefaultsSchema = z.object({
   /** Default paper-trading capital for a freshly provisioned test setup (decimal string). */
   defaultTestCapital: z.string().regex(/^\d+(\.\d+)?$/).default('1000'),
-  /** Default provider for generated test wallets. */
-  defaultTestProvider: z.string().min(1).default('hyperliquid'),
-  /** Whether the platform may auto-create a generated-wallet test connection. */
-  generatedWalletTestSetupAllowed: z.boolean().default(true),
+  /** Default mode for a first-created agent profile. Never live; swap venues fall back to shadow. */
+  defaultTestMode: z.enum(['paper', 'shadow']).default('paper'),
 }).default({});
 export type TestProvisioningDefaultsConfig = z.infer<typeof TestProvisioningDefaultsSchema>;
 

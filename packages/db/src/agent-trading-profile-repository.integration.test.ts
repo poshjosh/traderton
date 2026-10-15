@@ -235,4 +235,20 @@ describe.skipIf(SKIP)('AgentTradingProfileRepository (integration)', () => {
       repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'rp', actions: bare }),
     ).resolves.toBeInstanceOf(Map);
   });
+
+  it('applies creation defaults only when the row is first created, and a replay of the same input does not conflict', async () => {
+    const unset = { actionId: 'cd', kind: 'set' as const, venueAccountId: 'venue-cd', capital: null, riskPosture: null, executionDefaults: null };
+    const creationDefaults = { 'venue-cd': { mode: 'paper' as const, capital: '1000' } };
+    const base = { ownerId: 'owner-a', actorId: 'agent-a', creationDefaults };
+
+    await repo.applyOperation({ ...base, operationId: 'cd-create', actions: [unset] });
+    await expect(repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-cd'))
+      .resolves.toMatchObject({ capital: '1000', executionDefaults: { mode: 'paper' } });
+
+    await expect(repo.applyOperation({ ...base, operationId: 'cd-create', actions: [unset] })).resolves.toBeInstanceOf(Map);
+
+    await repo.applyOperation({ ...base, operationId: 'cd-update', actions: [{ ...unset, actionId: 'cd2', executionDefaults: { mode: 'shadow' as const } }] });
+    await expect(repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-cd'))
+      .resolves.toMatchObject({ capital: null, executionDefaults: { mode: 'shadow' } });
+  });
 });

@@ -345,6 +345,7 @@ describe('provision_venue_account', () => {
     expect(wallet).toBeDefined();
     expect(wallet.address).toMatch(/^0x[0-9a-f]{40}$/i);
     expect(wallet.network).toBe('Hyperliquid');
+    expect(venueAccountInsert?.venueAccountRef).toBe(wallet.address);
 
     // Rows written owner-keyed + linked; credential stored encrypted.
     expect(credentialInsert?.ownerId).toBe(OWNER_ID);
@@ -399,6 +400,19 @@ describe('provision_venue_account', () => {
     const envelope = JSON.stringify(res);
     expect(envelope).not.toContain(decrypted.privateKey);
     expect(envelope).not.toContain('privateKey');
+  });
+
+  it('generate mode for 1inch stores the minted EVM address as venueAccountRef', async () => {
+    const ctx = makeCtx();
+    const res = await provisionTool.execute(
+      { venue: '1inch', label: 'minted-1inch', generate: { network: 'Ethereum' } },
+      ctx,
+    );
+
+    expect(res.success).toBe(true);
+    const wallet = (res.data as Record<string, unknown>).wallet as { address: string };
+    expect(wallet.address).toMatch(/^0x[0-9a-f]{40}$/i);
+    expect(venueAccountInsert?.venueAccountRef).toBe(wallet.address);
   });
 
   it('rejects when BOTH secrets and generate are provided (invalid credential mode)', async () => {

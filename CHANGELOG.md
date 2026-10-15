@@ -6,6 +6,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **An agent profile created without a mode or capital now gets operator
+  defaults.** `set_agent_trading_profile` supplies `testProvisioningDefaults.defaultTestMode`
+  (`paper` or `shadow`; swap venues fall back to `shadow`) and `defaultTestCapital`
+  when the profile row is first created. Updates, explicit clears and replays of the
+  same operation are never filled, and capital is never defaulted for a live profile.
+
+### Removed
+
+- `testProvisioningDefaults.defaultTestProvider` and `generatedWalletTestSetupAllowed`:
+  nothing enforced them once herobids stopped creating wallets for agents.
+
+### Fixed
+
+- **`provision_venue_account` generate mode now stores the new wallet address
+  for every venue.** Hyperliquid and 1inch accounts used to save no address, so
+  `get_funding_info` returned `fundingAddress: null`. See
+  `docs/bug-reports/2026/10/14/001-generate-mode-hyperliquid-funding-address-not-stored.md`.
+
 ## 0.1.6-2026.10.12
 
 ### Fixed

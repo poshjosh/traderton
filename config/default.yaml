@@ -144,9 +144,8 @@ agentRiskDefaults:
 # is the sole authority; herobids reads them over the get_operator_defaults
 # boundary tool. Kept separate from agentRiskDefaults (risk-only block).
 testProvisioningDefaults:
-  defaultTestCapital: "1000"              # default paper-trading capital (decimal string)
-  defaultTestProvider: hyperliquid        # default provider for generated test wallets
-  generatedWalletTestSetupAllowed: true   # whether the platform may auto-create a generated-wallet test connection
+  defaultTestCapital: "1000"              # capital written into an agent profile created without one (decimal string; never for live)
+  defaultTestMode: paper                  # mode written into an agent profile created without one: paper | shadow (swap venues fall back to shadow)
 
 reconciliation:
   intervalMs: 30000          # reconciliation loop interval

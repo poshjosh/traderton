@@ -18,6 +18,7 @@ import {
   TechnicalConfigSchema,
   TokenSafetyConfigSchema,
   resolveActiveStrategy,
+  resolveProfileCreationDefaults,
   validateExecutionCapability,
   type AgentRiskDefaultsConfig,
   type AgentTool,
@@ -305,6 +306,47 @@ function validateCurrentAction(
   return actions;
 }
 
+/**
+ * Defaults for `set` actions that create a profile without a mode or capital (the first
+ * grant of a connection to an agent). Updates and explicit clears are never filled, and
+ * capital is never defaulted for a live profile.
+ */
+async function profileCreationDefaults(
+  ctx: TradingToolContext,
+  repo: AgentTradingProfileRepository,
+  actorId: string,
+  actions: z.infer<typeof ForwardActionSchema>[],
+): Promise<Record<string, { mode?: 'paper' | 'shadow'; capital?: string }>> {
+  const defaults = ctx.testProvisioningDefaults;
+  const result: Record<string, { mode?: 'paper' | 'shadow'; capital?: string }> = {};
+  if (!defaults) return result;
+  const db = ctx.db as Database;
+  for (const action of actions) {
+    if (action.kind !== 'set') continue;
+    const needsMode = action.executionDefaults == null;
+    if (!needsMode && action.capital != null) continue;
+    const existing = await repo.getByOwnerActorVenueAccount(ctx.ownerId!, actorId, action.venueAccountId);
+    if (existing) continue;
+    const [venueAccount] = await db.select({ venue: venueAccounts.venue }).from(venueAccounts).where(and(
+      eq(venueAccounts.id, action.venueAccountId),
+      eq(venueAccounts.ownerId, ctx.ownerId!),
+    )).limit(1);
+    if (!venueAccount) continue;
+    const resolved = resolveProfileCreationDefaults({
+      defaultTestMode: defaults.defaultTestMode,
+      defaultTestCapital: defaults.defaultTestCapital,
+      venueType: venueTypeFor(venueAccount.venue),
+    });
+    const effectiveMode = action.executionDefaults?.mode ?? resolved.mode;
+    const entry = {
+      ...(needsMode ? { mode: resolved.mode } : {}),
+      ...(action.capital == null && effectiveMode !== 'live' ? { capital: resolved.capital } : {}),
+    };
+    if (Object.keys(entry).length > 0) result[action.venueAccountId] = entry;
+  }
+  return result;
+}
+
 const setAgentTradingProfileTool: AgentTool<TradingToolContext> = {
   name: 'set_agent_trading_profile',
   ownerScopedNoVenue: true,
@@ -411,8 +453,9 @@ const setAgentTradingProfileTool: AgentTool<TradingToolContext> = {
       if (invalid) return invalid;
     }
 
+    const creationDefaults = await profileCreationDefaults(ctx, repo, params.actorId, actions);
     try {
-      const revisions = await repo.applyOperation({ ownerId: ctx.ownerId!, actorId: params.actorId, operationId: params.operationId, actions });
+      const revisions = await repo.applyOperation({ ownerId: ctx.ownerId!, actorId: params.actorId, operationId: params.operationId, actions, creationDefaults });
       return { success: true, data: { operationId: params.operationId, revision: revisions.get(params.actionId)?.toString() ?? null } };
     } catch (error) {
       if (error instanceof TradingProfileOperationConflictError) return unavailable(error.message, 'profile.operation_conflict');

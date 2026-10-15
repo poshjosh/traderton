@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { venueTypeFromProvider, validateExecutionCapability } from './execution-capability.js';
+import { venueTypeFromProvider, validateExecutionCapability, resolveProfileCreationDefaults } from './execution-capability.js';
 import type { ExecutionCapabilityInput } from './execution-capability.js';
 
 describe('venueTypeFromProvider', () => {
@@ -104,5 +104,21 @@ describe('validateExecutionCapability', () => {
       const result = validateExecutionCapability(input({ actorType: 'bot', executionMode: 'live', venueType: 'swap' }));
       expect(result.ok).toBe(true);
     });
+  });
+});
+
+describe('resolveProfileCreationDefaults', () => {
+  const base = { defaultTestMode: 'paper' as const, defaultTestCapital: '1000' };
+
+  it('uses the configured test mode and capital on an orderbook venue', () => {
+    expect(resolveProfileCreationDefaults({ ...base, venueType: 'orderbook' })).toEqual({ mode: 'paper', capital: '1000' });
+  });
+
+  it('falls back to shadow on a swap venue because paper is not supported there', () => {
+    expect(resolveProfileCreationDefaults({ ...base, venueType: 'swap' })).toEqual({ mode: 'shadow', capital: '1000' });
+  });
+
+  it('keeps shadow when shadow is configured', () => {
+    expect(resolveProfileCreationDefaults({ ...base, defaultTestMode: 'shadow', venueType: 'orderbook' }).mode).toBe('shadow');
   });
 });

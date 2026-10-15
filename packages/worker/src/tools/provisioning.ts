@@ -221,9 +221,9 @@ const provisionVenueAccountTool: AgentTool<TradingToolContext> = {
     // 2. Venue-specific venueAccountRef enforcement (copied Jupiter rule verbatim).
     //    Normalise early so the trimmed value is used for validation + persistence.
     //    In GENERATE mode the minted wallet address IS the venueAccountRef for
-    //    Jupiter (mirrors herobids `generated.wallet.address`).
+    //    every venue — get_funding_info surfaces it as the funding address.
     let venueAccountRef = params.venueAccountRef != null ? params.venueAccountRef.trim() : null;
-    if (params.venue === 'jupiter' && generatedWalletAddress) {
+    if (generatedWalletAddress) {
       venueAccountRef = generatedWalletAddress;
     }
     if (params.venue === 'jupiter') {

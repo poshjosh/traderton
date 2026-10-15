@@ -4,6 +4,7 @@ import { venueAccounts } from '@traderton/db';
 import { provisioningTools } from './provisioning.js';
 
 const getFundingInfoTool = provisioningTools.find((t) => t.name === 'get_funding_info')!;
+const provisionTool = provisioningTools.find((t) => t.name === 'provision_venue_account')!;
 
 const OWNER_ID = 'owner-1';
 const VA_ID = 'va-1';
@@ -157,5 +158,39 @@ describe('get_funding_info tool', () => {
       expect(result.fault).toBe(false);
       expect(result.error).toBe('owner scope not available');
     }
+  });
+
+  it('returns the generated wallet address as the funding address after generate-mode provisioning', async () => {
+    process.env['CREDENTIAL_ENCRYPTION_KEY'] = 'a'.repeat(64);
+    const inserts: Array<Record<string, unknown>> = [];
+    const provisionDb = {
+      transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          insert: () => ({
+            values: (v: Record<string, unknown>) => {
+              inserts.push(v);
+              return Promise.resolve();
+            },
+          }),
+        })),
+    } as unknown as TradingToolContext['db'];
+
+    const provisioned = await provisionTool.execute(
+      { venue: 'hyperliquid', label: 'HL Gen', generate: { network: 'Hyperliquid' } },
+      makeFundingCtx({}, { db: provisionDb }),
+    );
+    expect(provisioned.success).toBe(true);
+    const wallet = (provisioned.data as { wallet: { address: string } }).wallet;
+    const storedRow = inserts[1] as { venueAccountRef: string | null; venue: string; label: string };
+
+    const result = await getFundingInfoTool.execute(
+      { venueAccountId: VA_ID },
+      makeFundingCtx({
+        account: { venueAccountRef: storedRow.venueAccountRef, venue: storedRow.venue, label: storedRow.label },
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({ fundingAddress: wallet.address, network: 'Hyperliquid' });
   });
 });

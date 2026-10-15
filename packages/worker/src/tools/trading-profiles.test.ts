@@ -47,8 +47,7 @@ const operatorRiskDefaults = {
 
 const testProvisioningDefaults = {
   defaultTestCapital: '1000',
-  defaultTestProvider: 'hyperliquid',
-  generatedWalletTestSetupAllowed: true,
+  defaultTestMode: 'paper' as const,
 };
 
 function context(
@@ -193,6 +192,55 @@ const SOLANA_AND_BASE_TOKENS = {
     },
   },
 };
+
+describe('set_agent_trading_profile creation defaults', () => {
+  const unset = { capital: null, executionDefaults: null };
+  const creationDefaultsOf = () => (applyOperation.mock.calls[0]![0] as { creationDefaults: unknown }).creationDefaults;
+
+  beforeEach(() => applyOperation.mockResolvedValue(new Map([['action-1', 1n]])));
+
+  it('supplies the default mode and capital when a profile is created without them', async () => {
+    const result = await setProfile.execute({ ...params, ...unset }, context());
+
+    expect(result).toMatchObject({ success: true });
+    expect(creationDefaultsOf()).toEqual({ 'venue-1': { mode: 'paper', capital: '1000' } });
+  });
+
+  it('defaults to shadow on a swap venue, where paper is not supported', async () => {
+    const result = await setProfile.execute({ ...params, ...unset }, context('owner-1', 'agent-1', 'jupiter'));
+
+    expect(result).toMatchObject({ success: true });
+    expect(creationDefaultsOf()).toEqual({ 'venue-1': { mode: 'shadow', capital: '1000' } });
+  });
+
+  it('does not fill anything when the profile already exists', async () => {
+    getByOwnerActorVenueAccount.mockResolvedValue({ id: 'profile-1' });
+
+    await setProfile.execute({ ...params, ...unset }, context());
+
+    expect(creationDefaultsOf()).toEqual({});
+  });
+
+  it('keeps supplied values and fills only what is missing', async () => {
+    await setProfile.execute({ ...params, capital: '250', executionDefaults: null }, context());
+
+    expect(creationDefaultsOf()).toEqual({ 'venue-1': { mode: 'paper' } });
+  });
+
+  it('never defaults the capital of a live profile', async () => {
+    await setProfile.execute({ ...params, capital: null, executionDefaults: { mode: 'live' } }, context());
+
+    expect(creationDefaultsOf()).toEqual({});
+  });
+
+  it('supplies nothing when the operator defaults are not in the context', async () => {
+    const { testProvisioningDefaults: _dropped, ...withoutDefaults } = context() as Record<string, unknown>;
+
+    await setProfile.execute({ ...params, ...unset }, withoutDefaults as never);
+
+    expect(creationDefaultsOf()).toEqual({});
+  });
+});
 
 describe('set_agent_trading_profile scan configuration', () => {
   beforeEach(() => applyOperation.mockResolvedValue(new Map([['action-1', 1n]])));

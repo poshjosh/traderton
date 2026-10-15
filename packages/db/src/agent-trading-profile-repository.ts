@@ -49,6 +49,12 @@ export interface ApplyTradingProfileOperation {
   actorId: string;
   operationId: string;
   actions: AgentTradingProfileForwardAction[];
+  /**
+   * Values for fields a `set` action leaves null, keyed by venue account id. Applied only
+   * when the profile row is first created, never on update or replay; the stored manifest
+   * keeps the action exactly as supplied so a replay compares equal.
+   */
+  creationDefaults?: Readonly<Record<string, { mode?: 'paper' | 'shadow'; capital?: string }>>;
 }
 
 export class TradingProfileOperationConflictError extends Error {
@@ -128,7 +134,7 @@ export class AgentTradingProfileRepository {
       const revisions = new Map<string, bigint | null>();
       for (const action of input.actions) {
         const profile = await this.findIn(tx, input.ownerId, input.actorId, action.venueAccountId);
-        const revision = await this.applyAction(tx, input.ownerId, input.actorId, action, profile);
+        const revision = await this.applyAction(tx, input.ownerId, input.actorId, action, profile, input.creationDefaults?.[action.venueAccountId]);
         await tx.insert(agentTradingProfileChanges).values({
           operationId: input.operationId,
           actionId: action.actionId,
@@ -165,6 +171,7 @@ export class AgentTradingProfileRepository {
     actorId: string,
     action: AgentTradingProfileForwardAction,
     profile: AgentTradingProfile | null,
+    creationDefaults?: { mode?: 'paper' | 'shadow'; capital?: string },
   ): Promise<bigint | null> {
     if (action.kind === 'clear') {
         await tx.delete(agentTradingProfiles).where(and(
@@ -206,10 +213,10 @@ export class AgentTradingProfileRepository {
         ownerId,
         actorId,
         venueAccountId: action.venueAccountId,
-        capital: action.capital,
+        capital: action.capital ?? creationDefaults?.capital ?? null,
         riskPosture: action.riskPosture,
         riskOverrides: {},
-        executionDefaults: action.executionDefaults,
+        executionDefaults: action.executionDefaults ?? (creationDefaults?.mode ? { mode: creationDefaults.mode } : null),
         scanMode,
         creatorStrategy,
         presetPolicy,

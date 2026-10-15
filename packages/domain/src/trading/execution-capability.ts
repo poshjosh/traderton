@@ -51,3 +51,26 @@ export function validateExecutionCapability(
 
   return ok(undefined);
 }
+
+export interface ProfileCreationDefaults {
+  mode: 'paper' | 'shadow';
+  capital: string;
+}
+
+/**
+ * The defaults for an agent profile that is created without a mode or capital.
+ * Never live. Where the configured test mode is not allowed on the venue type
+ * (paper on a swap venue), the mode falls back to shadow.
+ */
+export function resolveProfileCreationDefaults(input: {
+  defaultTestMode: 'paper' | 'shadow';
+  defaultTestCapital: string;
+  venueType: VenueType;
+}): ProfileCreationDefaults {
+  const allowed = validateExecutionCapability({
+    actorType: 'agent',
+    executionMode: input.defaultTestMode,
+    venueType: input.venueType,
+  }).ok;
+  return { mode: allowed ? input.defaultTestMode : 'shadow', capital: input.defaultTestCapital };
+}
