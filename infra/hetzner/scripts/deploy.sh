@@ -7,6 +7,8 @@
 #   deploy.sh [--env <staging|production>] [--env-file <path>] \
 #             [--backend-env-file <path>] [--ssh-key <path>] \
 #             [--release-sha <40-character SHA>]
+# Example
+#   infra/hetzner/scripts/deploy.sh --env staging
 #
 # The VM public IP is resolved from `terraform output public_ip` (the
 # <env> workspace). `.env.<env>` and `.env.backup` are copied from --env-file /
