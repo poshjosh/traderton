@@ -93,6 +93,17 @@ if ! git -C "$ROOT" pull --ff-only origin main 2>&1; then
 fi
 ok "Branch is up to date with origin/main"
 
+# Site footers carry the platform version; fail if they drifted from package.json.
+SITE_PAGES=("${ROOT}"/site/index.html "${ROOT}"/site/status.html "${ROOT}"/site/docs/index.html "${ROOT}"/site/legal/*.html)
+PKG_VERSION=$(jq -r '.version' "${ROOT}/package.json")
+for page in "${SITE_PAGES[@]}"; do
+  if ! grep -q "platform v${PKG_VERSION})" "$page"; then
+    err "Footer version in ${page#"${ROOT}"/} does not match package.json (${PKG_VERSION})."
+    exit 1
+  fi
+done
+ok "Site footer versions match package.json"
+
 # ─── Version validation (fail-fast, before expensive tests) ──────────────────
 
 if [[ -n "$VERSION" ]]; then
@@ -199,6 +210,11 @@ log "Bumping package.json: ${CURRENT_VERSION} → ${VERSION}"
 jq --arg v "$VERSION" '.version = $v' "$PKG_JSON" > "${PKG_JSON}.tmp" && mv "${PKG_JSON}.tmp" "$PKG_JSON"
 ok "package.json updated"
 
+for page in "${SITE_PAGES[@]}"; do
+  sed "s/platform v[^)]*)/platform v${VERSION})/" "$page" > "${page}.tmp" && mv "${page}.tmp" "$page"
+done
+ok "Site footers updated to ${VERSION}"
+
 # ─── Update CHANGELOG.md ─────────────────────────────────────────────────────
 # Traderton version-header convention: `## X.Y.Z-YYYY.MM.DD` (dotted date, no
 # leading 'v'), consistent with the existing released entries.
@@ -238,7 +254,7 @@ cd "$ROOT"
 if $COMMIT_ALL; then
   git add -A
 else
-  git add package.json CHANGELOG.md
+  git add package.json CHANGELOG.md "${SITE_PAGES[@]}"
 fi
 
 # Check there's something to commit
