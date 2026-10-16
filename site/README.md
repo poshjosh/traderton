@@ -43,6 +43,10 @@ bash infra/hetzner/tests/site-isolation.sh
 If port 80 is taken: `SITE_HTTP_PORT=8088 docker compose -f infra/hetzner/compose.site-local.yaml up -d`
 (and pass the same `SITE_HTTP_PORT` to the isolation test).
 
+## Footer version token (`__PLATFORM_VERSION__`) — known and intentional locally
+
+Every page footer ends with `© 2026 Traderton (platform v__PLATFORM_VERSION__)`. The local stack shows the raw token `__PLATFORM_VERSION__` instead of a version number. **This is by design.**
+
 ## Publishing is a separate task (T4.2 — infrastructure hard stop)
 
 This directory and the local compose override do NOT publish the site. Wiring

@@ -3,7 +3,7 @@
 //
 // The PROVIDER_REGISTRY credential-field data (required fields, patterns,
 // aliases, normalization, error codes) IS the trading parity logic that venue-
-// secret validation depends on; it is copied verbatim. The PLATFORM catalog
+// secret validation depends on; it is copied verbatim. The system skills/platform catalog
 // projection surface (`getProviderCatalog` / `toPublicProvider` /
 // `buildCatalogResponse` / wallet-generation capability / `CUSTOM_MODE` / the
 // public ETag response) is DELETED — those are platform/UI concerns whose

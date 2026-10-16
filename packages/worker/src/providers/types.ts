@@ -3,7 +3,7 @@
 //
 // COPY (L3-P1 un-quarantine): the credential field/validation shapes are copied
 // verbatim from herobids `apps/api/src/providers/types.ts` +
-// `packages/domain/src/provider-catalog.ts`. Only the PLATFORM catalog
+// `packages/domain/src/provider-catalog.ts`. Only the system skills/platform catalog
 // projection surface (the public `ProviderCatalogResponse`, wallet-generation
 // capability, ETag response envelope) is DELETED — it is not a trading concern
 // and its `@herobids/domain` catalog types were never brought into

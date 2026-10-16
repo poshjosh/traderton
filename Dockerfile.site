@@ -21,6 +21,16 @@ COPY site/Caddyfile.image /etc/caddy/Caddyfile
 COPY site/ /srv/
 COPY docs/reference/ /srv/docs/reference/
 
+# Stamp the deployed platform version (package.json, bumped by release.sh) into
+# the footer token. Fails the build if the version is missing or any token is
+# left unreplaced.
+COPY package.json /tmp/package.json
+RUN version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' /tmp/package.json | head -n1)" \
+ && [ -n "$version" ] \
+ && find /srv -name '*.html' -exec sed -i "s/__PLATFORM_VERSION__/${version}/g" {} + \
+ && ! grep -rq '__PLATFORM_VERSION__' /srv \
+ && rm -f /tmp/package.json
+
 # Drop the baked-in site Caddyfile source out of the web root (it is config, not
 # content). The web root is /srv; /srv/Caddyfile.local and /srv/Caddyfile.image
 # would otherwise be publicly listable.

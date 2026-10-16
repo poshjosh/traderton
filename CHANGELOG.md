@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **The public site footer shows the deployed platform version.** Every page
+  ends with `© 2026 Traderton (platform vX.Y.Z)`. `Dockerfile.site` stamps the
+  version from `package.json` into the footer at image build time.
+
 ## 0.2.0-2026.10.16
 
 ### Changed
