@@ -73,7 +73,8 @@ function makeCtx(overrides: Partial<TradingToolContext> = {}): TradingToolContex
 
 describe('list_strategy_presets', () => {
   it('lists every catalog preset for a style tier with its behaviour version', async () => {
-    const result = await listTool.execute({ styleTier: 'standard' }, makeCtx());
+    const ctx = makeCtx({ presetCatalog: { listPresets: () => [{ key: 'momentum', entry: momentumPreset }] } });
+    const result = await listTool.execute({ styleTier: 'standard' }, ctx);
     expect(result.success).toBe(true);
     const data = result.data as { presets: Array<Record<string, unknown>> };
     expect(data.presets).toHaveLength(1);
@@ -82,8 +83,8 @@ describe('list_strategy_presets', () => {
     expect(typeof data.presets[0]!.behaviorVersion).toBe('string');
   });
 
-  it('fails cleanly when the preset-assessment port is absent', async () => {
-    const result = await listTool.execute({}, makeCtx({ presetAssessment: undefined }));
+  it('fails cleanly when the preset catalog port is absent', async () => {
+    const result = await listTool.execute({}, makeCtx({ presetCatalog: undefined }));
     expect(result.success).toBe(false);
     expect(result.fault).toBe(false);
   });
@@ -233,5 +234,161 @@ describe('change_strategy_preset', () => {
     const result = await changeTool.execute({ assessmentArtifactId: 'missing', targetPreset: 'momentum', mode: 'entries_only', reason: 'x' }, ctx);
     expect(result.success).toBe(false);
     expect(result.errorCode).toBe('assessment.artifact_not_found');
+  });
+});
+
+// ── list_strategy_presets is venue-independent (bug 2026-11-21/002, T1) ─────────
+// The boundary builds `presetAssessment` only for an agent subject that carries a
+// resolved venue account, and the dispatcher strips undeclared payload keys, so a
+// consumer cannot hand `list_strategy_presets` an account. The tool therefore reads
+// the always-present `presetCatalog` (the same source as `get_strategy_presets`), and
+// only that: `bin.ts` is the sole builder of either context and always sets the catalog.
+describe('list_strategy_presets reads the venue-independent catalog', () => {
+  const rangePreset: PresetEntry = {
+    name: 'Range — Day',
+    description: 'Mean reversion in a range',
+    strategy: { type: 'meanReversion', decisionMode: 'mechanical', params: { signalBias: 'mean-reverting', indicators: {} } },
+  };
+  const catalogByTier: Record<string, Array<{ key: string; entry: PresetEntry }>> = {
+    economy: [{ key: 'range', entry: rangePreset }],
+    standard: [{ key: 'momentum', entry: momentumPreset }],
+    premium: [{ key: 'momentum', entry: momentumPreset }, { key: 'range', entry: rangePreset }],
+  };
+  function catalogOnlyCtx(listPresets = vi.fn((tier: string) => catalogByTier[tier] ?? [])): { ctx: TradingToolContext; listPresets: typeof listPresets } {
+    return {
+      ctx: makeCtx({ presetAssessment: undefined, presetCatalog: { listPresets } }),
+      listPresets,
+    };
+  }
+
+  it('succeeds with the catalog present and NO preset-assessment context (the bug shape)', async () => {
+    const { ctx } = catalogOnlyCtx();
+    const result = await listTool.execute({ styleTier: 'standard' }, ctx);
+    expect(result.success).toBe(true);
+    const data = result.data as { ok: boolean; presets: Array<Record<string, unknown>> };
+    expect(data.ok).toBe(true);
+    expect(data.presets.map((p) => p.key)).toEqual(['momentum']);
+  });
+
+  it('lists every tier, in order, when no styleTier is given', async () => {
+    const { ctx, listPresets } = catalogOnlyCtx();
+    const result = await listTool.execute({}, ctx);
+    expect(result.success).toBe(true);
+    expect(listPresets.mock.calls.map((call) => call[0])).toEqual(['economy', 'standard', 'premium']);
+    const data = result.data as { presets: Array<Record<string, unknown>> };
+    expect(data.presets.map((p) => p.key)).toEqual(['range', 'momentum', 'momentum', 'range']);
+  });
+
+  it('asks the catalog for only the requested tier', async () => {
+    const { ctx, listPresets } = catalogOnlyCtx();
+    await listTool.execute({ styleTier: 'premium' }, ctx);
+    expect(listPresets).toHaveBeenCalledTimes(1);
+    expect(listPresets).toHaveBeenCalledWith('premium');
+  });
+
+  it('returns the same entry shape as before: key, name, description, strategyType, signalBias, behaviorVersion', async () => {
+    const { ctx } = catalogOnlyCtx();
+    const result = await listTool.execute({ styleTier: 'economy' }, ctx);
+    const entry = (result.data as { presets: Array<Record<string, unknown>> }).presets[0]!;
+    expect(Object.keys(entry).sort()).toEqual(['behaviorVersion', 'description', 'key', 'name', 'signalBias', 'strategyType']);
+    expect(entry).toMatchObject({
+      key: 'range',
+      name: 'Range — Day',
+      description: 'Mean reversion in a range',
+      strategyType: 'meanReversion',
+      signalBias: 'mean-reverting',
+    });
+    expect(entry.behaviorVersion).toEqual(expect.any(String));
+  });
+
+  it('ignores the preset-assessment context: the catalog is the only source', async () => {
+    const assessmentListPresets = vi.fn(() => [{ key: 'from-assessment', entry: momentumPreset }]);
+    const ctx = makeCtx({
+      presetAssessment: makePresetAssessment({ listPresets: assessmentListPresets }),
+      presetCatalog: { listPresets: () => [{ key: 'from-catalog', entry: rangePreset }] },
+    });
+    const result = await listTool.execute({ styleTier: 'standard' }, ctx);
+    expect((result.data as { presets: Array<{ key: string }> }).presets.map((p) => p.key)).toEqual(['from-catalog']);
+    expect(assessmentListPresets).not.toHaveBeenCalled();
+  });
+
+  it('fails cleanly, without a fault, when the catalog is absent, even if a preset-assessment context exists', async () => {
+    const result = await listTool.execute({}, makeCtx({ presetCatalog: undefined }));
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toBe('preset catalog not available in this context');
+  });
+
+  it('rejects a style tier outside economy, standard and premium', () => {
+    expect(() => listTool.parametersSchema!.parse({ styleTier: 'platinum' })).toThrow();
+  });
+
+  it('declares no venueAccountId, because the catalog needs no account', () => {
+    const properties = (listTool.parameters as { properties?: Record<string, unknown> }).properties ?? {};
+    expect(Object.keys(properties)).toEqual(['styleTier']);
+  });
+});
+
+// ── change_strategy_preset accepts the consumer-injected venue account (T2) ─────
+// `change_strategy_preset` is `ownerScopedNoVenue`, so the boundary resolves the
+// venue account from the payload's `venueAccountId`. The dispatcher strips keys the
+// schema does not declare, so the schema has to declare it (same as
+// `assess_strategy_preset`). The tool itself never consumes it.
+describe('change_strategy_preset venueAccountId', () => {
+  const validParams = { assessmentArtifactId: 'a1', targetPreset: 'momentum', mode: 'entries_only', reason: 'Strong momentum' } as const;
+
+  it('keeps an optional consumer-injected venueAccountId when the schema parses the payload', () => {
+    const parsed = changeTool.parametersSchema!.parse({ ...validParams, venueAccountId: 'va-1' }) as Record<string, unknown>;
+    expect(parsed.venueAccountId).toBe('va-1');
+  });
+
+  it('still parses without venueAccountId (older consumers keep working)', () => {
+    const parsed = changeTool.parametersSchema!.parse(validParams) as Record<string, unknown>;
+    expect(parsed).toEqual(validParams);
+    expect('venueAccountId' in parsed).toBe(false);
+  });
+
+  it('rejects an empty venueAccountId', () => {
+    expect(() => changeTool.parametersSchema!.parse({ ...validParams, venueAccountId: '' })).toThrow();
+  });
+
+  it('rejects a non-string venueAccountId', () => {
+    expect(() => changeTool.parametersSchema!.parse({ ...validParams, venueAccountId: 42 })).toThrow();
+  });
+
+  it('keeps every other field required and strict', () => {
+    for (const missing of ['assessmentArtifactId', 'targetPreset', 'mode', 'reason'] as const) {
+      const { [missing]: _omitted, ...rest } = validParams;
+      expect(() => changeTool.parametersSchema!.parse({ ...rest, venueAccountId: 'va-1' }), `missing ${missing}`).toThrow();
+    }
+    expect(() => changeTool.parametersSchema!.parse({ ...validParams, mode: 'full_transition', venueAccountId: 'va-1' })).toThrow();
+  });
+
+  it('lists venueAccountId in the JSON schema as an optional property', () => {
+    const json = changeTool.parameters as { properties: Record<string, unknown>; required?: string[] };
+    expect(Object.keys(json.properties)).toContain('venueAccountId');
+    expect(json.required ?? []).not.toContain('venueAccountId');
+    expect(json.required ?? []).toEqual(expect.arrayContaining(['assessmentArtifactId', 'targetPreset', 'mode', 'reason']));
+  });
+
+  it('applies the change and never forwards venueAccountId to the apply seam', async () => {
+    const applyPresetChange = vi.fn(async () => ({ ok: true as const }));
+    const ctx = makeCtx({ presetAssessment: makePresetAssessment({ applyPresetChange }) });
+    const result = await changeTool.execute({ ...validParams, venueAccountId: 'va-1' }, ctx);
+    expect(result.success).toBe(true);
+    expect(applyPresetChange).toHaveBeenCalledTimes(1);
+    expect(applyPresetChange).toHaveBeenCalledWith({
+      targetPreset: 'momentum',
+      styleTier: 'standard',
+      reason: 'Strong momentum',
+      artifactId: 'a1',
+    });
+  });
+
+  it('still fails cleanly when no preset-assessment context was built (no account reached the boundary)', async () => {
+    const result = await changeTool.execute(validParams, makeCtx({ presetAssessment: undefined }));
+    expect(result.success).toBe(false);
+    expect(result.fault).toBe(false);
+    expect(result.error).toBe('preset assessment not available in this context');
   });
 });

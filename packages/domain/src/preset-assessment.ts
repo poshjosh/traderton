@@ -140,6 +140,11 @@ export const ChangeStrategyPresetParamsSchema = z.object({
   targetPreset: z.string().min(1),
   mode: z.enum(['entries_only']).describe('Only entries_only is supported; other modes are rejected.'),
   reason: z.string().min(1).describe('Why the agent is changing its preset — shown on the review screen. Required.'),
+  // Declared so it survives the dispatcher's payload parse: the boundary resolves the agent's
+  // venue account from this key (the tool is `ownerScopedNoVenue`) and needs it to build the
+  // preset-assessment context. The tool never reads it.
+  venueAccountId: z.string().min(1).optional()
+    .describe('Consumer-injected venue account binding. Never an LLM input.'),
 });
 export type ChangeStrategyPresetParams = z.infer<typeof ChangeStrategyPresetParamsSchema>;
 

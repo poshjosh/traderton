@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   computeRegimeMatch,
   computeFreshnessNote,
+  AssessStrategyPresetParamsSchema,
+  ChangeStrategyPresetParamsSchema,
   SIGNAL_BIAS_VALUES,
   type RegimeResult,
 } from './preset-assessment.js';
+import { getToolSchema } from './tool-schemas.js';
 import {
   evaluateReviewEligibility,
   ReviewPreCheckReasonCodes,
@@ -126,5 +129,41 @@ describe('ReviewPreCheckReasonDescriptions', () => {
     for (const code of Object.values(ReviewPreCheckReasonCodes)) {
       expect(ReviewPreCheckReasonDescriptions[code]).toBeDefined();
     }
+  });
+});
+
+// ── Consumer-injected venueAccountId on the preset tool schemas (bug 2026-11-21/002) ──
+// The boundary dispatcher parses each payload with the tool's Zod schema and forwards the
+// PARSED result, so a key the schema does not declare is stripped before the subject
+// resolver can read it. Both tools that need the agent's venue account must declare it.
+describe('ChangeStrategyPresetParamsSchema venueAccountId', () => {
+  const valid = { assessmentArtifactId: 'artifact-1', targetPreset: 'momentum', mode: 'entries_only', reason: 'Strong momentum' } as const;
+
+  it('keeps an optional venueAccountId through parsing', () => {
+    expect(ChangeStrategyPresetParamsSchema.parse({ ...valid, venueAccountId: 'va-1' })).toEqual({ ...valid, venueAccountId: 'va-1' });
+  });
+
+  it('parses without it and does not add one', () => {
+    expect(ChangeStrategyPresetParamsSchema.parse(valid)).toEqual(valid);
+  });
+
+  it('rejects an empty or non-string venueAccountId', () => {
+    expect(ChangeStrategyPresetParamsSchema.safeParse({ ...valid, venueAccountId: '' }).success).toBe(false);
+    expect(ChangeStrategyPresetParamsSchema.safeParse({ ...valid, venueAccountId: null }).success).toBe(false);
+  });
+
+  it('declares venueAccountId the same way assess_strategy_preset does', () => {
+    const assess = AssessStrategyPresetParamsSchema.shape.venueAccountId;
+    const change = ChangeStrategyPresetParamsSchema.shape.venueAccountId;
+    expect(change.description).toBe(assess.description);
+    expect(change.safeParse(undefined).success).toBe(true);
+    expect(change.safeParse('').success).toBe(false);
+  });
+
+  it('does not advertise venueAccountId in the get_schema entry an LLM reads', () => {
+    const entry = getToolSchema('change_strategy_preset');
+    expect(entry).toBeDefined();
+    const properties = (entry!.schema as { properties?: Record<string, unknown> }).properties ?? {};
+    expect(Object.keys(properties).sort()).toEqual(['assessmentArtifactId', 'mode', 'reason', 'targetPreset']);
   });
 });

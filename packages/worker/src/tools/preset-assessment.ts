@@ -30,8 +30,15 @@ const listStrategyPresetsTool: AgentTool<TradingToolContext> = {
   parameters: convertZodToJsonSchema(ListStrategyPresetsParamsSchema),
   async execute(rawParams: unknown, ctx: TradingToolContext): Promise<ToolResult> {
     const params = ListStrategyPresetsParamsSchema.parse(rawParams);
-    if (!ctx.presetAssessment) {
-      return { success: false, error: 'preset assessment not available in this context', fault: false };
+    // The catalog is venue-independent, so read it from `presetCatalog` (always present at the
+    // boundary), the same source and guard as `get_strategy_presets`. `presetAssessment` only
+    // exists for an agent subject with a resolved venue account, and a consumer cannot supply
+    // one to this tool (the dispatcher strips undeclared payload keys), so requiring it made the
+    // tool fail with "not available". Only `bin.ts` builds either context, and it always sets
+    // `presetCatalog`, so there is no fallback.
+    const catalog = ctx.presetCatalog;
+    if (!catalog) {
+      return { success: false, error: 'preset catalog not available in this context', fault: false };
     }
     const tiers: Array<'economy' | 'standard' | 'premium'> = params.styleTier
       ? [params.styleTier]
@@ -39,7 +46,7 @@ const listStrategyPresetsTool: AgentTool<TradingToolContext> = {
 
     const entries: PresetCatalogEntry[] = [];
     for (const tier of tiers) {
-      for (const { key, entry } of ctx.presetAssessment.listPresets(tier)) {
+      for (const { key, entry } of catalog.listPresets(tier)) {
         const params_ = entry.strategy.params as Record<string, unknown>;
         entries.push({
           key,

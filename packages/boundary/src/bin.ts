@@ -10,8 +10,7 @@
 // boundary package (the 000 invariant); the dispatcher stays wiring-free.
 
 import { Redis } from 'ioredis';
-import type { TradingToolContext, ToolCategory, ScannerCandleTarget, PriceCandle } from '@traderton/domain';
-import { isReadOnlyCategory } from '@traderton/domain';
+import type { TradingToolContext, ScannerCandleTarget, PriceCandle } from '@traderton/domain';
 import {
   createDatabase,
   BotRepository,
@@ -55,6 +54,7 @@ import type {
   BoundaryInvocationStore,
 } from './dispatcher.js';
 import { buildToolRegistry } from './registry.js';
+import { canBuildPresetAssessment, skipsVenueResolution } from './context-rules.js';
 import {
   resolveSubjectInjection,
 } from './subject-resolver.js';
@@ -527,13 +527,13 @@ async function main(): Promise<void> {
     request: ContextFactoryRequest,
   ): Promise<TradingToolContext> => {
     const tool = registry.get(request.toolName);
-    const category = (tool?.category ?? 'read-config') as ToolCategory;
 
     // A tool needs no venue resolution when it is read-only (drive target never
     // invoked) OR it declares `ownerScopedNoVenue` (owner-scoped write that drives
     // no executor — provisioning, adjust_risk_limits, the watch tools). Computed
-    // here so the resolver stays port-only + registry-free.
-    const skipVenueResolution = isReadOnlyCategory(category) || tool?.ownerScopedNoVenue === true;
+    // here so the resolver stays port-only + registry-free. The rule lives in
+    // ./context-rules.ts so the tests that exercise this factory share it.
+    const skipVenueResolution = skipsVenueResolution(tool);
 
     const resolution = await resolveSubjectInjection(
       { ownerId: request.ownerId, actor: request.actor },
@@ -726,7 +726,7 @@ async function main(): Promise<void> {
       // with a resolved venue account; the tools guard on its absence. It closes
       // over this request's resolved venue coordinates + the profile's preset
       // policy + active strategy, so the tools never touch the db/runtime.
-      presetAssessment: request.actor.type === 'agent' && injection.venueAccountId
+      presetAssessment: canBuildPresetAssessment(request.actor.type, injection.venueAccountId)
         ? presetAssessmentOps.buildContext({
             ownerId: request.ownerId,
             actorId: request.actor.id,

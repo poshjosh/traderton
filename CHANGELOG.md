@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Fixed
+- **`list_strategy_presets` and `change_strategy_preset` now work over the boundary.** Both always returned "preset assessment not available in this context" for a consumer call, because the boundary builds the preset-assessment context only when a venue account reaches it and the dispatcher strips payload keys a tool schema does not declare. `list_strategy_presets` now reads the venue-independent preset catalog (the same source as `get_strategy_presets`), so it needs no account and also works before an owner has one; when the catalog is missing it answers "preset catalog not available in this context". `change_strategy_preset` now declares an optional consumer-injected `venueAccountId`, as `assess_strategy_preset` already does; the tool never reads it. The LLM-facing `get_schema` entry hides the field, but the tool's `parameters` schema served over MCP `tools/list` still lists it, described as "Never an LLM input", the same as for `assess_strategy_preset`. Both changes are additive. See `docs/bug-reports/2026/11/21/002-list-and-change-strategy-preset-unavailable-without-venue-account.md`.
 
 ## 0.2.2-2026.10.16
 

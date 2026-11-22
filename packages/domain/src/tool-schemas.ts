@@ -333,7 +333,9 @@ function buildSchemaRegistry(): Record<string, SchemaEntry> {
   // ── Preset Assessment & Transition Tool Schemas ──────────────────────────
 
   'change_strategy_preset': {
-    schema: zodToJsonSchemaSimple(ChangeStrategyPresetParamsSchema),
+    // `venueAccountId` is a consumer-injected binding, never an LLM input: keep it out of the
+    // schema an LLM reads through get_schema.
+    schema: zodToJsonSchemaSimple(ChangeStrategyPresetParamsSchema.omit({ venueAccountId: true })),
     example: { assessmentArtifactId: 'artifact-abc123', targetPreset: 'momentum', mode: 'entries_only', reason: 'Strong momentum regime detected' },
     version: '3.0.0',
     description: 'Apply a strategy preset change using an exact assessment artifact reference from assess_strategy_preset. Only entries_only is supported. Records the agent\'s reason for the review screen.',
