@@ -97,3 +97,18 @@ Approved by the owner on 2026-11-21 (items 1 to 4). Not started.
 - Whether paper and shadow mode fills reach the realized P&L path in full (`shadow-executor.ts` was not read in detail).
 - Who reads the Redis `startingCapital` key written by herobids `instance-event-publisher.ts`.
 - Exact line numbers are approximate (about 3 lines).
+
+## Implementation Plan (coordinator task list)
+1. DONE - Real figures in `get_account_summary`: initialCapital, lifetimeRealizedPnl, unrealizedPnlUsd, equity, availableCapital, drawdown (current/peak), per-position markPrice/unrealizedPnl + mark timestamp, `asOf`, `fundingIncluded: false` + note; live venue balance as a separate field; remove bare `capital`; fix descriptions/guidance; update `tool-schemas.ts`/contract types; single source with the risk gate; paper/shadow fills verified.
+2. PENDING - Capital-change baseline: nullable `agent_trading_profiles.capital_changed_at` (migration), set on capital change, `pnlSinceCapitalChange`, reset drawdown peak and measure return/drawdown since it.
+3. PENDING - `get_risk_limits`: fix or remove the `equity:{agentId}` reader, log Redis errors at warn; `get_analytics` `allTime` option scoped by venue account.
+4. PENDING - Skills wording (traderton-skills `crypto-trading`, `crypto-risk-monitoring`) and tool text in `trading.ts`/`tool-schemas.ts`; CHANGELOG; follow-up report for funding ingestion.
+
+## Outstanding Issues
+### Item 1
+- Agent shadow-mode limit orders are never resolved (`agent-trading-actor.ts` does not call `resolvePendingLimits()`), so those fills never write `realized_pnl_delta`; equity, summary and risk gate miss them in shadow mode. Needs a follow-up.
+- `marginUsed` is 1x notional (engine does not model leverage); `availableCapital` clamped at 0.
+- Drawdown peak is rebuilt from lifetime realized (`drawdownBasis: realized_peak`), not the live actor peak.
+- Equity excludes bot positions (`equityScope: agent_direct`).
+- `get_account_summary` field names (consumed by herobids): initialCapital, lifetimeRealizedPnl, unrealizedPnlUsd, unrealizedComplete, equity, marginUsed, marginBasis, availableCapital, drawdown{current,currentPct,peakEquity}, equityScope, drawdownBasis, fundingIncluded, fundingNote, venueBalance, asOf; positions[] add markPrice, unrealizedPnl, markedAt.
+- Boundary casts `botRepo` with `as unknown as` (pre-existing); root `pnpm lint` does not typecheck packages/worker (build does).

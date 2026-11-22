@@ -108,7 +108,7 @@ describe('C1 selected trading-profile risk seam', () => {
 
     expect(risk).toMatchObject({ success: true });
     expect((risk.data as { limits: { maxOpenPositions: { value: number } } }).limits.maxOpenPositions.value).toBe(3);
-    expect(account).toMatchObject({ success: true, data: { capital: '1000' } });
+    expect(account).toMatchObject({ success: true, data: { initialCapital: '1000' } });
     await expect(ctx.executionConfig?.getExecutionConfig()).resolves.toMatchObject({ mode: 'paper' });
   });
 

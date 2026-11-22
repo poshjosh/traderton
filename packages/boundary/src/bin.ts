@@ -21,6 +21,8 @@ import {
   AgentScanRepository,
   AgentActorRunRepository,
   PresetAssessmentRepository,
+  FillRepository,
+  BalanceSnapshotRepository,
   JournalPartitionMaintenance,
   computeRequestFingerprint,
 } from '@traderton/db';
@@ -117,6 +119,8 @@ async function main(): Promise<void> {
   const botRepo = new BotRepository(db);
   const profileRepo = new AgentTradingProfileRepository(db);
   const instrumentRepo = new InstrumentRepository(db);
+  const fillRepo = new FillRepository(db);
+  const balanceSnapshotRepo = new BalanceSnapshotRepository(db);
   // Running bots rehydrate at boundary start via the shared running-bot loader
   // (E2 F2) — see `buildBoundaryTradingRuntime` for the wiring + resume rationale.
   const runtime = buildBoundaryTradingRuntime({ config: appConfig, redis, db });
@@ -673,6 +677,20 @@ async function main(): Promise<void> {
       // Profile-backed risk and account context. No decision payload field is an
       // enforcement input after C1.
       riskContractOps,
+      // Venue-account-scoped ledger for get_account_summary (agent subjects only).
+      accountLedger: request.actor.type === 'agent' && injection.venueAccountId
+        ? {
+            venueAccountId: injection.venueAccountId,
+            getLifetimeRealizedPnl: () =>
+              fillRepo.sumRealizedPnlDeltaByVenueAccount('agent', request.actor.id, injection.venueAccountId),
+            getLatestVenueBalance: async () => {
+              const latest = await balanceSnapshotRepo.getLatestByVenueAccount(injection.venueAccountId, injection.venue);
+              return latest
+                ? { snapshotAt: latest.snapshotAt.toISOString(), balances: latest.balances }
+                : null;
+            },
+          }
+        : undefined,
       agentRepo: riskSource ? {
         getAgent: async (_agentId: string) => ({
           capital: riskSource.capital,

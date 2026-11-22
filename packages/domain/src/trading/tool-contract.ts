@@ -103,7 +103,7 @@ export interface ToolBotRecord {
 
 /** Position row shape returned by repository queries. */
 export interface ToolPositionRecord {
-  actorType: string;
+  actorType: 'agent' | 'bot' | 'user' | 'system';
   actorId: string | null;
   venue: string;
   /** Canonical instrument ID from the venue's instrument repository. Nullable for legacy positions. */
@@ -117,6 +117,8 @@ export interface ToolPositionRecord {
   /** Per-trade take-profit price level set at entry. Nullable — not all trades carry levels. */
   takeProfit?: string | null;
   openedAt: Date;
+  /** Venue account holding the position (present on DB rows). */
+  venueAccountId?: string;
 }
 
 /** Analytics result returned by getAnalyticsByCreator. */
@@ -295,6 +297,21 @@ export interface TradingToolContext {
   /** Agent repository for get_account_summary (capital, etc.). */
   agentRepo?: {
     getAgent(agentId: string): Promise<{ capital: string | null; risk: Record<string, unknown> | null } | null>;
+  };
+  /**
+   * Venue-account-scoped ledger reads for get_account_summary. Bound by the
+   * boundary to the request's resolved venue account; the fills sum is the same
+   * source the agent actor rehydrates its EquityTracker from.
+   */
+  accountLedger?: {
+    venueAccountId: string;
+    /** Lifetime fee-adjusted realized P&L of the agent's own fills on this venue account (decimal string). */
+    getLifetimeRealizedPnl(): Promise<string>;
+    /** Latest persisted venue balance snapshot (not a fresh venue fetch), or null when none exists. */
+    getLatestVenueBalance(): Promise<{
+      snapshotAt: string;
+      balances: Array<{ asset: string; free: string; locked: string; total: string }>;
+    } | null>;
   };
   /** Trading-owned execution-config lookup for account summaries (mode + position sizing). */
   executionConfig?: {

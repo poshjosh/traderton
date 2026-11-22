@@ -4,6 +4,8 @@ import type { AgentTool, ToolResult, TradingToolContext } from '@traderton/domai
 import type { Database } from '@traderton/db';
 import { venueAccounts } from '@traderton/db';
 import { convertZodToJsonSchema } from './registry.js';
+import { markOpenPositions, POSITION_MARK_BUDGET_MS } from './position-marks.js';
+import { buildAccountEquityView } from './account-summary.js';
 import { AgentRiskSpecFieldsSchema, llmEmptyParamsSchema } from './risk-limits.js';
 import { createLogger } from '../logger.js';
 
@@ -20,13 +22,13 @@ const GetAccountSummaryParamsSchema = z.object({
 
 const getAccountSummaryTool: AgentTool<TradingToolContext> = {
   name: 'get_account_summary',
-  description: 'Get a summary of the agent\'s trading account including usable capital, equity, open positions, P&L, and risk limits. Use this to compute appropriate position sizes (targetSize) before calling submit_decision, or to determine sizing for position sizing configuration.',
+  description: 'Get a summary of the agent\'s trading account: initialCapital (the configured allocation, NOT current funds), lifetimeRealizedPnl (fees included, funding excluded), unrealizedPnlUsd (from current marks), equity (= initialCapital + realized + unrealized; equityScope=agent_direct: agent-direct positions and own fills only, bot books excluded), marginUsed (open notional at 1x, leverage not modelled), availableCapital (= max(0, equity - marginUsed)), drawdown (drawdownBasis=realized_peak: peak rebuilt from realized P&L), venueBalance (live mode only: the latest persisted snapshot, not a fresh venue fetch), open positions with markPrice/unrealizedPnl, and risk limits. Use availableCapital and equity, not initialCapital, to compute position sizes (targetSize) before calling submit_decision.',
   parametersSchema: GetAccountSummaryParamsSchema,
   // Spec fields are platform-injected post-LLM — the LLM-facing JSON schema is
   // the empty contract (see risk-limits.ts).
   parameters: convertZodToJsonSchema(llmEmptyParamsSchema),
   category: 'read-database',
-  promptGuidance: 'Call get_account_summary before submit_decision to see available capital and open positions. targetSize is in base units — the amount of the asset being bought or sold. If capital is unavailable, omit targetSize to let the engine use a safe default.',
+  promptGuidance: 'Call get_account_summary before submit_decision to see equity, availableCapital and open positions. initialCapital is the configured allocation, not current funds: size from equity/availableCapital. targetSize is in base units — the amount of the asset being bought or sold. If equity is null, omit targetSize to let the engine use a safe default. Figures include fees but exclude funding payments (fundingIncluded: false).',
   async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
     if (!ctx.botRepo) {
       return {
@@ -38,8 +40,11 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
     }
 
     try {
-      // Gather positions for both agent-direct and bot-managed
-      const allPositions = await ctx.botRepo.getOpenPositionsByCreator('agent', ctx.agentId);
+      // Gather positions for both agent-direct and bot-managed, scoped to the
+      // selected venue account (same scope as the engine's equity tracker).
+      const ledger = ctx.accountLedger;
+      const allPositions = (await ctx.botRepo.getOpenPositionsByCreator('agent', ctx.agentId))
+        .filter((p) => !ledger || p.venueAccountId === undefined || p.venueAccountId === ledger.venueAccountId);
       const agentPositions = allPositions.filter((p) => p.actorType === 'agent');
       const botPositions = allPositions.filter((p) => p.actorType === 'bot');
 
@@ -67,7 +72,7 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
       }
 
       // Get agent config for capital and sizing info
-      let capital: string | null = null;
+      let initialCapital: string | null = null;
       let executionMode: string | null = null;
       let fixedPositionSize: string | null = null;
       let positionSizeMode: string | null = null;
@@ -93,7 +98,7 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
         try {
           const agent = await ctx.agentRepo.getAgent(ctx.agentId);
           if (agent) {
-            capital = agent.capital;
+            initialCapital = agent.capital;
           }
         } catch (err) {
           warnings.push('agent_repo_unavailable');
@@ -103,11 +108,62 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
         warnings.push('agent_repo_unavailable');
       }
 
-      // Count open positions
-      const openPositionCount = agentPositions.length + botPositions.length;
+      const effectiveMode = executionMode ?? ctx.executionMode;
 
-      // Build position summaries
-      const positions = allPositions.map((p) => ({
+      // Lifetime fee-adjusted realized P&L: the same fills sum the agent actor
+      // rehydrates its EquityTracker from, so tool and risk gate agree.
+      let lifetimeRealizedPnl: string | null = null;
+      if (ledger) {
+        try {
+          lifetimeRealizedPnl = await ledger.getLifetimeRealizedPnl();
+        } catch (err) {
+          warnings.push('realized_pnl_unavailable');
+          logger.warn({ agentId: ctx.agentId, err }, 'get_account_summary: realized P&L unavailable');
+        }
+      } else {
+        warnings.push('realized_pnl_unavailable');
+      }
+
+      // Mark open positions (best-effort; unmarked rows carry null mark fields).
+      const asOf = new Date();
+      // Only agent-direct rows feed equity, so only they are marked; bot rows
+      // keep null mark fields rather than spending the mark budget.
+      const markedAgent = await markOpenPositions(
+        agentPositions.map((p) => ({ ...p, closedAt: null })),
+        {
+          priceService: ctx.priceService,
+          oneInchConfig: ctx.oneInchPriceChainConfig,
+          budgetMs: POSITION_MARK_BUDGET_MS,
+          now: asOf,
+        },
+      );
+
+      const equityView = buildAccountEquityView(
+        initialCapital,
+        lifetimeRealizedPnl,
+        markedAgent,
+      );
+      const marked = [
+        ...markedAgent,
+        ...botPositions.map((p) => ({ ...p, markPrice: null, unrealizedPnl: null, markedAt: null })),
+      ];
+      if (equityView.equity !== null && !equityView.unrealizedComplete) {
+        warnings.push('unrealized_pnl_incomplete');
+      }
+
+      // Live mode: latest persisted venue balance, reported separately — never
+      // substituted for availableCapital.
+      let venueBalance: unknown = null;
+      if (effectiveMode === 'live' && ledger) {
+        try {
+          venueBalance = await ledger.getLatestVenueBalance();
+        } catch (err) {
+          warnings.push('venue_balance_unavailable');
+          logger.warn({ agentId: ctx.agentId, err }, 'get_account_summary: venue balance unavailable');
+        }
+      }
+
+      const positions = marked.map((p) => ({
         actorType: p.actorType,
         actorId: p.actorId,
         symbol: p.symbol,
@@ -115,6 +171,9 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
         size: p.size,
         entryPrice: p.entryPrice,
         openedAt: p.openedAt,
+        markPrice: p.markPrice,
+        unrealizedPnl: p.unrealizedPnl,
+        markedAt: p.markedAt,
       }));
 
       return {
@@ -122,20 +181,23 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
         data: {
           ok: true,
           agentId: ctx.agentId,
-          capital: capital,
-          capitalAvailable: capital !== null,
-          executionMode: executionMode ?? ctx.executionMode,
+          asOf: asOf.toISOString(),
+          ...equityView,
+          fundingIncluded: false,
+          fundingNote: 'P&L and equity include trading fees but exclude funding payments.',
+          venueBalance: effectiveMode === 'live' ? venueBalance : undefined,
+          executionMode: effectiveMode,
           positionSizeMode: positionSizeMode ?? 'unknown',
           fixedPositionSize: fixedPositionSize ?? null,
-          openPositionCount,
+          openPositionCount: agentPositions.length + botPositions.length,
           agentDirectPositions: agentPositions.length,
           botManagedPositions: botPositions.length,
           positions,
           riskLimits: riskContract ?? 'unavailable',
           warnings: warnings.length > 0 ? warnings : undefined,
-          guidance: capital !== null
-            ? `Available capital: ${capital}. targetSize for submit_decision is in base units — the amount of the asset being bought or sold, not a dollar value. A typical position size is 5–10% of capital; adjust up or down based on conviction and risk limits.`
-            : 'Capital information unavailable. targetSize for submit_decision is in base units — the amount of the asset being bought or sold. You must provide a value; a conservative starting point is 5% of your expected capital.',
+          guidance: equityView.equity !== null
+            ? `Equity: ${equityView.equity}; available capital: ${equityView.availableCapital} (initial allocation ${equityView.initialCapital} is not current funds). Equity and P&L cover agent-direct positions only. targetSize for submit_decision is in base units — the amount of the asset being bought or sold, not a dollar value. A typical position size is 5–10% of equity; adjust up or down based on conviction and risk limits.`
+            : 'Equity unavailable. targetSize for submit_decision is in base units — the amount of the asset being bought or sold. You must provide a value; a conservative starting point is 5% of your expected capital.',
         },
       };
     } catch (err) {

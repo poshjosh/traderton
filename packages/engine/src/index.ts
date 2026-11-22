@@ -48,6 +48,8 @@ export { applyFillAccounting } from './fill-accounting.js';
 export type { FillAccountingResult } from './fill-accounting.js';
 
 export { EquityTracker } from './equity-tracker.js';
+export { computeAccountEquity } from './account-equity.js';
+export type { AccountEquityInput, AccountEquitySnapshot } from './account-equity.js';
 export { DailyLossTracker } from './daily-loss-tracker.js';
 export { rehydrateDailyLoss } from './rehydrate-daily-loss.js';
 export type { StoredFill } from './rehydrate-daily-loss.js';
