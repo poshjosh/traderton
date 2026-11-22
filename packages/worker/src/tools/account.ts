@@ -206,7 +206,7 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
           warnings: warnings.length > 0 ? warnings : undefined,
           guidance: equityView.equity !== null
             ? `Equity: ${equityView.equity}; available capital: ${equityView.availableCapital} (initial allocation ${equityView.initialCapital} is not current funds). Equity and P&L cover agent-direct positions only. targetSize for submit_decision is in base units — the amount of the asset being bought or sold, not a dollar value. A typical position size is 5–10% of equity; adjust up or down based on conviction and risk limits.`
-            : 'Equity unavailable. targetSize for submit_decision is in base units — the amount of the asset being bought or sold. You must provide a value; a conservative starting point is 5% of your expected capital.',
+            : 'Equity unavailable. targetSize for submit_decision is in base units — the amount of the asset being bought or sold. You must provide a value; a conservative starting point is 5% of your configured allocation.',
         },
       };
     } catch (err) {

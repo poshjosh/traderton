@@ -52,7 +52,7 @@ const submitDecisionTool: AgentTool<TradingToolContext> = {
   // LLM-facing JSON schema is the LLM-visible subset only (see risk-limits.ts).
   parameters: convertZodToJsonSchema(submitDecisionLlmParamsSchema),
   category: 'execute-trade',
-  promptGuidance: 'Use dryRun=true first to preview the decision before submitting. Call find_instrument to get the correct instrumentId, and get_account_summary to see available capital and open positions. targetSize is denominated in the base asset (e.g. ETH in ETH/USDC), so a $50 position at $2500/ETH is "0.02". Use get_schema("venue-defaults") for recommended slippage values. In approval_required mode, your decision will be recorded and sent to the user — ask them to approve with /yes <code> or reject with /no <code>. No trade executes without user approval.',
+  promptGuidance: 'Use dryRun=true first to preview the decision before submitting. Call find_instrument to get the correct instrumentId, and get_account_summary to see equity, availableCapital and open positions (size from these, not from initialCapital). targetSize is denominated in the base asset (e.g. ETH in ETH/USDC), so a $50 position at $2500/ETH is "0.02". Use get_schema("venue-defaults") for recommended slippage values. In approval_required mode, your decision will be recorded and sent to the user — ask them to approve with /yes <code> or reject with /no <code>. No trade executes without user approval.',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
     const p = params as z.infer<typeof SubmitDecisionParamsSchema>;
 

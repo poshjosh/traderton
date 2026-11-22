@@ -94,7 +94,7 @@ Approved by the owner on 2026-11-21 (items 1 to 4). Not started.
 
 ## Not verified
 - Not reproduced live; findings are from reading source.
-- Whether paper and shadow mode fills reach the realized P&L path in full (`shadow-executor.ts` was not read in detail).
+- Paper and shadow fills reach the realized P&L path for market orders. Gap found: agent shadow limit orders are never resolved (`agent-trading-actor.ts` does not call `resolvePendingLimits()`), so those fills never write `realized_pnl_delta`. Tracked in `004-agent-shadow-limit-orders-never-resolved.md`. Funding ingestion is tracked in `003-funding-payments-not-ingested-into-realized-pnl.md`.
 - Who reads the Redis `startingCapital` key written by herobids `instance-event-publisher.ts`.
 - Exact line numbers are approximate (about 3 lines).
 
@@ -102,7 +102,7 @@ Approved by the owner on 2026-11-21 (items 1 to 4). Not started.
 1. DONE - Real figures in `get_account_summary`: initialCapital, lifetimeRealizedPnl, unrealizedPnlUsd, equity, availableCapital, drawdown (current/peak), per-position markPrice/unrealizedPnl + mark timestamp, `asOf`, `fundingIncluded: false` + note; live venue balance as a separate field; remove bare `capital`; fix descriptions/guidance; update `tool-schemas.ts`/contract types; single source with the risk gate; paper/shadow fills verified.
 2. DONE - Capital-change baseline: nullable `agent_trading_profiles.capital_changed_at` (migration), set on capital change, `pnlSinceCapitalChange`, reset drawdown peak and measure return/drawdown since it.
 3. DONE - `get_risk_limits`: removed the `equity:{agentId}` Redis reader (nobody wrote it); `drawdown.current` now comes from the same equity view as `get_account_summary`, the daily-loss limit is pct of that equity (as in the risk gate; falls back to configured capital), swallowed errors log at warn. `get_analytics` gained `allTime` (no window, adds fee-adjusted `lifetimeRealizedPnlUsd`) and is scoped by venue account (`getAnalyticsByCreator` takes an optional `venueAccountId`). `tool-schemas.ts` has no entries for these tools, so descriptions live in the tool files.
-4. PENDING - Skills wording (traderton-skills `crypto-trading`, `crypto-risk-monitoring`) and tool text in `trading.ts`/`tool-schemas.ts`; CHANGELOG; follow-up report for funding ingestion.
+4. DONE - Wording: `crypto-trading` and `crypto-risk-monitoring` skills (not committed, separate repo; `get_analytics` described as realized-only), tool text in `trading.ts`, `tool-schemas.ts` (`submit_decision.targetSize`) and the `get_account_summary` no-equity fallback guidance now point to `equity`/`availableCapital`, never `initialCapital` as funds. CHANGELOG entry added. Follow-ups: `003` (funding ingestion), `004` (agent shadow limit orders).
 
 ## Outstanding Issues
 ### Item 1
@@ -128,3 +128,7 @@ Approved by the owner on 2026-11-21 (items 1 to 4). Not started.
 - Medium: mark-price calls on every `get_risk_limits` call; `allTime` without ledger omits `lifetimeRealizedPnlUsd` instead of explicit null.
 - Medium: no DB integration test for `getAnalyticsByCreator` venue filter.
 - Low: `openPositionsCurrent` not venue-scoped; `venueAccountId === undefined` filter escape hatch; document known limits (drawdown peak approximation, bot exclusion, daily-loss still windowed net sum).
+### Item 4 (code review, no High)
+- Medium: skills say "open positions with marks"/"own direct positions"; bot rows carry null marks.
+- Medium: report 004 Impact ("agent may see a pending order that never completes") unverified; report 003 venue claims partly unverified.
+- Low: `promptGuidance` ("omit targetSize") contradicts runtime fallback ("You must provide a value") in `account.ts`.
