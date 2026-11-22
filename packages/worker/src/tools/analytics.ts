@@ -4,26 +4,37 @@ import { convertZodToJsonSchema } from './registry.js';
 
 // --- get_analytics ---
 
+// LLMs may send booleans as strings; z.coerce.boolean would turn "false" into true.
+const lenientBoolean = z.preprocess(
+  (value) => (value === 'true' ? true : value === 'false' ? false : value),
+  z.boolean(),
+);
+
 const GetAnalyticsParamsSchema = z.object({
   // coerce: LLMs may send numbers as strings
-  days: z.coerce.number().int().positive().max(90).default(7).describe('Lookback period in days (1-90). Defaults to 7.'),
+  days: z.coerce.number().int().positive().max(90).default(7).describe('Lookback period in days (1-90). Defaults to 7. Ignored when allTime is true.'),
+  allTime: lenientBoolean.optional().describe('Set true for lifetime analytics instead of the days window. Defaults to false.'),
 });
 
 const getAnalyticsTool: AgentTool<TradingToolContext> = {
   name: 'get_analytics',
-  description: 'Get trading analytics for this agent, including both direct agent trades and all bot-created trades. Returns total trades, win rate, P&L, fees, per-bot breakdown, and an agent-direct summary over the specified lookback period.',
+  description: 'Get trading analytics for this agent, including both direct agent trades and all bot-created trades. Returns total trades, win rate, P&L, fees, per-bot breakdown, and an agent-direct summary over the specified lookback period (days, max 90), or over the whole lifetime with allTime=true. Results are scoped to the selected venue account. realizedPnlUsd sums closed positions; with allTime=true lifetimeRealizedPnlUsd is also returned: the fee-adjusted realized P&L of the agent\'s own fills (the figure get_account_summary reports as lifetimeRealizedPnl; funding excluded).',
   parametersSchema: GetAnalyticsParamsSchema,
   parameters: convertZodToJsonSchema(GetAnalyticsParamsSchema),
   category: 'read-database',
   async execute(params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
-    const { days } = params as z.infer<typeof GetAnalyticsParamsSchema>;
+    const { days, allTime = false } = params as z.infer<typeof GetAnalyticsParamsSchema>;
 
     if (!ctx.botRepo) {
       return { success: false, error: 'direct db access not available' };
     }
 
-    const analyticsSince = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const analytics = await ctx.botRepo.getAnalyticsByCreator('agent', ctx.agentId, analyticsSince);
+    const ledger = ctx.accountLedger;
+    const analyticsSince = allTime ? undefined : new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const analytics = await ctx.botRepo.getAnalyticsByCreator(
+      'agent', ctx.agentId, analyticsSince, undefined, ledger?.venueAccountId,
+    );
+    const lifetimeRealizedPnlUsd = allTime && ledger ? await ledger.getLifetimeRealizedPnl() : undefined;
 
     const winRate = analytics.closedPositions > 0
       ? (analytics.winningPositions / analytics.closedPositions) * 100
@@ -42,7 +53,10 @@ const getAnalyticsTool: AgentTool<TradingToolContext> = {
         avgHoldTimeHours: analytics.avgHoldTimeHours,
         byBot: analytics.byBot,
         agentDirect: analytics.agentDirect,
-        days,
+        days: allTime ? null : days,
+        allTime,
+        venueAccountId: ledger?.venueAccountId ?? null,
+        ...(lifetimeRealizedPnlUsd !== undefined ? { lifetimeRealizedPnlUsd } : {}),
       },
     };
   },

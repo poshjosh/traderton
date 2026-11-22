@@ -213,7 +213,8 @@ export interface TradingToolContext {
     markBotRunning: (botId: string) => Promise<void>;
     restoreBotRuntimeState: (state: { botId: string; status: string; startedAt: Date | null; stoppedAt: Date | null }) => Promise<void>;
     updateBotConfig: (botId: string, config: Record<string, unknown>) => Promise<void>;
-    getAnalyticsByCreator: (creatorType: string, creatorId: string, since: Date, botId?: string) => Promise<ToolAnalyticsResult>;
+    /** `since` undefined = all time. `venueAccountId` restricts fills and positions to that venue account. */
+    getAnalyticsByCreator: (creatorType: string, creatorId: string, since?: Date, botId?: string, venueAccountId?: string) => Promise<ToolAnalyticsResult>;
     getOpenPositionsByCreator: (creatorType: string, creatorId: string, botId?: string) => Promise<ToolPositionRecord[]>;
   };
   /** Optional market data registry */

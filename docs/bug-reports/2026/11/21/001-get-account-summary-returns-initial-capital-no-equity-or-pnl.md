@@ -101,7 +101,7 @@ Approved by the owner on 2026-11-21 (items 1 to 4). Not started.
 ## Implementation Plan (coordinator task list)
 1. DONE - Real figures in `get_account_summary`: initialCapital, lifetimeRealizedPnl, unrealizedPnlUsd, equity, availableCapital, drawdown (current/peak), per-position markPrice/unrealizedPnl + mark timestamp, `asOf`, `fundingIncluded: false` + note; live venue balance as a separate field; remove bare `capital`; fix descriptions/guidance; update `tool-schemas.ts`/contract types; single source with the risk gate; paper/shadow fills verified.
 2. DONE - Capital-change baseline: nullable `agent_trading_profiles.capital_changed_at` (migration), set on capital change, `pnlSinceCapitalChange`, reset drawdown peak and measure return/drawdown since it.
-3. PENDING - `get_risk_limits`: fix or remove the `equity:{agentId}` reader, log Redis errors at warn; `get_analytics` `allTime` option scoped by venue account.
+3. DONE - `get_risk_limits`: removed the `equity:{agentId}` Redis reader (nobody wrote it); `drawdown.current` now comes from the same equity view as `get_account_summary`, the daily-loss limit is pct of that equity (as in the risk gate; falls back to configured capital), swallowed errors log at warn. `get_analytics` gained `allTime` (no window, adds fee-adjusted `lifetimeRealizedPnlUsd`) and is scoped by venue account (`getAnalyticsByCreator` takes an optional `venueAccountId`). `tool-schemas.ts` has no entries for these tools, so descriptions live in the tool files.
 4. PENDING - Skills wording (traderton-skills `crypto-trading`, `crypto-risk-monitoring`) and tool text in `trading.ts`/`tool-schemas.ts`; CHANGELOG; follow-up report for funding ingestion.
 
 ## Outstanding Issues
@@ -122,3 +122,9 @@ Approved by the owner on 2026-11-21 (items 1 to 4). Not started.
 - Medium: null -> value and value -> null capital count as an edit and move the baseline; decide and document.
 - Medium: no drizzle meta snapshot for 0009/0010; next `drizzle-kit generate` needs manual reconciliation.
 - Low: dead lifetime fallback in `bin.ts` `getRealizedPnlSinceCapitalChange`; `capitalChangedAt` optional on `StoredTradingProfile`/`AgentActorSpec`/deps (make required); marker uses app clock vs `fills.filledAt` (skew edge); pre-edit unrealized is attributed to the new period (documented); `returnPct` null when capital <= 0 lacks a test.
+### Item 3 (code review, no High)
+- Medium: `get_risk_limits` `dailyLoss.current` analytics call not venue-scoped (and includes bot P&L) while limit/equity are; pass `ledger?.venueAccountId`.
+- Medium: failure in `resolveEquityView` loses the configured-capital fallback for the daily-loss limit (wrap in its own try/catch + warn).
+- Medium: mark-price calls on every `get_risk_limits` call; `allTime` without ledger omits `lifetimeRealizedPnlUsd` instead of explicit null.
+- Medium: no DB integration test for `getAnalyticsByCreator` venue filter.
+- Low: `openPositionsCurrent` not venue-scoped; `venueAccountId === undefined` filter escape hatch; document known limits (drawdown peak approximation, bot exclusion, daily-loss still windowed net sum).

@@ -223,3 +223,65 @@ describe('analyticsTools', () => {
     expect(data['botCount']).toBe(0);
   });
 });
+describe('get_analytics allTime', () => {
+  const getAnalyticsTool = analyticsTools.find((tool) => tool.name === 'get_analytics')!;
+  const analytics = {
+    botCount: 0, openPositions: 0, closedPositions: 4, winningPositions: 3, realizedPnlUsd: '120.00',
+    totalFeesUsd: '5.00', recentFills: 9, avgHoldTimeHours: 2, byBot: [], agentDirect: { recentFills: 9, realizedPnlUsd: '120.00' },
+  };
+
+  function ctxWith(getAnalyticsByCreator: ReturnType<typeof vi.fn>, withLedger = true): ToolContext {
+    return createToolContext({
+      botRepo: { getAnalyticsByCreator } as unknown as ToolContext['botRepo'],
+      ...(withLedger ? {
+        accountLedger: {
+          venueAccountId: 'va-1',
+          getLifetimeRealizedPnl: vi.fn(async () => '117.5'),
+          capitalChangedAt: null,
+          getRealizedPnlSinceCapitalChange: vi.fn(async () => '117.5'),
+          getLatestVenueBalance: vi.fn(async () => null),
+        },
+      } : {}),
+    });
+  }
+
+  it('queries without a time window when allTime is true', async () => {
+    const query = vi.fn(async () => analytics);
+    const result = await getAnalyticsTool.execute({ allTime: true }, ctxWith(query));
+    expect(result.success).toBe(true);
+    expect(query).toHaveBeenCalledWith('agent', 'agent-1', undefined, undefined, 'va-1');
+    const data = result.data as Record<string, unknown>;
+    expect(data['allTime']).toBe(true);
+    expect(data['days']).toBeNull();
+  });
+
+  it('returns fee-adjusted lifetime realized P&L for the venue account when allTime is true', async () => {
+    const result = await getAnalyticsTool.execute({ allTime: true }, ctxWith(vi.fn(async () => analytics)));
+    expect((result.data as Record<string, unknown>)['lifetimeRealizedPnlUsd']).toBe('117.5');
+  });
+
+  it('keeps the days window and omits lifetime P&L when allTime is not set', async () => {
+    const query = vi.fn(async () => analytics);
+    const before = Date.now();
+    const result = await getAnalyticsTool.execute({ days: 3 }, ctxWith(query));
+    const since = (query.mock.calls[0] as unknown[])[2] as Date;
+    expect(before - since.getTime()).toBeGreaterThanOrEqual(3 * 86_400_000);
+    const data = result.data as Record<string, unknown>;
+    expect(data['days']).toBe(3);
+    expect(data['allTime']).toBe(false);
+    expect(data).not.toHaveProperty('lifetimeRealizedPnlUsd');
+  });
+
+  it('accepts allTime sent as a string and treats "false" as false', () => {
+    const schema = getAnalyticsTool.parametersSchema!;
+    expect((schema.parse({ allTime: 'true' }) as { allTime: boolean }).allTime).toBe(true);
+    expect((schema.parse({ allTime: 'false' }) as { allTime: boolean }).allTime).toBe(false);
+  });
+
+  it('leaves the query unscoped when no venue ledger is bound', async () => {
+    const query = vi.fn(async () => analytics);
+    const result = await getAnalyticsTool.execute({ allTime: true }, ctxWith(query, false));
+    expect(query).toHaveBeenCalledWith('agent', 'agent-1', undefined, undefined, undefined);
+    expect(result.data as Record<string, unknown>).not.toHaveProperty('lifetimeRealizedPnlUsd');
+  });
+});

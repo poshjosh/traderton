@@ -1539,7 +1539,7 @@ export class BotRepository {
   }
 
   /** Compute lightweight bot analytics for all bots created by the given actor. */
-  async getAnalyticsByCreator(creatorType: string, creatorId: string, since?: Date, botId?: string) {
+  async getAnalyticsByCreator(creatorType: string, creatorId: string, since?: Date, botId?: string, venueAccountId?: string) {
     // Load bots WITHOUT the since filter — we want all bots that belong to the agent,
     // not just those created within the analytics window. Older bots can still have
     // fills and positions within the requested window.
@@ -1563,11 +1563,13 @@ export class BotRepository {
       };
     }
 
+    const positionVenue = venueAccountId ? [eq(positions.venueAccountId, venueAccountId)] : [];
+    const fillVenue = venueAccountId ? [eq(fills.venueAccountId, venueAccountId)] : [];
     const botPositionCondition = botIds.length > 0
-      ? and(eq(positions.actorType, 'bot'), inArray(positions.actorId, botIds))
+      ? and(eq(positions.actorType, 'bot'), inArray(positions.actorId, botIds), ...positionVenue)
       : undefined;
     const agentPositionCondition = hasAgentDirect
-      ? and(eq(positions.actorType, 'agent'), eq(positions.actorId, creatorId))
+      ? and(eq(positions.actorType, 'agent'), eq(positions.actorId, creatorId), ...positionVenue)
       : undefined;
     const positionWhereClause = botPositionCondition && agentPositionCondition
       ? or(botPositionCondition, agentPositionCondition)
@@ -1584,6 +1586,7 @@ export class BotRepository {
         eq(fills.actorType, 'bot'),
         inArray(fills.actorId, botIds),
         ...(since ? [gte(fills.filledAt, since)] : []),
+        ...fillVenue,
       )
       : undefined;
     const agentFillCondition = hasAgentDirect
@@ -1591,6 +1594,7 @@ export class BotRepository {
         eq(fills.actorType, 'agent'),
         eq(fills.actorId, creatorId),
         ...(since ? [gte(fills.filledAt, since)] : []),
+        ...fillVenue,
       )
       : undefined;
     const fillWhereClause = botFillCondition && agentFillCondition

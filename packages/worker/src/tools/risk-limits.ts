@@ -1,6 +1,11 @@
 import { z } from 'zod';
-import type { AgentTool, ToolResult, TradingToolContext, ResolvedAgentRiskContract, ResolvedAgentRiskProfile, AgentRiskProfileField } from '@traderton/domain';
+import type { AgentTool, ToolResult, TradingToolContext, ResolvedAgentRiskContract, ResolvedAgentRiskProfile, AgentRiskProfileField, ToolPositionRecord } from '@traderton/domain';
 import { convertZodToJsonSchema } from './registry.js';
+import { markOpenPositions, POSITION_MARK_BUDGET_MS } from './position-marks.js';
+import { buildAccountEquityView, type AccountEquityView } from './account-summary.js';
+import { createLogger } from '../logger.js';
+
+const logger = createLogger('tools:risk-limits');
 
 // ── Consumer-injected platform risk spec (A3) ──────────────────────────────
 // get_risk_limits / get_account_summary take "empty" payloads from the LLM, but
@@ -53,7 +58,10 @@ const getRiskLimitsTool: AgentTool<TradingToolContext> = {
     if (ctx.riskContractOps.getProfile) {
       try {
         profile = await ctx.riskContractOps.getProfile();
-      } catch { /* Non-critical — proceed with 5-field contract only */ }
+      } catch (err) {
+        // Non-critical — proceed with the 5-field contract only
+        logger.warn({ agentId: ctx.agentId, err }, 'get_risk_limits: risk profile unavailable');
+      }
     }
 
     return {
@@ -168,12 +176,16 @@ export async function adjustOverridesViaRiskContractOps(
  *
  * Conventions:
  * - dailyMaxLossPct === 0 means "no daily loss limit configured" — treated as unlimited.
- * - drawdown is engine-only state populated during decision execution; not available here.
+ * - drawdown.current and the daily-loss limit come from the same equity view as
+ *   get_account_summary (initialCapital + realized since capital change + unrealized),
+ *   which is also what the risk gate's EquityTracker computes. Both are null when that
+ *   view cannot be computed.
  */
 async function buildRuntime(ctx: TradingToolContext, contract: ResolvedAgentRiskContract) {
   // --- openPositions ---
   let openPositionsCurrent = 0;
   const openPositionsLimit = contract.maxOpenPositions.effectiveValue;
+  let agentPositions: ToolPositionRecord[] = [];
 
   // --- dailyLoss ---
   let dailyLossCurrent: string | null = null;
@@ -190,8 +202,12 @@ async function buildRuntime(ctx: TradingToolContext, contract: ResolvedAgentRisk
       ]);
       openPositionsCurrent = positions.filter((p) => p.size !== '0').length;
       dailyLossCurrent = analytics.realizedPnlUsd;
-    } catch {
+      const ledger = ctx.accountLedger;
+      agentPositions = positions.filter((p) => p.actorType === 'agent'
+        && (!ledger || p.venueAccountId === undefined || p.venueAccountId === ledger.venueAccountId));
+    } catch (err) {
       // Non-critical: use defaults (openPositionsCurrent stays 0, dailyLossCurrent stays null)
+      logger.warn({ agentId: ctx.agentId, err }, 'get_risk_limits: position/analytics read failed');
     }
   } else {
     dailyLossCurrent = '0';
@@ -202,6 +218,7 @@ async function buildRuntime(ctx: TradingToolContext, contract: ResolvedAgentRisk
   // Derive the daily loss limit from the canonical agents.risk.dailyMaxLossPct column.
   // No legacy fallback to dailyLossLimit — that column is deprecated.
   let dailyLossLimitFromUser = false;
+  let equityView: AccountEquityView | null = null;
   if (ctx.agentRepo) {
     try {
       const agent = await ctx.agentRepo.getAgent(ctx.agentId);
@@ -210,14 +227,19 @@ async function buildRuntime(ctx: TradingToolContext, contract: ResolvedAgentRisk
         dailyLossLimitPct = Number(risk['dailyMaxLossPct']);
         dailyLossLimitFromUser = true;
       }
-      if (dailyLossLimitPct != null && dailyLossLimitPct > 0 && agent?.capital) {
-        const capital = Number(agent.capital);
+      equityView = await resolveEquityView(ctx, agent?.capital ?? null, agentPositions);
+      // The risk gate caps daily loss at pct of current equity; fall back to the
+      // configured capital only when equity cannot be computed.
+      const base = equityView?.equity ?? agent?.capital ?? null;
+      if (dailyLossLimitPct != null && dailyLossLimitPct > 0 && base) {
+        const capital = Number(base);
         if (!Number.isNaN(capital) && capital > 0) {
           dailyLossLimit = String(capital * dailyLossLimitPct / 100);
         }
       }
-    } catch {
+    } catch (err) {
       // Non-critical
+      logger.warn({ agentId: ctx.agentId, err }, 'get_risk_limits: agent capital/equity unavailable');
     }
   }
 
@@ -246,9 +268,9 @@ async function buildRuntime(ctx: TradingToolContext, contract: ResolvedAgentRisk
       remainingMs: null,
     },
     drawdown: {
-      // Current drawdown is engine-only state — populated from Redis cache
-      // (equity:{actorId}) written by the worker after each decision.
-      current: await resolveDrawdownCurrent(ctx),
+      // Same equity view as get_account_summary (peak rebuilt from realized P&L
+      // since the capital change); null when equity cannot be computed.
+      current: equityView?.drawdown?.current ?? null,
       limit: drawdownPctField.effectiveValue > 0 ? String(drawdownPctField.effectiveValue) : null,
       limitPct: drawdownPctField.effectiveValue,
       source: drawdownPctField.source === 'user' ? 'user_configured' :
@@ -290,17 +312,35 @@ function formatProfileField(field: AgentRiskProfileField) {
 }
 
 /**
- * Read the current drawdown from the Redis equity cache.
- * The worker writes equity:{actorId} after each decision (see decision-intake.ts).
+ * Compute the account equity view (the same one get_account_summary returns) from
+ * the platform ledger and marked agent-direct positions. Null when the ledger or
+ * capital is missing, or realized P&L cannot be read.
  */
-async function resolveDrawdownCurrent(ctx: TradingToolContext): Promise<string | null> {
-  try {
-    const snapshot = await ctx.redis.hgetall(`equity:${ctx.agentId}`);
-    if (snapshot && snapshot['currentDrawdown'] != null) {
-      return snapshot['currentDrawdown'];
-    }
-  } catch { /* Redis unavailable — return null */ }
-  return null;
+async function resolveEquityView(
+  ctx: TradingToolContext,
+  initialCapital: string | null,
+  agentPositions: ToolPositionRecord[],
+): Promise<AccountEquityView | null> {
+  const ledger = ctx.accountLedger;
+  if (!ledger || initialCapital === null) return null;
+  const lifetimeRealizedPnl = await ledger.getLifetimeRealizedPnl();
+  const pnlSinceCapitalChange = ledger.capitalChangedAt === null
+    ? lifetimeRealizedPnl
+    : await ledger.getRealizedPnlSinceCapitalChange();
+  const marked = await markOpenPositions(
+    agentPositions.map((p) => ({ ...p, closedAt: null })),
+    {
+      priceService: ctx.priceService,
+      oneInchConfig: ctx.oneInchPriceChainConfig,
+      budgetMs: POSITION_MARK_BUDGET_MS,
+      now: new Date(),
+    },
+  );
+  return buildAccountEquityView(
+    initialCapital,
+    { lifetimeRealizedPnl, pnlSinceCapitalChange, capitalChangedAt: ledger.capitalChangedAt },
+    marked,
+  );
 }
 
 export const riskLimitsTools: AgentTool<TradingToolContext>[] = [

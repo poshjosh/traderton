@@ -313,3 +313,99 @@ describe('adjust_risk_limits tool', () => {
     expect(result.error).toContain('No fields');
   });
 });
+
+describe('get_risk_limits equity-backed runtime', () => {
+  const VA = 'va-1';
+  const emptyAnalytics = { realizedPnlUsd: '0', botCount: 0, openPositions: 0, closedPositions: 0, winningPositions: 0, totalFeesUsd: '0', recentFills: 0, avgHoldTimeHours: null, byBot: [] };
+
+  function equityCtx(opts: {
+    capital: string;
+    realized: string;
+    positions?: Array<Record<string, unknown>>;
+    prices?: Record<string, number>;
+    dailyPnl?: string;
+    dailyMaxLossPct?: number;
+    redis?: Partial<ToolContext['redis']>;
+  }): ToolContext {
+    const base = makeCtx({
+      riskContractOps: { getContract: vi.fn().mockResolvedValue(makeContract()), adjustOverrides: vi.fn() },
+      botRepo: {
+        getOpenPositionsByCreator: vi.fn().mockResolvedValue(opts.positions ?? []),
+        getAnalyticsByCreator: vi.fn().mockResolvedValue({ ...emptyAnalytics, realizedPnlUsd: opts.dailyPnl ?? '0' }),
+      } as unknown as ToolContext['botRepo'],
+      agentRepo: {
+        getAgent: vi.fn().mockResolvedValue({ capital: opts.capital, risk: opts.dailyMaxLossPct ? { dailyMaxLossPct: opts.dailyMaxLossPct } : null }),
+      },
+    });
+    return {
+      ...base,
+      redis: { ...base.redis, ...opts.redis } as ToolContext['redis'],
+      accountLedger: {
+        venueAccountId: VA,
+        getLifetimeRealizedPnl: vi.fn(async () => opts.realized),
+        capitalChangedAt: null,
+        getRealizedPnlSinceCapitalChange: vi.fn(async () => opts.realized),
+        getLatestVenueBalance: vi.fn(async () => null),
+      },
+      priceService: {
+        getPrice: vi.fn(async (symbol: string) => {
+          const priceUsd = opts.prices?.[symbol];
+          return priceUsd === undefined
+            ? { ok: false, error: { code: 'price.not_found', message: 'no price' } }
+            : { ok: true, data: { priceUsd, source: 'oracle' as const, fetchedAt: '2026-01-02T00:00:00.000Z', stale: false } };
+        }),
+        resolvePriceTarget: vi.fn(),
+      } as unknown as ToolContext['priceService'],
+    };
+  }
+
+  const shortEth = {
+    actorType: 'agent', actorId: 'agent-1', symbol: 'ETH-PERP', venue: 'hyperliquid', side: 'short',
+    size: '2', entryPrice: '3000', openedAt: new Date(), venueAccountId: VA,
+  };
+
+  async function runtimeOf(ctx: ToolContext) {
+    const result = await getRiskLimitsTool.execute({}, ctx);
+    expect(result.success).toBe(true);
+    return (result.data as Record<string, any>).runtime as Record<string, any>;
+  }
+
+  it('reports current drawdown from the account equity view when equity is below its peak', async () => {
+    // peak = 10000 + 500 realized = 10500; equity = 10500 - 200 unrealized = 10300
+    const runtime = await runtimeOf(equityCtx({ capital: '10000', realized: '500', positions: [shortEth], prices: { ETH: 3100 } }));
+    expect(runtime.drawdown.current).toBe('200');
+  });
+
+  it('reports zero drawdown when equity sits at its peak', async () => {
+    const runtime = await runtimeOf(equityCtx({ capital: '10000', realized: '500' }));
+    expect(runtime.drawdown.current).toBe('0');
+  });
+
+  it('reports null drawdown when no account ledger is bound', async () => {
+    const ctx = equityCtx({ capital: '10000', realized: '500' });
+    delete (ctx as { accountLedger?: unknown }).accountLedger;
+    const runtime = await runtimeOf(ctx);
+    expect(runtime.drawdown.current).toBeNull();
+  });
+
+  it('ignores the legacy equity redis key that nothing writes', async () => {
+    const hgetall = vi.fn().mockResolvedValue({ currentDrawdown: '999' });
+    const runtime = await runtimeOf(equityCtx({ capital: '10000', realized: '0', redis: { hgetall } }));
+    expect(runtime.drawdown.current).toBe('0');
+    expect(hgetall).not.toHaveBeenCalled();
+  });
+
+  it('bases the daily loss limit on current equity, matching the risk gate', async () => {
+    // equity = 10000 - 2000 = 8000; 10% of equity = 800 (not 1000 from initial capital)
+    const runtime = await runtimeOf(equityCtx({ capital: '10000', realized: '-2000', dailyMaxLossPct: 10, dailyPnl: '-900' }));
+    expect(runtime.dailyLoss.limit).toBe('800');
+    expect(runtime.dailyLoss.blocked).toBe(true);
+  });
+
+  it('falls back to configured capital for the daily loss limit when equity is unavailable', async () => {
+    const ctx = equityCtx({ capital: '5000', realized: '0', dailyMaxLossPct: 10 });
+    delete (ctx as { accountLedger?: unknown }).accountLedger;
+    const runtime = await runtimeOf(ctx);
+    expect(runtime.dailyLoss.limit).toBe('500');
+  });
+});
