@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import {
+  Decimal,
   resolveActiveStrategy,
   SWAP_VENUES,
   type ActiveStrategy,
@@ -196,8 +197,11 @@ export class AgentTradingProfileRepository {
       : action.presetPolicy;
     const activeStrategy = await this.deriveActiveStrategy(tx, ownerId, action, profile, now);
     if (profile) {
+      // A capital edit starts a new allocation period; an unchanged resend keeps the old marker.
+      const capitalChangedAt = capitalDiffers(profile.capital, action.capital) ? now : profile.capitalChangedAt;
       await tx.update(agentTradingProfiles).set({
         capital: action.capital,
+        capitalChangedAt,
         riskPosture: action.riskPosture,
         executionDefaults: action.executionDefaults,
         scanMode,
@@ -404,6 +408,12 @@ export class AgentTradingProfileRepository {
   }
 }
 
+/** Numeric-aware so "100" -> "100.0" is not an edit; null only equals null. */
+function capitalDiffers(previous: string | null, next: string | null): boolean {
+  if (previous === null || next === null) return previous !== next;
+  return !new Decimal(previous).eq(new Decimal(next));
+}
+
 function sameManifest(
   existing: AgentTradingProfileForwardAction[],
   requested: AgentTradingProfileForwardAction[],
@@ -454,6 +464,7 @@ function canonicalJson(value: unknown): string {
 function serializePreimage(profile: AgentTradingProfile): AgentTradingProfilePreimage {
   return {
     ...profile,
+    capitalChangedAt: profile.capitalChangedAt?.toISOString() ?? null,
     revision: profile.revision.toString(),
     createdAt: profile.createdAt.toISOString(),
     updatedAt: profile.updatedAt.toISOString(),
@@ -463,6 +474,7 @@ function serializePreimage(profile: AgentTradingProfile): AgentTradingProfilePre
 function deserializePreimage(preimage: AgentTradingProfilePreimage): AgentTradingProfile {
   return {
     ...preimage,
+    capitalChangedAt: preimage.capitalChangedAt ? new Date(preimage.capitalChangedAt) : null,
     revision: BigInt(preimage.revision),
     createdAt: new Date(preimage.createdAt),
     updatedAt: new Date(preimage.updatedAt),

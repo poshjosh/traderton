@@ -369,6 +369,8 @@ export interface AgentActorSpec {
   swapAssets?: { baseAsset: string; quoteAsset: string; baseDecimals: number; quoteDecimals: number };
   /** INJECTED risk inputs (consumer/config) — fed to buildAgentRiskLimits. */
   capital?: string | null;
+  /** When capital last changed; the actor's equity tracker measures P&L since then (null = lifetime). */
+  capitalChangedAt?: Date | null;
   riskPosture?: RiskPosture | null;
   riskOverrides?: AgentRiskOverrides;
   /**
@@ -622,6 +624,7 @@ export function constructAndRegisterAgentActor(
     canonicalTokens: runtimeDeps.canonicalTokens,
     perTradeLevelMonitorIntervalMs: runtimeDeps.perTradeLevelMonitorIntervalMs,
     ...(spec.capital != null ? { capital: spec.capital } : {}),
+    ...(spec.capitalChangedAt ? { capitalChangedAt: spec.capitalChangedAt } : {}),
     feeConfig: runtimeDeps.feeConfig,
     maxConsecutiveVenueErrors: runtimeDeps.maxConsecutiveVenueErrors,
     slippageAlertBps: runtimeDeps.slippageAlertBps,

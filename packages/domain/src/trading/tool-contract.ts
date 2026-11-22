@@ -307,6 +307,10 @@ export interface TradingToolContext {
     venueAccountId: string;
     /** Lifetime fee-adjusted realized P&L of the agent's own fills on this venue account (decimal string). */
     getLifetimeRealizedPnl(): Promise<string>;
+    /** When capital last changed (ISO), or null if never edited — the current allocation period starts here. */
+    capitalChangedAt: string | null;
+    /** Realized P&L of the agent's own fills since `capitalChangedAt`; equals lifetime when it is null. */
+    getRealizedPnlSinceCapitalChange(): Promise<string>;
     /** Latest persisted venue balance snapshot (not a fresh venue fetch), or null when none exists. */
     getLatestVenueBalance(): Promise<{
       snapshotAt: string;

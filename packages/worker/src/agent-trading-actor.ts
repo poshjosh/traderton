@@ -143,6 +143,12 @@ export interface AgentTradingActorDeps {
   onCrashed?: (err: Error) => Promise<void>;
   /** USD allocation cap — used as equity for %-based risk checks (maxPositionSizePct). */
   capital?: string;
+  /**
+   * When capital last changed. Equity, return and the drawdown peak are measured over the
+   * current allocation period, so the tracker rehydrates from fills since this instant
+   * (equity = capital + realized since + unrealized). Absent = never edited = lifetime.
+   */
+  capitalChangedAt?: Date;
   /** Simulated fee configuration for paper/shadow fills */
   feeConfig?: FeeSimulatorConfig;
   /** Max consecutive venue errors before circuit breaker trips */
@@ -2941,7 +2947,10 @@ export class AgentTradingActor implements ExecutionActor {
     // Rehydrate fee-adjusted realized P&L from fills for equity tracker (venue-account-scoped)
     let economicRealizedPnl = price('0');
     try {
-      const total = await this.deps.fillRepo.sumRealizedPnlDeltaByVenueAccount('agent', this.agentId, this.deps.venueAccountId);
+      const { capitalChangedAt } = this.deps;
+      const total = capitalChangedAt
+        ? await this.deps.fillRepo.sumRealizedPnlDeltaByVenueAccountSince('agent', this.agentId, this.deps.venueAccountId, capitalChangedAt)
+        : await this.deps.fillRepo.sumRealizedPnlDeltaByVenueAccount('agent', this.agentId, this.deps.venueAccountId);
       economicRealizedPnl = price(total);
     } catch (err) {
       this.logger.warn({ err }, 'Failed to rehydrate economic realized P&L — falling back to position sum');

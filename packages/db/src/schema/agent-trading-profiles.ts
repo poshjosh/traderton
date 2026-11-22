@@ -16,6 +16,12 @@ export const agentTradingProfiles = pgTable('agent_trading_profiles', {
   actorId: text('actor_id').notNull(),
   venueAccountId: text('venue_account_id').notNull(),
   capital: text('capital'),
+  /**
+   * When `capital` last changed on an existing profile (null = never edited, so the
+   * allocation period is the whole lifetime). Only the most recent edit is kept.
+   * Starts the period for pnlSinceCapitalChange, returnPct and the drawdown peak.
+   */
+  capitalChangedAt: timestamp('capital_changed_at', { withTimezone: true }),
   riskPosture: jsonb('risk_posture').$type<RiskPosture>(),
   riskOverrides: jsonb('risk_overrides').$type<AgentRiskOverrides>().notNull().default({}),
   executionDefaults: jsonb('execution_defaults').$type<ExecutionDefaults>(),
@@ -54,6 +60,8 @@ export interface AgentTradingProfilePreimage {
   actorId: string;
   venueAccountId: string;
   capital: string | null;
+  /** ISO timestamp; absent on preimages captured before the column existed (= null). */
+  capitalChangedAt?: string | null;
   riskPosture: RiskPosture | null;
   riskOverrides: AgentRiskOverrides;
   executionDefaults: ExecutionDefaults | null;

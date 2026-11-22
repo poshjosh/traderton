@@ -251,4 +251,29 @@ describe.skipIf(SKIP)('AgentTradingProfileRepository (integration)', () => {
     await expect(repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-cd'))
       .resolves.toMatchObject({ capital: null, executionDefaults: { mode: 'shadow' } });
   });
+
+  it('leaves capital_changed_at null on creation and when capital is resent unchanged', async () => {
+    await repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'cc1', actions: [action('cc1', 'venue-cc', '100')] });
+    await expect(repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-cc')).resolves.toMatchObject({ capitalChangedAt: null });
+    // "100.0" is numerically the same allocation: not an edit.
+    await repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'cc2', actions: [action('cc2', 'venue-cc', '100.0')] });
+    await expect(repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-cc')).resolves.toMatchObject({ capitalChangedAt: null });
+  });
+  it('sets capital_changed_at when capital changes and keeps it across later unchanged resends', async () => {
+    await repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'ce1', actions: [action('ce1', 'venue-ce', '100')] });
+    const before = Date.now();
+    await repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'ce2', actions: [action('ce2', 'venue-ce', '250')] });
+    const edited = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-ce');
+    expect(edited?.capitalChangedAt?.getTime()).toBeGreaterThanOrEqual(before - 1000);
+    await repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'ce3', actions: [action('ce3', 'venue-ce', '250')] });
+    const resent = await repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-ce');
+    expect(resent?.capitalChangedAt?.getTime()).toBe(edited?.capitalChangedAt?.getTime());
+  });
+  it('restores the previous capital_changed_at when a capital edit is rolled back', async () => {
+    await repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'cr1', actions: [action('cr1', 'venue-cr', '100')] });
+    await repo.applyOperation({ ownerId: 'owner-a', actorId: 'agent-a', operationId: 'cr2', actions: [action('cr2', 'venue-cr', '300')] });
+    await repo.rollbackChange('owner-a', 'agent-a', 'cr2');
+    await expect(repo.getByOwnerActorVenueAccount('owner-a', 'agent-a', 'venue-cr'))
+      .resolves.toMatchObject({ capital: '100', capitalChangedAt: null });
+  });
 });

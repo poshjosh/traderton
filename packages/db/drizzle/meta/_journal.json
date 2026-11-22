@@ -71,6 +71,13 @@
       "when": 1791657000000,
       "tag": "0009_preset_assessment_data_only",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791743400000,
+      "tag": "0010_capital_changed_at",
+      "breakpoints": true
     }
   ]
 }

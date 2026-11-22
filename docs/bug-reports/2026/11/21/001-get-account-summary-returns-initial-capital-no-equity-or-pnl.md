@@ -100,7 +100,7 @@ Approved by the owner on 2026-11-21 (items 1 to 4). Not started.
 
 ## Implementation Plan (coordinator task list)
 1. DONE - Real figures in `get_account_summary`: initialCapital, lifetimeRealizedPnl, unrealizedPnlUsd, equity, availableCapital, drawdown (current/peak), per-position markPrice/unrealizedPnl + mark timestamp, `asOf`, `fundingIncluded: false` + note; live venue balance as a separate field; remove bare `capital`; fix descriptions/guidance; update `tool-schemas.ts`/contract types; single source with the risk gate; paper/shadow fills verified.
-2. PENDING - Capital-change baseline: nullable `agent_trading_profiles.capital_changed_at` (migration), set on capital change, `pnlSinceCapitalChange`, reset drawdown peak and measure return/drawdown since it.
+2. DONE - Capital-change baseline: nullable `agent_trading_profiles.capital_changed_at` (migration), set on capital change, `pnlSinceCapitalChange`, reset drawdown peak and measure return/drawdown since it.
 3. PENDING - `get_risk_limits`: fix or remove the `equity:{agentId}` reader, log Redis errors at warn; `get_analytics` `allTime` option scoped by venue account.
 4. PENDING - Skills wording (traderton-skills `crypto-trading`, `crypto-risk-monitoring`) and tool text in `trading.ts`/`tool-schemas.ts`; CHANGELOG; follow-up report for funding ingestion.
 
@@ -112,3 +112,13 @@ Approved by the owner on 2026-11-21 (items 1 to 4). Not started.
 - Equity excludes bot positions (`equityScope: agent_direct`).
 - `get_account_summary` field names (consumed by herobids): initialCapital, lifetimeRealizedPnl, unrealizedPnlUsd, unrealizedComplete, equity, marginUsed, marginBasis, availableCapital, drawdown{current,currentPct,peakEquity}, equityScope, drawdownBasis, fundingIncluded, fundingNote, venueBalance, asOf; positions[] add markPrice, unrealizedPnl, markedAt.
 - Boundary casts `botRepo` with `as unknown as` (pre-existing); root `pnpm lint` does not typecheck packages/worker (build does).
+### Item 2
+- Migration `0010_capital_changed_at` (hand-written; 0009 has no snapshot). Set in `AgentTradingProfileRepository.applyAction` only when capital differs numerically on an existing profile; rollback restores the preimage value.
+- Baseline rule (tool and actor agree): equity = initialCapital + realized since `capital_changed_at` + unrealized. Unrealized is the open positions' full mark-to-entry figure, including any part accrued before the edit. Lifetime realized is unchanged. Null marker = lifetime.
+- New summary fields: `pnlSinceCapitalChange`, `capitalChangedAt`, `returnPct` (equity vs initialCapital, since the change). Drawdown peak is rebuilt from since-change realized P&L, so a capital edit restarts it.
+- Actor: `AgentTradingActorDeps.capitalChangedAt` -> `sumRealizedPnlDeltaByVenueAccountSince`. Edits bump the profile revision, so the actor is rebuilt with the new baseline. Bot actor (`trading-actor.ts`) is unchanged (bot capital is not a profile field).
+### Item 2 (code review, no High)
+- Medium: `capitalDiffers` (`packages/db/src/agent-trading-profile-repository.ts`) can throw on a non-numeric stored capital inside the transaction; guard it.
+- Medium: null -> value and value -> null capital count as an edit and move the baseline; decide and document.
+- Medium: no drizzle meta snapshot for 0009/0010; next `drizzle-kit generate` needs manual reconciliation.
+- Low: dead lifetime fallback in `bin.ts` `getRealizedPnlSinceCapitalChange`; `capitalChangedAt` optional on `StoredTradingProfile`/`AgentActorSpec`/deps (make required); marker uses app clock vs `fills.filledAt` (skew edge); pre-edit unrealized is attributed to the new period (documented); `returnPct` null when capital <= 0 lacks a test.

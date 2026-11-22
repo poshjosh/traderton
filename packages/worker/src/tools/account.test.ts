@@ -84,6 +84,8 @@ describe('get_account_summary', () => {
       accountLedger: {
         venueAccountId: 'va-1',
         getLifetimeRealizedPnl: vi.fn(async () => '0'),
+        capitalChangedAt: null,
+        getRealizedPnlSinceCapitalChange: vi.fn(async () => '0'),
         getLatestVenueBalance: vi.fn(async () => null),
       },
     });
@@ -238,6 +240,9 @@ function priceServiceAt(prices: Record<string, number>) {
 function summaryCtx(opts: {
   capital?: string;
   realized?: string;
+  /** Realized P&L since the capital edit; setting it (or changedAt) marks capital as edited. */
+  realizedSinceChange?: string;
+  changedAt?: string;
   positions?: Array<Record<string, unknown>>;
   prices?: Record<string, number>;
   mode?: 'paper' | 'shadow' | 'live';
@@ -254,6 +259,8 @@ function summaryCtx(opts: {
     accountLedger: {
       venueAccountId: VENUE_ACCOUNT_ID,
       getLifetimeRealizedPnl: vi.fn(async () => opts.realized ?? '0'),
+      capitalChangedAt: opts.changedAt ?? null,
+      getRealizedPnlSinceCapitalChange: vi.fn(async () => opts.realizedSinceChange ?? opts.realized ?? '0'),
       getLatestVenueBalance: vi.fn(async () => (opts.venueBalance ?? null) as never),
     },
     priceService: priceServiceAt(opts.prices ?? {}),
@@ -395,6 +402,47 @@ describe('get_account_summary real figures', () => {
     expect(data.drawdown).toEqual({ current: '1000', currentPct: '10', peakEquity: '10000' });
   });
 
+  it('reports pnlSinceCapitalChange equal to lifetime realized when capital was never edited', async () => {
+    const data = await summaryOf(summaryCtx({ capital: '10000', realized: '-250.5' }));
+    expect(data.pnlSinceCapitalChange).toBe('-250.5');
+    expect(data.capitalChangedAt).toBeNull();
+    expect(data.returnPct).toBe('-2.505');
+  });
+  it('measures equity, return and drawdown from the new allocation after a capital edit', async () => {
+    // Lifetime +2000 earned on the old allocation; capital raised to 20000, then -500 realized.
+    const data = await summaryOf(summaryCtx({
+      capital: '20000',
+      realized: '1500',
+      realizedSinceChange: '-500',
+      changedAt: '2026-01-02T00:00:00.000Z',
+    }));
+    expect(data.initialCapital).toBe('20000');
+    expect(data.lifetimeRealizedPnl).toBe('1500');
+    expect(data.pnlSinceCapitalChange).toBe('-500');
+    expect(data.capitalChangedAt).toBe('2026-01-02T00:00:00.000Z');
+    expect(data.equity).toBe('19500');
+    expect(data.returnPct).toBe('-2.5');
+    // Peak restarted at the edit (rebuilt from since-edit realized P&L): the pre-edit +1500
+    // does not lift it to 21500, so a realized loss alone shows no drawdown from the new peak.
+    expect(data.drawdown).toEqual({ current: '0', currentPct: '0', peakEquity: '19500' });
+  });
+  it('restarts pnlSinceCapitalChange at zero right after a capital edit', async () => {
+    const data = await summaryOf(summaryCtx({
+      capital: '15000', realized: '3000', realizedSinceChange: '0', changedAt: '2026-01-02T00:00:00.000Z',
+    }));
+    expect(data.lifetimeRealizedPnl).toBe('3000');
+    expect(data.pnlSinceCapitalChange).toBe('0');
+    expect(data.equity).toBe('15000');
+    expect(data.returnPct).toBe('0');
+  });
+  it('matches the risk gate tracker rehydrated since the capital edit', async () => {
+    const tracker = new EquityTracker(price('20000'), price('-500'));
+    const data = await summaryOf(summaryCtx({
+      capital: '20000', realized: '1500', realizedSinceChange: '-500', changedAt: '2026-01-02T00:00:00.000Z',
+    }));
+    expect(data.equity).toBe(tracker.currentEquity(price('0')).toFixed());
+    expect(data.drawdown.peakEquity).toBe(tracker.peakEquity.toFixed());
+  });
   it('states funding is excluded and carries an asOf timestamp', async () => {
     const data = await summaryOf(summaryCtx({}));
     expect(data.fundingIncluded).toBe(false);

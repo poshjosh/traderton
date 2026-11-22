@@ -171,6 +171,28 @@ export class FillRepository {
   }
 
   /**
+   * Like sumRealizedPnlDeltaByVenueAccount, restricted to fills at or after `since`
+   * (the capital-change marker). Returns '0' if no fills in the window.
+   */
+  async sumRealizedPnlDeltaByVenueAccountSince(
+    actorType: string,
+    actorId: string,
+    venueAccountId: string,
+    since: Date,
+  ): Promise<string> {
+    const rows = await this.db
+      .select({ total: sql<string>`COALESCE(SUM(${fills.realizedPnlDelta}::numeric), 0)` })
+      .from(fills)
+      .where(and(
+        eq(fills.actorType, actorType),
+        eq(fills.actorId, actorId),
+        eq(fills.venueAccountId, venueAccountId),
+        gte(fills.filledAt, since),
+      ));
+    return rows[0]?.total ?? '0';
+  }
+
+  /**
    * Load all fills attributable to an agent (agent-native + agent-owned bots).
    *
    * Agent-native fills: `actorType = 'agent'`, `actorId = agentId`.

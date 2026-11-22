@@ -22,7 +22,7 @@ const GetAccountSummaryParamsSchema = z.object({
 
 const getAccountSummaryTool: AgentTool<TradingToolContext> = {
   name: 'get_account_summary',
-  description: 'Get a summary of the agent\'s trading account: initialCapital (the configured allocation, NOT current funds), lifetimeRealizedPnl (fees included, funding excluded), unrealizedPnlUsd (from current marks), equity (= initialCapital + realized + unrealized; equityScope=agent_direct: agent-direct positions and own fills only, bot books excluded), marginUsed (open notional at 1x, leverage not modelled), availableCapital (= max(0, equity - marginUsed)), drawdown (drawdownBasis=realized_peak: peak rebuilt from realized P&L), venueBalance (live mode only: the latest persisted snapshot, not a fresh venue fetch), open positions with markPrice/unrealizedPnl, and risk limits. Use availableCapital and equity, not initialCapital, to compute position sizes (targetSize) before calling submit_decision.',
+  description: 'Get a summary of the agent\'s trading account: initialCapital (the configured allocation, NOT current funds), lifetimeRealizedPnl (all-time, fees included, funding excluded), pnlSinceCapitalChange (realized since capitalChangedAt; equals lifetime when capital was never edited), unrealizedPnlUsd (from current marks), equity (= initialCapital + pnlSinceCapitalChange + unrealized; equityScope=agent_direct: agent-direct positions and own fills only, bot books excluded), marginUsed (open notional at 1x, leverage not modelled), returnPct (equity vs initialCapital, since capitalChangedAt), availableCapital (= max(0, equity - marginUsed)), drawdown (drawdownBasis=realized_peak: peak rebuilt from realized P&L since capitalChangedAt), venueBalance (live mode only: the latest persisted snapshot, not a fresh venue fetch), open positions with markPrice/unrealizedPnl, and risk limits. Use availableCapital and equity, not initialCapital, to compute position sizes (targetSize) before calling submit_decision.',
   parametersSchema: GetAccountSummaryParamsSchema,
   // Spec fields are platform-injected post-LLM — the LLM-facing JSON schema is
   // the empty contract (see risk-limits.ts).
@@ -113,9 +113,14 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
       // Lifetime fee-adjusted realized P&L: the same fills sum the agent actor
       // rehydrates its EquityTracker from, so tool and risk gate agree.
       let lifetimeRealizedPnl: string | null = null;
+      let pnlSinceCapitalChange: string | null = null;
       if (ledger) {
         try {
           lifetimeRealizedPnl = await ledger.getLifetimeRealizedPnl();
+          // Never edited: the period is the whole lifetime, so skip the second query.
+          pnlSinceCapitalChange = ledger.capitalChangedAt === null
+            ? lifetimeRealizedPnl
+            : await ledger.getRealizedPnlSinceCapitalChange();
         } catch (err) {
           warnings.push('realized_pnl_unavailable');
           logger.warn({ agentId: ctx.agentId, err }, 'get_account_summary: realized P&L unavailable');
@@ -140,7 +145,11 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
 
       const equityView = buildAccountEquityView(
         initialCapital,
-        lifetimeRealizedPnl,
+        {
+          lifetimeRealizedPnl,
+          pnlSinceCapitalChange,
+          capitalChangedAt: ledger?.capitalChangedAt ?? null,
+        },
         markedAgent,
       );
       const marked = [

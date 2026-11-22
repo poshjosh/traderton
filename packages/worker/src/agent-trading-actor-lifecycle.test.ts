@@ -224,3 +224,30 @@ describe('onSessionActive activation sequence (mirrors index.ts composition root
     expect(registerActor).not.toHaveBeenCalled();
   });
 });
+describe('AgentTradingActor — equity tracker baseline after a capital edit', () => {
+  it('rehydrates realized P&L only from fills since the capital change so the peak restarts at the new capital', async () => {
+    const capitalChangedAt = new Date('2026-01-02T00:00:00Z');
+    const deps = makeAgentActorDeps({ capital: '20000', capitalChangedAt });
+    const fillRepo = deps.fillRepo as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    fillRepo['sumRealizedPnlDeltaByVenueAccount'] = vi.fn().mockResolvedValue('1500');
+    fillRepo['sumRealizedPnlDeltaByVenueAccountSince'] = vi.fn().mockResolvedValue('-500');
+    const actor = new AgentTradingActor(deps);
+    await actor.start();
+    const tracker = actor.getIntakeDeps('BTC')?.equityTracker;
+    expect(fillRepo['sumRealizedPnlDeltaByVenueAccountSince']).toHaveBeenCalledWith('agent', 'agent-test', 'va-test', capitalChangedAt);
+    expect(fillRepo['sumRealizedPnlDeltaByVenueAccount']).not.toHaveBeenCalled();
+    expect(tracker?.currentEquity(price('0')).toFixed()).toBe('19500');
+    // Peak is rebuilt from since-edit realized P&L, not lifetime (which would give 21500).
+    expect(tracker?.peakEquity.toFixed()).toBe('19500');
+    await actor.stop();
+  });
+  it('rehydrates from lifetime realized P&L when capital was never edited', async () => {
+    const deps = makeAgentActorDeps({ capital: '10000' });
+    const fillRepo = deps.fillRepo as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    fillRepo['sumRealizedPnlDeltaByVenueAccount'] = vi.fn().mockResolvedValue('250');
+    const actor = new AgentTradingActor(deps);
+    await actor.start();
+    expect(actor.getIntakeDeps('BTC')?.equityTracker?.currentEquity(price('0')).toFixed()).toBe('10250');
+    await actor.stop();
+  });
+});

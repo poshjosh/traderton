@@ -683,6 +683,10 @@ async function main(): Promise<void> {
             venueAccountId: injection.venueAccountId,
             getLifetimeRealizedPnl: () =>
               fillRepo.sumRealizedPnlDeltaByVenueAccount('agent', request.actor.id, injection.venueAccountId),
+            capitalChangedAt: profile?.capitalChangedAt?.toISOString() ?? null,
+            getRealizedPnlSinceCapitalChange: () => profile?.capitalChangedAt
+              ? fillRepo.sumRealizedPnlDeltaByVenueAccountSince('agent', request.actor.id, injection.venueAccountId, profile.capitalChangedAt)
+              : fillRepo.sumRealizedPnlDeltaByVenueAccount('agent', request.actor.id, injection.venueAccountId),
             getLatestVenueBalance: async () => {
               const latest = await balanceSnapshotRepo.getLatestByVenueAccount(injection.venueAccountId, injection.venue);
               return latest
