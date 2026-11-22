@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+## 0.2.3-2026.11.22
 ### Changed
 - **Tool text no longer calls initial capital "available capital".** `submit_decision` guidance, the `submit_decision.targetSize` schema entry and the `get_account_summary` no-equity fallback now tell agents to size from `equity` or `availableCapital`, and describe `initialCapital` as the configured allocation. Wording only. See `docs/bug-reports/2026/11/21/001-get-account-summary-returns-initial-capital-no-equity-or-pnl.md`; follow-ups `003` (funding) and `004` (agent shadow limit orders).
 ### Fixed
