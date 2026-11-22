@@ -28,7 +28,7 @@ const getAccountSummaryTool: AgentTool<TradingToolContext> = {
   // the empty contract (see risk-limits.ts).
   parameters: convertZodToJsonSchema(llmEmptyParamsSchema),
   category: 'read-database',
-  promptGuidance: 'Call get_account_summary before submit_decision to see equity, availableCapital and open positions. initialCapital is the configured allocation, not current funds: size from equity/availableCapital. targetSize is in base units — the amount of the asset being bought or sold. If equity is null, omit targetSize to let the engine use a safe default. Figures include fees but exclude funding payments (fundingIncluded: false).',
+  promptGuidance: 'Call get_account_summary before submit_decision to see equity, availableCapital and open positions. initialCapital is the configured allocation, not current funds: size from equity/availableCapital. targetSize is in base units — the amount of the asset being bought or sold. targetSize is always required; if equity is null, use a conservative size (about 5% of the configured allocation). Figures include fees but exclude funding payments (fundingIncluded: false).',
   async execute(_params: unknown, ctx: TradingToolContext): Promise<ToolResult> {
     if (!ctx.botRepo) {
       return {

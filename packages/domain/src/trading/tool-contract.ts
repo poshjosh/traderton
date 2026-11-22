@@ -310,7 +310,7 @@ export interface TradingToolContext {
     getLifetimeRealizedPnl(): Promise<string>;
     /** When capital last changed (ISO), or null if never edited — the current allocation period starts here. */
     capitalChangedAt: string | null;
-    /** Realized P&L of the agent's own fills since `capitalChangedAt`; equals lifetime when it is null. */
+    /** Realized P&L of the agent's own fills since `capitalChangedAt`. Only valid when `capitalChangedAt` is non-null (callers use lifetime otherwise). */
     getRealizedPnlSinceCapitalChange(): Promise<string>;
     /** Latest persisted venue balance snapshot (not a fresh venue fetch), or null when none exists. */
     getLatestVenueBalance(): Promise<{

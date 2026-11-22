@@ -25,7 +25,7 @@ const logger = createLogger('boundary-agent-direct-ensure');
 export interface StoredTradingProfile {
   capital: string | null;
   /** When capital last changed; the equity/drawdown baseline restarts here. Null = never edited. */
-  capitalChangedAt?: Date | null;
+  capitalChangedAt: Date | null;
   riskPosture: RiskPosture | null;
   riskOverrides: AgentRiskOverrides;
   executionDefaults: ExecutionDefaults | null;
@@ -284,7 +284,7 @@ export function buildAgentDirectActorEnsure(
           venue: injection.venue,
           venueType: injection.venueType,
           capital: profile.capital,
-          capitalChangedAt: profile.capitalChangedAt ?? null,
+          capitalChangedAt: profile.capitalChangedAt,
           riskPosture: profile.riskPosture,
           riskOverrides: profile.riskOverrides,
           // Traderton-owned scan config (E1-T T4): the actor starts a scan loop

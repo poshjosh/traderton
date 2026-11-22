@@ -408,4 +408,20 @@ describe('get_risk_limits equity-backed runtime', () => {
     const runtime = await runtimeOf(ctx);
     expect(runtime.dailyLoss.limit).toBe('500');
   });
+  it('falls back to configured capital for the daily loss limit when the equity view throws', async () => {
+    const ctx = equityCtx({ capital: '5000', realized: '0', dailyMaxLossPct: 10 });
+    ctx.accountLedger!.getLifetimeRealizedPnl = vi.fn(async () => { throw new Error('db down'); });
+    const runtime = await runtimeOf(ctx);
+    expect(runtime.dailyLoss.limit).toBe('500');
+    expect(runtime.drawdown.current).toBeNull();
+  });
+  it('scopes the daily loss analytics read to the selected venue account', async () => {
+    const ctx = equityCtx({ capital: '10000', realized: '0' });
+    await runtimeOf(ctx);
+    const call = (ctx.botRepo!.getAnalyticsByCreator as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
+    expect(call[0]).toBe('agent');
+    expect(call[1]).toBe('agent-1');
+    expect(call[3]).toBeUndefined();
+    expect(call[4]).toBe(VA);
+  });
 });

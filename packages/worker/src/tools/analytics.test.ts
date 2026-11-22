@@ -282,6 +282,6 @@ describe('get_analytics allTime', () => {
     const query = vi.fn(async () => analytics);
     const result = await getAnalyticsTool.execute({ allTime: true }, ctxWith(query, false));
     expect(query).toHaveBeenCalledWith('agent', 'agent-1', undefined, undefined, undefined);
-    expect(result.data as Record<string, unknown>).not.toHaveProperty('lifetimeRealizedPnlUsd');
+    expect((result.data as Record<string, unknown>)['lifetimeRealizedPnlUsd']).toBeNull();
   });
 });

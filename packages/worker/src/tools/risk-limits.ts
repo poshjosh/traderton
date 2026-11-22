@@ -193,16 +193,16 @@ async function buildRuntime(ctx: TradingToolContext, contract: ResolvedAgentRisk
   let dailyLossLimitPct: number | null = null;
   let dailyLossBlocked = false;
 
+  const ledger = ctx.accountLedger;
   if (ctx.botRepo) {
     try {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const [positions, analytics] = await Promise.all([
         ctx.botRepo.getOpenPositionsByCreator('agent', ctx.agentId),
-        ctx.botRepo.getAnalyticsByCreator('agent', ctx.agentId, since),
+        ctx.botRepo.getAnalyticsByCreator('agent', ctx.agentId, since, undefined, ledger?.venueAccountId),
       ]);
       openPositionsCurrent = positions.filter((p) => p.size !== '0').length;
       dailyLossCurrent = analytics.realizedPnlUsd;
-      const ledger = ctx.accountLedger;
       agentPositions = positions.filter((p) => p.actorType === 'agent'
         && (!ledger || p.venueAccountId === undefined || p.venueAccountId === ledger.venueAccountId));
     } catch (err) {
@@ -227,7 +227,13 @@ async function buildRuntime(ctx: TradingToolContext, contract: ResolvedAgentRisk
         dailyLossLimitPct = Number(risk['dailyMaxLossPct']);
         dailyLossLimitFromUser = true;
       }
-      equityView = await resolveEquityView(ctx, agent?.capital ?? null, agentPositions);
+      // Isolated: an equity failure must not drop the configured-capital fallback below.
+      try {
+        equityView = await resolveEquityView(ctx, agent?.capital ?? null, agentPositions);
+      } catch (err) {
+        equityView = null;
+        logger.warn({ agentId: ctx.agentId, err }, 'get_risk_limits: equity view unavailable');
+      }
       // The risk gate caps daily loss at pct of current equity; fall back to the
       // configured capital only when equity cannot be computed.
       const base = equityView?.equity ?? agent?.capital ?? null;

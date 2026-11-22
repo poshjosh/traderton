@@ -408,10 +408,18 @@ export class AgentTradingProfileRepository {
   }
 }
 
-/** Numeric-aware so "100" -> "100.0" is not an edit; null only equals null. */
-function capitalDiffers(previous: string | null, next: string | null): boolean {
+/**
+ * Numeric-aware so "100" -> "100.0" is not an edit. null -> value and value -> null
+ * both count as an edit (the allocation changed, so the baseline restarts). A
+ * non-numeric stored or requested value is treated as differing rather than throwing.
+ */
+export function capitalDiffers(previous: string | null, next: string | null): boolean {
   if (previous === null || next === null) return previous !== next;
-  return !new Decimal(previous).eq(new Decimal(next));
+  try {
+    return !new Decimal(previous).eq(new Decimal(next));
+  } catch {
+    return true;
+  }
 }
 
 function sameManifest(

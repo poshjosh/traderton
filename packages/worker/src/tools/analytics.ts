@@ -18,7 +18,7 @@ const GetAnalyticsParamsSchema = z.object({
 
 const getAnalyticsTool: AgentTool<TradingToolContext> = {
   name: 'get_analytics',
-  description: 'Get trading analytics for this agent, including both direct agent trades and all bot-created trades. Returns total trades, win rate, P&L, fees, per-bot breakdown, and an agent-direct summary over the specified lookback period (days, max 90), or over the whole lifetime with allTime=true. Results are scoped to the selected venue account. realizedPnlUsd sums closed positions; with allTime=true lifetimeRealizedPnlUsd is also returned: the fee-adjusted realized P&L of the agent\'s own fills (the figure get_account_summary reports as lifetimeRealizedPnl; funding excluded).',
+  description: 'Get trading analytics for this agent, including both direct agent trades and all bot-created trades. Returns total trades, win rate, P&L, fees, per-bot breakdown, and an agent-direct summary over the specified lookback period (days, max 90), or over the whole lifetime with allTime=true. Results are scoped to the selected venue account. realizedPnlUsd sums closed positions; with allTime=true lifetimeRealizedPnlUsd is also returned (null when no venue-account ledger is bound): the fee-adjusted realized P&L of the agent\'s own fills (the figure get_account_summary reports as lifetimeRealizedPnl; funding excluded).',
   parametersSchema: GetAnalyticsParamsSchema,
   parameters: convertZodToJsonSchema(GetAnalyticsParamsSchema),
   category: 'read-database',
@@ -34,7 +34,7 @@ const getAnalyticsTool: AgentTool<TradingToolContext> = {
     const analytics = await ctx.botRepo.getAnalyticsByCreator(
       'agent', ctx.agentId, analyticsSince, undefined, ledger?.venueAccountId,
     );
-    const lifetimeRealizedPnlUsd = allTime && ledger ? await ledger.getLifetimeRealizedPnl() : undefined;
+    const lifetimeRealizedPnlUsd = allTime ? (ledger ? await ledger.getLifetimeRealizedPnl() : null) : undefined;
 
     const winRate = analytics.closedPositions > 0
       ? (analytics.winningPositions / analytics.closedPositions) * 100

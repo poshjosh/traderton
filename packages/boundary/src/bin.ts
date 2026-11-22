@@ -684,9 +684,11 @@ async function main(): Promise<void> {
             getLifetimeRealizedPnl: () =>
               fillRepo.sumRealizedPnlDeltaByVenueAccount('agent', request.actor.id, injection.venueAccountId),
             capitalChangedAt: profile?.capitalChangedAt?.toISOString() ?? null,
-            getRealizedPnlSinceCapitalChange: () => profile?.capitalChangedAt
-              ? fillRepo.sumRealizedPnlDeltaByVenueAccountSince('agent', request.actor.id, injection.venueAccountId, profile.capitalChangedAt)
-              : fillRepo.sumRealizedPnlDeltaByVenueAccount('agent', request.actor.id, injection.venueAccountId),
+            // Callers use lifetime when capitalChangedAt is null, so this is only reached with a marker.
+            getRealizedPnlSinceCapitalChange: async () => {
+              if (!profile?.capitalChangedAt) throw new Error('getRealizedPnlSinceCapitalChange called without a capital change marker');
+              return fillRepo.sumRealizedPnlDeltaByVenueAccountSince('agent', request.actor.id, injection.venueAccountId, profile.capitalChangedAt);
+            },
             getLatestVenueBalance: async () => {
               const latest = await balanceSnapshotRepo.getLatestByVenueAccount(injection.venueAccountId, injection.venue);
               return latest

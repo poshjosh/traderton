@@ -146,9 +146,9 @@ export interface AgentTradingActorDeps {
   /**
    * When capital last changed. Equity, return and the drawdown peak are measured over the
    * current allocation period, so the tracker rehydrates from fills since this instant
-   * (equity = capital + realized since + unrealized). Absent = never edited = lifetime.
+   * (equity = capital + realized since + unrealized). Null = never edited = lifetime.
    */
-  capitalChangedAt?: Date;
+  capitalChangedAt: Date | null;
   /** Simulated fee configuration for paper/shadow fills */
   feeConfig?: FeeSimulatorConfig;
   /** Max consecutive venue errors before circuit breaker trips */

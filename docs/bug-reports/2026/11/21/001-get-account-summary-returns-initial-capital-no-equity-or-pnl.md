@@ -1,5 +1,5 @@
 # Bug Report: `get_account_summary` returns the configured (initial) capital as "available capital"; agents have no accurate equity or P&L
-- **Status:** OPEN. Not fixed. This report documents the defect and the approved fix plan. No work started; waiting for the owner's greenlight.
+- **Status:** FIXED (2026-11-21). All plan items DONE; see "Implementation Plan" and "Outstanding Issues" below. Follow-ups: `003` (funding ingestion), `004` (agent shadow limit orders never resolved). Not verified live.
 - **Severity:** High. Agents size positions and judge performance from numbers that never change with trading. Percent-based sizing, daily-loss limits and drawdown reasoning all start from a wrong base.
 - **Date:** 2026-11-21
 - **Environment:** code analysis only (traderton and herobids source). Not reproduced live. Applies to paper, shadow and live modes (see "Not verified").
@@ -132,3 +132,10 @@ Approved by the owner on 2026-11-21 (items 1 to 4). Not started.
 - Medium: skills say "open positions with marks"/"own direct positions"; bot rows carry null marks.
 - Medium: report 004 Impact ("agent may see a pending order that never completes") unverified; report 003 venue claims partly unverified.
 - Low: `promptGuidance` ("omit targetSize") contradicts runtime fallback ("You must provide a value") in `account.ts`.
+### Final gap review
+- Fixed: `get_risk_limits` daily-loss analytics venue-scoped and equity-view failure keeps the configured-capital fallback; `capitalDiffers` no longer throws (non-numeric treated as an edit; null->value and value->null restart the baseline); `capitalChangedAt` required (`Date | null`) on profile/actor spec/deps; `promptGuidance` says `targetSize` is always required; `get_analytics` `allTime` without ledger returns `lifetimeRealizedPnlUsd: null` (payload change: key was previously absent).
+- Medium: `capitalDiffers` catch is silent (add a warn or validate capital at the boundary).
+- Medium: `bin.ts` `getRealizedPnlSinceCapitalChange` throws a generic Error when the marker is null; callers guard, but the contract type does not encode it.
+- Medium: no shared schema for the summary in `@poshjosh/contracts`; herobids pins the shape with a hand-copied golden fixture.
+- Low: `openPositionsCurrent` in `get_risk_limits` is not venue-scoped; worker/boundary test fixtures without `capitalChangedAt` would fail a strict typecheck (tests are excluded from tsconfig).
+- Not run: DB integration tests for the `getAnalyticsByCreator` venue filter (no DATABASE_URL in this run).
