@@ -64,10 +64,18 @@ export class TradingProfileOperationConflictError extends Error {
   }
 }
 
+/** Minimal structural logger; a pino `Logger` satisfies it. The db package has no logging dependency. */
+export interface ProfileRepositoryLogger {
+  warn(context: Record<string, unknown>, message: string): void;
+}
+
 export class AgentTradingProfileRepository {
   private static readonly PROFILE_LOCK_CLASS = 19;
 
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly logger?: ProfileRepositoryLogger,
+  ) {}
 
   async getByOwnerActorVenueAccount(
     ownerId: string,
@@ -198,7 +206,10 @@ export class AgentTradingProfileRepository {
     const activeStrategy = await this.deriveActiveStrategy(tx, ownerId, action, profile, now);
     if (profile) {
       // A capital edit starts a new allocation period; an unchanged resend keeps the old marker.
-      const capitalChangedAt = capitalDiffers(profile.capital, action.capital) ? now : profile.capitalChangedAt;
+      const capitalChangedAt = capitalDiffers(profile.capital, action.capital, (value) => this.logger?.warn(
+        { profileId: profile.id, value },
+        'Stored or requested capital is not numeric; treating it as a capital edit and restarting the baseline',
+      )) ? now : profile.capitalChangedAt;
       await tx.update(agentTradingProfiles).set({
         capital: action.capital,
         capitalChangedAt,
@@ -411,13 +422,19 @@ export class AgentTradingProfileRepository {
 /**
  * Numeric-aware so "100" -> "100.0" is not an edit. null -> value and value -> null
  * both count as an edit (the allocation changed, so the baseline restarts). A
- * non-numeric stored or requested value is treated as differing rather than throwing.
+ * non-numeric stored or requested value is treated as differing rather than throwing,
+ * and is reported through `onUnparseable` so the baseline restart is never silent.
  */
-export function capitalDiffers(previous: string | null, next: string | null): boolean {
+export function capitalDiffers(
+  previous: string | null,
+  next: string | null,
+  onUnparseable?: (value: string) => void,
+): boolean {
   if (previous === null || next === null) return previous !== next;
   try {
     return !new Decimal(previous).eq(new Decimal(next));
   } catch {
+    onUnparseable?.(`previous=${previous} next=${next}`);
     return true;
   }
 }

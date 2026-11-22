@@ -134,7 +134,7 @@ Approved by the owner on 2026-11-21 (items 1 to 4). Not started.
 - Low: `promptGuidance` ("omit targetSize") contradicts runtime fallback ("You must provide a value") in `account.ts`.
 ### Final gap review
 - Fixed: `get_risk_limits` daily-loss analytics venue-scoped and equity-view failure keeps the configured-capital fallback; `capitalDiffers` no longer throws (non-numeric treated as an edit; null->value and value->null restart the baseline); `capitalChangedAt` required (`Date | null`) on profile/actor spec/deps; `promptGuidance` says `targetSize` is always required; `get_analytics` `allTime` without ledger returns `lifetimeRealizedPnlUsd: null` (payload change: key was previously absent).
-- Medium: `capitalDiffers` catch is silent (add a warn or validate capital at the boundary).
+- RESOLVED: `capitalDiffers` now reports a non-numeric capital through an `onUnparseable` callback; `AgentTradingProfileRepository` takes an optional logger (pino-compatible `warn`) and logs a warning when a baseline restart is caused by non-numeric capital. Capital is already regex-validated at the write boundary (`trading-profiles.ts`), so this only fires on legacy or corrupt rows.
 - Medium: `bin.ts` `getRealizedPnlSinceCapitalChange` throws a generic Error when the marker is null; callers guard, but the contract type does not encode it.
 - Medium: no shared schema for the summary in `@poshjosh/contracts`; herobids pins the shape with a hand-copied golden fixture.
 - Low: `openPositionsCurrent` in `get_risk_limits` is not venue-scoped; worker/boundary test fixtures without `capitalChangedAt` would fail a strict typecheck (tests are excluded from tsconfig).

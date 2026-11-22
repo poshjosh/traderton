@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { capitalDiffers } from './agent-trading-profile-repository.js';
 
 describe('capitalDiffers', () => {
@@ -18,5 +18,17 @@ describe('capitalDiffers', () => {
   it('treats a non-numeric stored capital as differing instead of throwing', () => {
     expect(capitalDiffers('abc', '100')).toBe(true);
     expect(capitalDiffers('100', 'abc')).toBe(true);
+  });
+  it('reports a non-numeric capital through the callback so the baseline restart is not silent', () => {
+    const onUnparseable = vi.fn();
+    expect(capitalDiffers('abc', '100', onUnparseable)).toBe(true);
+    expect(onUnparseable).toHaveBeenCalledTimes(1);
+    expect(onUnparseable).toHaveBeenCalledWith('previous=abc next=100');
+  });
+  it('does not call the callback for numeric capital', () => {
+    const onUnparseable = vi.fn();
+    expect(capitalDiffers('100', '200', onUnparseable)).toBe(true);
+    expect(capitalDiffers('100', '100.0', onUnparseable)).toBe(false);
+    expect(onUnparseable).not.toHaveBeenCalled();
   });
 });

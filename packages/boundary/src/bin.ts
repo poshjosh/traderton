@@ -117,7 +117,7 @@ async function main(): Promise<void> {
   });
   const db = createDatabase(appConfig.database.url);
   const botRepo = new BotRepository(db);
-  const profileRepo = new AgentTradingProfileRepository(db);
+  const profileRepo = new AgentTradingProfileRepository(db, createLogger('boundary-trading-profile'));
   const instrumentRepo = new InstrumentRepository(db);
   const fillRepo = new FillRepository(db);
   const balanceSnapshotRepo = new BalanceSnapshotRepository(db);

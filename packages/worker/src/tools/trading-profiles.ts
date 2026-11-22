@@ -32,6 +32,9 @@ import {
 import { resolveSwapNetwork } from '../resolve-swap-assets.js';
 import { validateSwapScannerConfig } from '../swap-startup-validation.js';
 import { convertZodToJsonSchema } from './registry.js';
+import { createLogger } from '../logger.js';
+
+const logger = createLogger('trading-profiles');
 
 const OperationSchema = z.object({ operationId: z.string().min(1) });
 const ChangeOperationSchema = OperationSchema.extend({ actorId: z.string().min(1) });
@@ -229,7 +232,7 @@ function validateScanConfiguration(params: {
 async function repositoryFor(ctx: TradingToolContext): Promise<AgentTradingProfileRepository | ToolResult> {
   if (!ctx.db) return unavailable('Database access not available in this context', 'profile.db_unavailable');
   if (!ctx.ownerId?.trim()) return unavailable('Owner identity not available in this context', 'profile.owner_unavailable');
-  return new AgentTradingProfileRepository(ctx.db as Database);
+  return new AgentTradingProfileRepository(ctx.db as Database, logger);
 }
 
 async function authorizeIdentity(
